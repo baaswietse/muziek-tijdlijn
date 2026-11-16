@@ -1,0 +1,9 @@
+node_modules/
+web/dist/
+test-results/
+playwright-report/
+.wrangler/
+__pycache__/
+*.pyc
+.env
+.dev.vars

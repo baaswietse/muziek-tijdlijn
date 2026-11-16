@@ -1,0 +1,32 @@
+{
+  "name": "muziek-tijdlijn",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Muziekspel voor een groep op de gsm: leg nummers in chronologische volgorde op je tijdlijn.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite --config web/vite.config.js",
+    "build": "vite build --config web/vite.config.js",
+    "preview": "vite preview --config web/vite.config.js",
+    "server": "node server/node/server.js",
+    "server:cf": "wrangler dev --config server/wrangler.jsonc",
+    "deploy:cf": "wrangler deploy --config server/wrangler.jsonc",
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:py": "python3 -m unittest discover -s tools -p \"test_*.py\"",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@preact/preset-vite": "^2.10.6",
+    "preact": "^11.2.0",
+    "qrcode-generator": "^2.0.4",
+    "vite": "^8.3.8",
+    "wrangler": "^4.163.0"
+  }
+}
