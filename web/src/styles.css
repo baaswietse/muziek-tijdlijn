@@ -405,6 +405,7 @@ h2 {
 .chip.warn {
   background: var(--amber-soft);
   color: var(--amber-ink);
+  text-decoration: none;
 }
 
 .chip.code {

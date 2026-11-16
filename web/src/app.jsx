@@ -101,7 +101,11 @@ export function App({ loginResult }) {
           {APP_NAME}
         </span>
         <span class="topbar-right">
-          {isMock && <span class="chip warn" title="Testmodus: Spotify is nagebootst, er komt geen geluid.">testmodus</span>}
+          {isMock && (
+            <a class="chip warn" href="?mock=0" title="Testmodus: Spotify is nagebootst, er komt geen geluid. Tik om de testmodus uit te zetten.">
+              testmodus
+            </a>
+          )}
           {view && <span class="chip code" data-testid="room-code">{view.code}</span>}
           {session && (
             <span class={`net ${net}`} data-testid="net-status" data-status={net} title={NET_LABEL[net]}>
