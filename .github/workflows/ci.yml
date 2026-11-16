@@ -1,0 +1,40 @@
+# Tests bij elke pull request: spelregels, het Python-script en het volledige
+# spelverloop met meerdere browsers, tegen beide servervarianten.
+name: Tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Spelregels (unit-tests)
+        run: npm test
+      - name: Script voor de jaartallen (unit-tests)
+        run: npm run test:py
+      - name: Site bouwen
+        run: npm run build
+      - name: Browser installeren
+        run: npx playwright install --with-deps chromium
+      - name: Spelverloop met de Node-server
+        run: npm run test:e2e
+      - name: Spelverloop met de Cloudflare-server (lokaal)
+        run: npm run test:e2e
+        env:
+          MT_SERVER: cloudflare

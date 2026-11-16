@@ -1,2 +1,232 @@
-# muziek-tijdlijn
-Muziekspel voor een groep op de gsm: raad het jaar van een nummer en leg het op je tijdlijn. Muziek via Spotify.
+# Muziek-tijdlijn
+
+Muziekspel voor een groep vrienden: er speelt een nummer, niemand ziet titel of artiest, en wie aan de beurt is legt het op
+de juiste plaats op zijn tijdlijn. Iedereen speelt op zijn eigen gsm in de browser; de muziek komt uit één box, via de
+Spotify van de host.
+
+- Site: <https://baaswietse.github.io/muziek-tijdlijn/>
+- Privéspel voor eigen gebruik, niet commercieel. Eigen naam en eigen vormgeving.
+
+## Spelregels
+
+1. Iedereen begint met één onthulde kaart: een nummer met zijn jaartal.
+2. Wie aan de beurt is, hoort een nummer. Titel en artiest blijven geheim.
+3. Die speler legt het nummer op zijn tijdlijn: vóór, tussen of na de kaarten die hij al heeft.
+4. Juist: hij houdt de kaart. Fout: de kaart is weg.
+5. Het nummer wordt onthuld (artiest, titel, jaar) en de volgende is aan de beurt.
+6. Wie eerst 10 kaarten heeft, wint. De host kan dat aantal in de wachtkamer aanpassen (3 tot 20).
+
+Details:
+
+- Hetzelfde jaar als een buurkaart mag ervoor of erna liggen.
+- Is de stapel op voor iemand het doel haalt, dan wint wie de meeste kaarten heeft (gelijkspel kan).
+- Later instappen kan: je krijgt een startkaart en sluit achteraan aan.
+- De host kan een ander nummer vragen (als er een niet afspeelt), een beurt overslaan en een speler verwijderen.
+- Een tweede spel in dezelfde kamer herhaalt geen nummers zolang er genoeg ongespeelde zijn.
+
+## Hoe het in elkaar zit
+
+```
+gsm speler ─┐                         ┌─ tracks.json (op de site)
+gsm speler ─┼── WebSocket ── spelserver ┘
+gsm host  ──┘        │
+   │                 └─ beslist alles: stapel schudden, beurt, juist/fout
+   └── Spotify Web API ──> Spotify-toestel van de host ──> box
+```
+
+| Map | Wat |
+| --- | --- |
+| `web/` | De site (Vite + Preact). Staat op GitHub Pages. |
+| `server/src/` | De spelregels, los van hoe de server draait. |
+| `server/cloudflare/` | De server als Cloudflare Worker met een Durable Object per spel. |
+| `server/node/` | Dezelfde server als gewoon Node-programma (eigen server, lokaal testen). |
+| `tools/` | Het Python-script dat `tracks.json` maakt, met cache en correcties. |
+| `tests/` | Unit-tests en het spelverloop met meerdere browsers (Playwright). |
+
+- **De server is de baas.** De gsm's sturen alleen acties («ik leg het hier») en krijgen bij elke wijziging de volledige
+  stand terug. Valt een verbinding weg (scherm vergrendeld, wifi kwijt), dan herverbindt de gsm vanzelf en klopt alles
+  meteen weer. Je plaats in het spel zit in een token in de browser, dus ook herladen kan.
+- **Het antwoord lekt niet.** Titel, artiest, jaar en track-ID van het lopende nummer gaan pas bij de onthulling naar de
+  spelers. Alleen de gsm van de host krijgt het track-ID eerder, omdat die Spotify moet aansturen. Voor de host is het
+  dus te vinden voor wie echt wil zoeken; dat kan niet anders zolang zijn gsm de muziek start.
+- **Spotify blijft bij de host.** De host logt in met Authorization Code + PKCE, volledig in de browser. Er is geen
+  Client Secret, en de tokens gaan nooit naar de spelserver.
+
+## Eenmalige opzet
+
+### 1. Spotify-app
+
+1. Ga naar <https://developer.spotify.com/dashboard> en maak een app (API: **Web API**).
+2. Zet bij **Redirect URIs** exact deze twee:
+   - `https://baaswietse.github.io/muziek-tijdlijn/` (met de schuine streep op het einde)
+   - `http://127.0.0.1:8765/callback` (voor het script dat de playlist leest)
+3. Zet de **Client ID** in `web/src/config.js` (`SPOTIFY_CLIENT_ID`). Die is niet geheim. Een Client Secret is niet nodig
+   en hoort niet in de repo.
+
+Wat je moet weten over een Spotify-app in «development mode» (toestand november 2026):
+
+- De eigenaar van de app heeft **Spotify Premium** nodig; zonder werkt de app niet.
+- Hoogstens **5 gebruikers** kunnen inloggen, en elk moet je toevoegen onder *Settings → User Management*. Alleen de
+  host logt in, dus dat is enkel van belang als iemand anders dan jij host is.
+- Afspelen sturen (`PUT /me/player/play`, scopes `user-modify-playback-state` en `user-read-playback-state`) werkt
+  alleen met Premium.
+- Een playlist uitlezen (`GET /playlists/{id}/items`) lukt alleen voor playlists waarvan je eigenaar of medewerker bent.
+- Het Developer Policy van Spotify zegt dat je met hun platform geen spellen of quizzen mag bouwen. Voor een privéspel
+  onder vrienden is het risico dat Spotify de toegang van de app intrekt.
+
+### 2. Spelserver
+
+De server heeft een adres met HTTPS nodig: een site op `https://` mag alleen met een beveiligde `wss://`-verbinding
+praten. Twee mogelijkheden; de code voor beide zit in de repo.
+
+**A. Cloudflare Workers (aanbevolen, gratis plan)**
+
+1. Maak een account op <https://dash.cloudflare.com> en kies een `workers.dev`-subdomein.
+2. *Workers & Pages → Create → Import a repository*, kies deze repo en vul in:
+   - Project name: `muziek-tijdlijn` (moet gelijk zijn aan `name` in `server/wrangler.jsonc`)
+   - Deploy command: `npx wrangler deploy --config server/wrangler.jsonc`
+   - Root directory: leeg laten (hoofdmap)
+3. Na het uitrollen krijg je een adres zoals `https://muziek-tijdlijn.<jouw-subdomein>.workers.dev`. Zet dat in
+   `web/src/config.js` (`DEFAULT_SERVER_URL`).
+
+Liever vanaf je eigen pc (met Node.js): `npx wrangler login` en daarna `npm run deploy:cf`.
+
+Het gratis plan volstaat ruim; de server slaapt niet en bewaart elk spel, dus een spel overleeft ook een herstart.
+Kamers die een halve dag stil liggen, ruimt hij zelf op.
+
+**B. Eigen server**
+
+```bash
+docker build -f server/Dockerfile -t muziek-tijdlijn-server .
+```
+
+```bash
+docker run -d --restart unless-stopped -p 127.0.0.1:8787:8787 -v muziek-tijdlijn:/data muziek-tijdlijn-server
+```
+
+De server luistert dan alleen lokaal op poort 8787. Maak hem bereikbaar via HTTPS met een tunnel, bijvoorbeeld
+Tailscale Funnel (`tailscale funnel --bg 8787`) of Cloudflare Tunnel. Zo gaat er geen poort open op je router. Port
+forwarding raad ik af. Zet het HTTPS-adres van de tunnel in `web/src/config.js`.
+
+De server bevat geen geheimen: geen wachtwoorden en geen Spotify-tokens, alleen namen en tijdlijnen.
+
+### 3. GitHub Pages
+
+De workflow `.github/workflows/pages.yml` bouwt de site en zet ze online bij elke push naar `main`. Ze probeert Pages
+zelf aan te zetten. Lukt dat niet (GitHub laat dat niet altijd toe aan een workflow), zet dan één keer
+*Settings → Pages → Source* op **GitHub Actions** en start de workflow opnieuw.
+
+## Een spelavond
+
+1. **Host:** hang het toestel met Spotify aan de box, open de Spotify-app en speel even iets af. Zo wordt het toestel
+   zichtbaar voor Spotify.
+2. **Host:** open de site, kies *Nieuw spel*, log in bij Spotify, kies het toestel en tik op *Test het geluid*.
+3. **Spelers:** scan de QR-code of tik de code van 4 letters in.
+4. **Host:** start het spel. Elke beurt begint het nummer vanzelf.
+
+### De titel geheim houden voor de host
+
+De Spotify-app op het toestel van de host toont titel en hoes in de melding, op het vergrendelscherm en in de app zelf.
+Een box of auto met een schermpje kan de titel ook tonen.
+
+- Het spel houdt het scherm wakker, zodat het vergrendelscherm niet verschijnt zolang de pagina open staat.
+- Trek de meldingenbalk niet open en open de Spotify-app niet tijdens een beurt.
+- Android: zet *Instellingen → Geluid → Media → Media op vergrendelscherm tonen* uit.
+- Het zekerst: hang een ander toestel aan de box (oude gsm, tablet of laptop met Spotify open, scherm naar beneden)
+  en kies dat in de toestellenlijst. De gsm van de host stuurt dan alleen aan.
+
+### Als er iets hapert
+
+| Probleem | Oplossing |
+| --- | --- |
+| Geen toestel in de lijst | Open de Spotify-app op dat toestel, speel even iets af en tik op *Zoek opnieuw*. |
+| «Spotify vindt het toestel niet» | Hetzelfde; tik daarna op *Opnieuw afspelen*. |
+| «Spotify weigert dit commando» | Geen Premium, of het account staat niet bij *User Management* van de app. |
+| Een nummer speelt niet af | *Ander nummer* (host): dezelfde speler krijgt een nieuw nummer. |
+| Iemand is even weg | *Sla beurt over* (host). |
+| Scherm was vergrendeld | Niets doen: de gsm herverbindt vanzelf. |
+
+## Nummers en jaartallen bijwerken
+
+`web/public/tracks.json` bevat per nummer: Spotify track-ID, artiest, titel, jaar en de bron van dat jaar
+(`musicbrainz`, `spotify` of `handmatig`). Het script `tools/tracks.py` maakt dat bestand.
+
+Spotify geeft alleen de datum van het album, en dat is vaak een remaster of compilatie. Het script zoekt daarom per
+nummer het jaar van de eerste release op bij MusicBrainz, en neemt het vroegste van de twee.
+
+Draaien op Windows (Python 3.9 of nieuwer, geen extra pakketten):
+
+```bash
+python tools/tracks.py
+```
+
+Een andere playlist:
+
+```bash
+python tools/tracks.py --playlist https://open.spotify.com/playlist/JOUW_PLAYLIST
+```
+
+- Je browser opent Spotify om in te loggen. De Client ID leest het script uit `web/src/config.js`.
+- De playlist moet van jou zijn (of je bent medewerker), anders weigert Spotify.
+- MusicBrainz laat 1 verzoek per seconde toe; 100 nieuwe nummers duren een paar minuten. De antwoorden staan in
+  `tools/musicbrainz-cache.json`, dus een tweede keer gaat snel. Met `--opnieuw` zoekt het alles opnieuw op.
+- `tools/playlist.json` is de laatst opgehaalde lijst. Met `--invoer tools/playlist.json` draai je zonder Spotify-login.
+
+**Nakijken.** `tools/tracks-nakijken.md` somt op wat je best controleert: nummers waar Spotify en MusicBrainz meer dan
+een jaar verschillen, nummers die MusicBrainz niet vond, live-opnames en dubbels.
+
+**Verbeteren.** Zet het juiste jaar in `tools/correcties.json` en draai het script opnieuw:
+
+```json
+{
+  "5IX4TbIR5mMHGE4wiWwKW0": { "year": 1989, "note": "single uit 1989" }
+}
+```
+
+Commit daarna `web/public/tracks.json` en de bestanden in `tools/`. Na de push naar `main` staat de nieuwe lijst online;
+de server haalt ze bij de start van elk spel opnieuw op.
+
+## Ontwikkelen en testen
+
+```bash
+npm install
+```
+
+Lokaal draaien (twee vensters): de server met de testnummers, en de site.
+
+```bash
+TRACKS_FILE=tests/fixtures/tracks.json npm run server
+```
+
+```bash
+VITE_SERVER_URL=http://127.0.0.1:8787 npm run dev
+```
+
+Open dan <http://127.0.0.1:5173/muziek-tijdlijn/?mock=1>. Met `?mock=1` is Spotify nagebootst: geen login en geen
+geluid, maar het hele spel werkt (`?mock=0` zet het weer uit).
+
+| Commando | Wat |
+| --- | --- |
+| `npm test` | Unit-tests van de spelregels. |
+| `npm run test:py` | Unit-tests van het script voor de jaartallen (zonder netwerk). |
+| `npm run test:e2e` | Spelverloop met meerdere browsers tegen de Node-server. |
+| `MT_SERVER=cloudflare npm run test:e2e` | Hetzelfde tegen de Cloudflare-variant (lokaal via wrangler). |
+
+De workflow `.github/workflows/ci.yml` draait dit alles bij elke pull request.
+
+### Wat de tests wel en niet dekken
+
+Gedekt, automatisch:
+
+- De spelregels: plaatsen, gelijke jaren, winnen, lege stapel, overslaan, verwijderen, laat instappen.
+- Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
+  winnaar, nog een spel.
+- Dat het antwoord niet in de netwerkdata van gewone spelers zit vóór de onthulling.
+- Herverbinden na een weggevallen verbinding en na herladen; een herlaad bij de host start het nummer niet opnieuw.
+- Beide servervarianten (Node en Cloudflare, lokaal).
+
+Niet gedekt, alleen in het echt te testen:
+
+- Inloggen bij Spotify en het echte afspelen op een toestel.
+- Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.
+- De uitgerolde server op Cloudflare of je eigen server.
