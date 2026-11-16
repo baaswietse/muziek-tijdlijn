@@ -167,8 +167,12 @@ def artist_matches(recording: dict, artists: list[str]) -> bool:
 _last_mb_call = 0.0
 
 
-def http_json(url: str, headers: dict | None = None, data: bytes | None = None, tries: int = 5):
-    """GET of POST met wachten en opnieuw proberen bij 429/503 en netwerkfouten."""
+def http_json(url: str, headers: dict | None = None, data: bytes | None = None, tries: int = 8):
+    """GET of POST met wachten en opnieuw proberen bij 429/503 en netwerkfouten.
+
+    MusicBrainz antwoordt geregeld met "server busy" of verbreekt de verbinding;
+    met steeds langere pauzes (tot een halve minuut) lukt het daarna meestal wel.
+    """
     wait = 2.0
     for attempt in range(1, tries + 1):
         req = urllib.request.Request(url, data=data, headers={"User-Agent": USER_AGENT, **(headers or {})})
@@ -180,13 +184,13 @@ def http_json(url: str, headers: dict | None = None, data: bytes | None = None, 
                 retry_after = err.headers.get("Retry-After")
                 pause = float(retry_after) if retry_after and retry_after.isdigit() else wait
                 time.sleep(min(pause, 60))
-                wait *= 2
+                wait = min(wait * 2, 30)
                 continue
             raise
         except (urllib.error.URLError, TimeoutError, ConnectionError):
             if attempt < tries:
                 time.sleep(wait)
-                wait *= 2
+                wait = min(wait * 2, 30)
                 continue
             raise
     return None
@@ -211,24 +215,59 @@ def lucene_phrase(text: str) -> str:
     return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+# Uitgaven die niets zeggen over wanneer een nummer uitkwam.
+_SKIP_TYPES = {"live", "demo", "interview", "audiobook", "audio drama", "dj-mix", "mixtape/street", "spokenword"}
+
+
+def official_date(recording: dict) -> str | None:
+    """Vroegste datum van een officiële studio-uitgave met deze opname.
+
+    Bootlegs, promo's, live-albums en demo's tellen niet mee: die zijn in
+    MusicBrainz vaak fout of veel te vroeg gedateerd.
+    """
+    best = None
+    for release in recording.get("releases") or []:
+        if str(release.get("status") or "").casefold() != "official":
+            continue
+        group = release.get("release-group") or {}
+        types = {str(t).casefold() for t in group.get("secondary-types") or []}
+        if types & _SKIP_TYPES:
+            continue
+        d = release.get("date")
+        if year_of(d) is None:
+            continue
+        if best is None or str(d) < best:
+            best = str(d)
+    return best
+
+
 def pick_year(recordings: list[dict], title: str, artists: list[str]) -> dict | None:
-    """Kiest uit zoekresultaten het vroegste jaar van een opname die echt past."""
+    """Kiest uit zoekresultaten het jaar van de opname die echt past.
+
+    Een officiële studio-uitgave gaat altijd voor; pas als die er niet is,
+    telt de vroegste datum van eender welke uitgave ('official': False).
+    """
     best = None
     count = 0
     for rec in recordings:
-        y = year_of(rec.get("first-release-date"))
-        if y is None:
-            continue
         if not title_matches(rec.get("title", ""), title) or not artist_matches(rec, artists):
             continue
+        official = official_date(rec)
+        d = official or rec.get("first-release-date")
+        y = year_of(d)
+        if y is None:
+            continue
         count += 1
-        if best is None or y < best["year"]:
+        candidate = (0 if official else 1, y)
+        if best is None or candidate < best["_rank"]:
             credit = "".join(
                 c.get("name", "") + (c.get("joinphrase") or "") for c in rec.get("artist-credit") or []
             )
             best = {
+                "_rank": candidate,
                 "year": y,
-                "date": rec.get("first-release-date"),
+                "date": d,
+                "official": bool(official),
                 "mbid": rec.get("id"),
                 "title": rec.get("title"),
                 "artist": credit,
@@ -252,23 +291,46 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
     for method, query in queries:
         recordings, total = search(query)
         found = pick_year(recordings, wanted, artists)
+        if total > len(recordings):
+            # Bekende nummers hebben honderden opnames (live, bootlegs); de eerste
+            # honderd zijn niet noodzakelijk de oudste en de studio-opname zit er
+            # soms niet eens bij. Vraag daarom gericht naar officiële
+            # studio-uitgaven: dat zijn er hooguit enkele tientallen.
+            studio = f"({query}){_STUDIO_FILTER}"
+            found = _better(found, pick_year(search(studio)[0], wanted, artists))
+            # Een opname met een vroegere officiële uitgave heeft ook een vroegere
+            # 'eerste release'. Kijk dus of er vóór het gevonden jaar nog iets zit.
+            for _ in range(5):
+                if not found:
+                    break
+                before = f" AND firstreleasedate:[1900-01-01 TO {found['year'] - 1}-12-31]"
+                older, older_total = search(f"({query}){before}")
+                improved = _better(found, pick_year(older, wanted, artists))
+                if older_total > len(older):
+                    # Nog altijd te veel om te overzien: opnieuw alleen studio-uitgaven.
+                    improved = _better(improved, pick_year(search(studio + before)[0], wanted, artists))
+                if improved is found:
+                    break
+                found = improved
         if not found:
             continue
-        # Bekende nummers hebben honderden opnames (live, remasters) en de oudste
-        # zit niet altijd bij de eerste honderd. Vraag daarom gericht naar opnames
-        # van vóór het gevonden jaar, tot er geen oudere meer is.
-        steps = 0
-        while total > len(recordings) and steps < 6:
-            steps += 1
-            older, _ = search(f"({query}) AND firstreleasedate:[1900-01-01 TO {found['year'] - 1}-12-31]")
-            earlier = pick_year(older, wanted, artists)
-            if not earlier or earlier["year"] >= found["year"]:
-                break
-            earlier["matches"] = found["matches"]
-            found = earlier
         found["method"] = method
+        del found["_rank"]
         return found
     return {"year": None, "method": "niets gevonden"}
+
+
+_STUDIO_FILTER = " AND status:official AND NOT secondarytype:live AND NOT secondarytype:demo"
+
+
+def _better(current: dict | None, other: dict | None) -> dict | None:
+    """De beste van twee kandidaten: officieel voor onofficieel, dan het vroegste jaar."""
+    if current is None:
+        return other
+    if other and other["_rank"] < current["_rank"]:
+        other["matches"] = max(current.get("matches", 0), other.get("matches", 0))
+        return other
+    return current
 
 
 def _words(text: str) -> str:
@@ -459,6 +521,8 @@ def decide(track: dict, mb: dict | None, correction: dict | None) -> dict:
     if source != "handmatig":
         if mb_year and (mb or {}).get("method") == "ruim":
             reasons.append("alleen via een ruime zoekopdracht gevonden")
+        if mb_year and (mb or {}).get("official") is False:
+            reasons.append("MusicBrainz kent alleen live-, demo- of onofficiële uitgaven")
         if is_live(track.get("title", "")):
             reasons.append("live-opname: het jaar is dat van de eerste release van het nummer")
     return {
@@ -639,7 +703,8 @@ def main(argv=None) -> int:
 
 
 def _cache_key(track: dict) -> str:
-    return norm(clean_title(track.get("title", ""))) + "|" + norm((track.get("artists") or [""])[0])
+    # "v4": verhoog dit als de zoekmethode verandert, dan wordt alles opnieuw opgezocht.
+    return "v4|" + norm(clean_title(track.get("title", ""))) + "|" + norm((track.get("artists") or [""])[0])
 
 
 if __name__ == "__main__":
