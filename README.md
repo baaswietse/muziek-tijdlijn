@@ -82,7 +82,8 @@ praten. Twee mogelijkheden; de code voor beide zit in de repo.
 **A. Cloudflare Workers (aanbevolen, gratis plan)**
 
 1. Maak een account op <https://dash.cloudflare.com> en kies een `workers.dev`-subdomein.
-2. *Workers & Pages → Create → Import a repository*, kies deze repo en vul in:
+2. *Workers & Pages → Create → Import a repository*, kies deze repo en vul in (de namen in het dashboard kunnen licht
+   afwijken):
    - Project name: `muziek-tijdlijn` (moet gelijk zijn aan `name` in `server/wrangler.jsonc`)
    - Deploy command: `npx wrangler deploy --config server/wrangler.jsonc`
    - Root directory: leeg laten (hoofdmap)
@@ -131,7 +132,7 @@ Een box of auto met een schermpje kan de titel ook tonen.
 
 - Het spel houdt het scherm wakker, zodat het vergrendelscherm niet verschijnt zolang de pagina open staat.
 - Trek de meldingenbalk niet open en open de Spotify-app niet tijdens een beurt.
-- Android: zet *Instellingen → Geluid → Media → Media op vergrendelscherm tonen* uit.
+- Android: zet *Instellingen → Geluid → Media → Media op vergrendelscherm tonen* uit (de naam verschilt per merk).
 - Het zekerst: hang een ander toestel aan de box (oude gsm, tablet of laptop met Spotify open, scherm naar beneden)
   en kies dat in de toestellenlijst. De gsm van de host stuurt dan alleen aan.
 
@@ -152,7 +153,8 @@ Een box of auto met een schermpje kan de titel ook tonen.
 (`musicbrainz`, `spotify` of `handmatig`). Het script `tools/tracks.py` maakt dat bestand.
 
 Spotify geeft alleen de datum van het album, en dat is vaak een remaster of compilatie. Het script zoekt daarom per
-nummer het jaar van de eerste release op bij MusicBrainz, en neemt het vroegste van de twee.
+nummer het jaar van de eerste release op bij MusicBrainz, en neemt het vroegste van de twee. Bij MusicBrainz tellen
+alleen officiële studio-uitgaven: bootlegs, live-albums en demo's zijn er vaak fout of veel te vroeg gedateerd.
 
 Draaien op Windows (Python 3.9 of nieuwer, geen extra pakketten):
 
@@ -173,7 +175,8 @@ python tools/tracks.py --playlist https://open.spotify.com/playlist/JOUW_PLAYLIS
 - `tools/playlist.json` is de laatst opgehaalde lijst. Met `--invoer tools/playlist.json` draai je zonder Spotify-login.
 
 **Nakijken.** `tools/tracks-nakijken.md` somt op wat je best controleert: nummers waar Spotify en MusicBrainz meer dan
-een jaar verschillen, nummers die MusicBrainz niet vond, live-opnames en dubbels.
+een jaar verschillen, nummers die MusicBrainz niet vond, live-opnames en dubbels. Onderaan staat de volledige lijst op
+jaar, om snel te overlopen. MusicBrainz is door vrijwilligers ingevuld en niet foutloos.
 
 **Verbeteren.** Zet het juiste jaar in `tools/correcties.json` en draai het script opnieuw:
 
