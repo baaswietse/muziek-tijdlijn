@@ -1,0 +1,702 @@
+[
+  {
+    "id": "31joRJoijYOGBIW4444Fwk",
+    "artist": "Red Fang",
+    "title": "Prehistoric Dog",
+    "year": 2007,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "4yl1IpHPuXUV2MjxXy6hZn",
+    "artist": "Red Fang",
+    "title": "Wires",
+    "year": 2011,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2MvIMgtWyK88OiPi0J8Dg3",
+    "artist": "Slipknot",
+    "title": "Psychosocial",
+    "year": 2008,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "61mWefnWQOLf90gepjOCb3",
+    "artist": "Slipknot",
+    "title": "Duality",
+    "year": 2004,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "6wqJeItl3Vc3az4ZicSQAB",
+    "artist": "Slipknot",
+    "title": "Before I Forget",
+    "year": 2004,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "17C4oPQ3sTpF11pi9yvGcs",
+    "artist": "Asking Alexandria",
+    "title": "Not The American Average",
+    "year": 2009,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "0CqCpm4LLQbHUX5ysizWJS",
+    "artist": "Asking Alexandria",
+    "title": "The Final Episode (Let's Change Channel)",
+    "year": 2009,
+    "source": "handmatig"
+  },
+  {
+    "id": "6RJdYpFQwLyNfDc5FbjkgV",
+    "artist": "Disturbed",
+    "title": "Stricken",
+    "year": 2005,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "42ZVk59gT4tMlrZmd8Ijxf",
+    "artist": "Disturbed",
+    "title": "Indestructible",
+    "year": 2008,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2TNPagu8Z4zvDOpmnktF00",
+    "artist": "Disturbed",
+    "title": "Warrior",
+    "year": 2010,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5tz5QsHPkv69T1scq2utZZ",
+    "artist": "Disturbed",
+    "title": "The Vengeful One",
+    "year": 2015,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1RIn8LBQzinLEraFtUcpZP",
+    "artist": "Disturbed",
+    "title": "Hell",
+    "year": 2005,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5tYqrn7cItYhDGDLHt8XuH",
+    "artist": "Bring Me The Horizon",
+    "title": "Throne",
+    "year": 2015,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "4Ku3OOZWR4tpKNCVFXILY8",
+    "artist": "Suicide Silence",
+    "title": "You Only Live Once",
+    "year": 2011,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "4zKlkTXbCtQE9dY3SZjRi3",
+    "artist": "Amaranthe",
+    "title": "The Nexus",
+    "year": 2013,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5V3mdRI2yQxbSsJGDPc5lD",
+    "artist": "System Of A Down",
+    "title": "Chop Suey!",
+    "year": 2001,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "7MeXwzhSDGfqNfuFANgzVC",
+    "artist": "System Of A Down",
+    "title": "Toxicity",
+    "year": 2001,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "6oO7WMjD6kEvCITLbVj0mu",
+    "artist": "System Of A Down",
+    "title": "Hypnotize",
+    "year": 2005,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "47EqCQZG5v4o0WFMufGf5S",
+    "artist": "System Of A Down",
+    "title": "Cigaro",
+    "year": 2005,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1rWBeTMLU7Ys15lw6XqJvq",
+    "artist": "System Of A Down",
+    "title": "Science",
+    "year": 2001,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5n6STq2i8W223SFzHoOy8Y",
+    "artist": "System Of A Down",
+    "title": "Toxicity",
+    "year": 2001,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5PtBAIs2577uZZOjpmZrj9",
+    "artist": "System Of A Down",
+    "title": "Aerials",
+    "year": 2001,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2xI7o9zYcqynmueNH4foku",
+    "artist": "Limp Bizkit",
+    "title": "Take A Look Around",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1jH2IzZ7JnixFoGG6XSnpf",
+    "artist": "Limp Bizkit",
+    "title": "Rollin' (Air Raid Vehicle)",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "4WJNMSihHL8e4hs9SkBq9C",
+    "artist": "Limp Bizkit",
+    "title": "Break Stuff",
+    "year": 1999,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5anCkDvJ17aznvK5TED5uo",
+    "artist": "Avenged Sevenfold",
+    "title": "Hail to the King",
+    "year": 2013,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5pKCDm2fw4k6D6C5Rk646C",
+    "artist": "Bullet For My Valentine",
+    "title": "Tears Don't Fall",
+    "year": 2005,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "25GC50HslaaruyrKjdu0lP",
+    "artist": "Bullet For My Valentine",
+    "title": "Your Betrayal",
+    "year": 2010,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "6XimI1O15wpfwUdrCnlrxo",
+    "artist": "Bullet For My Valentine",
+    "title": "All These Things I Hate (Revolve Around Me)",
+    "year": 2005,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1bdXMstfxFWYSkEFTnJMoN",
+    "artist": "Metallica",
+    "title": "Enter Sandman",
+    "year": 1991,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "6kRz6Juetg9FgBm7PB1jDl",
+    "artist": "Metallica",
+    "title": "Master Of Puppets",
+    "year": 1986,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "0BAjUM6V9P9g8rK83hVUTJ",
+    "artist": "Metallica",
+    "title": "The Unforgiven",
+    "year": 1991,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "0kUBk3PnCat4oPvTlNsStp",
+    "artist": "Metallica",
+    "title": "One",
+    "year": 1988,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1dD6rZRfVkEIWlJt5tJCG9",
+    "artist": "Metallica",
+    "title": "Hardwired",
+    "year": 2016,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "3dcvwpAqj1kNOiXzbloC1n",
+    "artist": "Metallica",
+    "title": "Atlas, Rise!",
+    "year": 2016,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "7KcYTtKsLs1JnNYYohHNv0",
+    "artist": "Metallica",
+    "title": "Moth Into Flame",
+    "year": 2016,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "3ylifwuzlMnMy7sqtDsEun",
+    "artist": "Metallica",
+    "title": "The End Of The Line",
+    "year": 2008,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "3dIpOWSzTADMIpcvbiSHW8",
+    "artist": "Metallica",
+    "title": "Blackened",
+    "year": 1988,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1OXF53TgeSaycxIXBuylAl",
+    "artist": "Metallica",
+    "title": "Eye Of The Beholder",
+    "year": 1988,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2PRpu5J2wRm74PzB0IijC4",
+    "artist": "Metallica",
+    "title": "Fade To Black",
+    "year": 1984,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2aJ4SR65U9hwJx2WwrX0tj",
+    "artist": "Drowning Pool",
+    "title": "Tear Away",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "08mG3Y1vljYA6bvDt4Wqkj",
+    "artist": "AC/DC",
+    "title": "Back In Black",
+    "year": 1980,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2zYzyRzz6pRmhPzyfMEC8s",
+    "artist": "AC/DC",
+    "title": "Highway to Hell",
+    "year": 1979,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "57bgtoPSgt236HzfBOd8kj",
+    "artist": "AC/DC",
+    "title": "Thunderstruck",
+    "year": 1990,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "7LRMbd3LEoV5wZJvXT1Lwb",
+    "artist": "AC/DC",
+    "title": "T.N.T.",
+    "year": 1975,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2SiXAy7TuUkycRVbbWDEpo",
+    "artist": "AC/DC",
+    "title": "You Shook Me All Night Long",
+    "year": 1980,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "6GzCkTddOn1vSln1gbSr8y",
+    "artist": "AC/DC",
+    "title": "Shoot to Thrill",
+    "year": 1980,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "4feXJ5IC3avXsVW9WNFSag",
+    "artist": "AC/DC",
+    "title": "Rock N Roll Train",
+    "year": 2008,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "4wYq5wugZDzQiMZQYG4wVB",
+    "artist": "AC/DC",
+    "title": "Whole Lotta Rosie",
+    "year": 1977,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1AhDOtG9vPSOmsWgNW0BEY",
+    "artist": "Queen",
+    "title": "Bohemian Rhapsody",
+    "year": 1975,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "3YBZIN3rekqsKxbJc9FZko",
+    "artist": "Guns N' Roses",
+    "title": "Paradise City",
+    "year": 1987,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "54flyrjcdnQdco7300avMJ",
+    "artist": "Queen",
+    "title": "We Will Rock You",
+    "year": 1977,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "3RkS5epxKd1SFlDdLuKJMJ",
+    "artist": "Motörhead",
+    "title": "Ace Of Spades",
+    "year": 1980,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "7o2CTH4ctstm8TNelqjb51",
+    "artist": "Guns N' Roses",
+    "title": "Sweet Child O' Mine",
+    "year": 1987,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "58q4ZkagWkDV16Sehqx6AF",
+    "artist": "Volbeat",
+    "title": "The Devil's Bleeding Crown",
+    "year": 2016,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1znGxpojJSjxZZEWA5zWva",
+    "artist": "Volbeat",
+    "title": "Still Counting",
+    "year": 2008,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "0lP4HYLmvowOKdsQ7CVkuq",
+    "artist": "Thirty Seconds To Mars",
+    "title": "The Kill",
+    "year": 2005,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2D52zjCyqEIQa221lhw6uk",
+    "artist": "Thirty Seconds To Mars",
+    "title": "This Is War",
+    "year": 2009,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "60a0Rd6pjrkxjPbaKzXjfq",
+    "artist": "Linkin Park",
+    "title": "In the End",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2nLtzopw4rPReszdYBJU6h",
+    "artist": "Linkin Park",
+    "title": "Numb",
+    "year": 2003,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1Vej0qeQ3ioKwpI6FUbRv1",
+    "artist": "Linkin Park",
+    "title": "Papercut",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "7AB0cUXnzuSlAnyHOqmrZr",
+    "artist": "Linkin Park",
+    "title": "Faint",
+    "year": 2003,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "7oVEtyuv9NBmnytsCIsY5I",
+    "artist": "Linkin Park",
+    "title": "BURN IT DOWN",
+    "year": 2012,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "0UFDKFqW2oGspYeYqo9wjA",
+    "artist": "Linkin Park",
+    "title": "Bleed It Out",
+    "year": 2007,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1r1fPuhj9H4VdXr7OK6FL5",
+    "artist": "Linkin Park",
+    "title": "CASTLE OF GLASS",
+    "year": 2012,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5bvgRxco3jgSZ3SP8rueDA",
+    "artist": "Linkin Park",
+    "title": "The Catalyst",
+    "year": 2010,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "7dyluIqv7QYVTXXZiMWPHW",
+    "artist": "JAŸ-Z, Linkin Park",
+    "title": "Numb / Encore",
+    "year": 2004,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "12qZHAeOyTf93YAWvGDTat",
+    "artist": "blink-182",
+    "title": "All The Small Things",
+    "year": 1999,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "7x8dCjCr0x6x2lXKujYD34",
+    "artist": "Foo Fighters",
+    "title": "The Pretender",
+    "year": 2007,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "0SjhCnjTT2bXD9RtU8bFT9",
+    "artist": "Papa Roach",
+    "title": "Last Resort",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1f3yAtsJtY87CTmM8RLnxf",
+    "artist": "Nirvana",
+    "title": "Smells Like Teen Spirit",
+    "year": 1991,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "59WN2psjkt1tyaxjspN8fp",
+    "artist": "Rage Against The Machine",
+    "title": "Killing In The Name",
+    "year": 1992,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2pxAohyJptQWTQ5ZRWYijN",
+    "artist": "Iron Maiden",
+    "title": "The Trooper",
+    "year": 1983,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "3xktQXIr1OD3ENc19viwDP",
+    "artist": "Drowning Pool",
+    "title": "Bodies",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "76Je5Wklky23mVoxiRszcN",
+    "artist": "Foo Fighters",
+    "title": "Walk",
+    "year": 2011,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "01a0J96fRD91VnjQQUCqMK",
+    "artist": "The Offspring",
+    "title": "The Kids Aren't Alright",
+    "year": 1998,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1VNWaY3uNfoeWqb5U8x2QX",
+    "artist": "System Of A Down",
+    "title": "Lonely Day",
+    "year": 2005,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "4Yx9Tw9dTgQ8eGCq3PRDyn",
+    "artist": "Slayer",
+    "title": "Raining Blood",
+    "year": 1986,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "3cwDSDzTiWr5H5xMQhQ6Mx",
+    "artist": "Rammstein",
+    "title": "Du hast",
+    "year": 1997,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5siM4eG36axvG3alLNnsAx",
+    "artist": "Rammstein",
+    "title": "Sonne",
+    "year": 2001,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "4L58FgCh0T0WNG0UIqxK4E",
+    "artist": "Rammstein",
+    "title": "Engel",
+    "year": 1997,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1vcxF91pWs9uNwDROuiCPB",
+    "artist": "Rise Against",
+    "title": "Savior",
+    "year": 2008,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "65LTO4ikfU6zu3ZQYToNdk",
+    "artist": "Limp Bizkit",
+    "title": "Rollin' (Air Raid Vehicle)",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1Cj2vqUwlJVG27gJrun92y",
+    "artist": "Disturbed",
+    "title": "The Sound of Silence",
+    "year": 2015,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "6PvYTAWLe9BfPAfjrwSTVF",
+    "artist": "Tokio Hotel",
+    "title": "Monsoon",
+    "year": 2007,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "6Ft0ex5TQJ5eq5VbLAvNDs",
+    "artist": "Channel Zero",
+    "title": "Help",
+    "year": 1994,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1BGHV5aEUaOiv5URMtLpk2",
+    "artist": "Channel Zero",
+    "title": "Black Fuel",
+    "year": 1996,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1zOaxkbS1kAY1gIi0g8sOm",
+    "artist": "Bon Jovi",
+    "title": "It's My Life",
+    "year": 2000,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2tyW1uBUnYMKAFEfKDKi9B",
+    "artist": "Bon Jovi",
+    "title": "Livin' On A Prayer",
+    "year": 1986,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "0hCB0YR03f6AmQaHbwWDe8",
+    "artist": "Led Zeppelin",
+    "title": "Whole Lotta Love",
+    "year": 1969,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "5XcZRgJv3zMhTqCyESjQrF",
+    "artist": "Alice Cooper",
+    "title": "Poison",
+    "year": 1989,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "60rHc4AkLlP4XVSATvBb6K",
+    "artist": "Halestorm",
+    "title": "I Miss the Misery",
+    "year": 2012,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "0RdUX4WE0fO30VnlUbDVL6",
+    "artist": "Scorpions",
+    "title": "Still Loving You",
+    "year": 1984,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2gscB6kDOmrv1P6qs2KXE3",
+    "artist": "Slipknot",
+    "title": "Wait and Bleed",
+    "year": 1999,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "2SgbR6ttzoNlCRGQOKjrop",
+    "artist": "Pantera",
+    "title": "Cowboys from Hell",
+    "year": 1990,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "3MjrueDQKVr6xDDseZwhEd",
+    "artist": "Royal Blood",
+    "title": "Figure It Out",
+    "year": 2014,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1060gzllf4b0UETAXisR5l",
+    "artist": "Royal Blood",
+    "title": "Lights Out",
+    "year": 2017,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "35lBL83KZl80dHivikZKEq",
+    "artist": "Royal Blood",
+    "title": "Hook, Line & Sinker",
+    "year": 2017,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "1LbwMX3159t6QxG3u7DRWe",
+    "artist": "Royal Blood",
+    "title": "I Only Lie When I Love You",
+    "year": 2017,
+    "source": "musicbrainz"
+  },
+  {
+    "id": "64BbK9SFKH2jk86U3dGj2P",
+    "artist": "Red Hot Chili Peppers",
+    "title": "Otherside",
+    "year": 1999,
+    "source": "musicbrainz"
+  }
+]
