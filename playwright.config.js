@@ -25,7 +25,7 @@ export default defineConfig({
     process.env.MT_SERVER === 'cloudflare'
       ? {
           command:
-            `npx wrangler dev --config server/wrangler.jsonc --port ${SERVER_PORT} --ip 127.0.0.1 ` +
+            `npx wrangler dev --port ${SERVER_PORT} --ip 127.0.0.1 ` +
             `--var ALLOWED_ORIGINS:* --var TRACKS_URL:http://127.0.0.1:${TRACKS_PORT}/tracks.json`,
           env: { WRANGLER_SEND_METRICS: 'false' },
           url: `http://127.0.0.1:${SERVER_PORT}/api/health`,

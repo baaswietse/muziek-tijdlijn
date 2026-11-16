@@ -77,25 +77,29 @@ Wat je moet weten over een Spotify-app in «development mode» (toestand novembe
 ### 2. Spelserver
 
 De server heeft een adres met HTTPS nodig: een site op `https://` mag alleen met een beveiligde `wss://`-verbinding
-praten. Twee mogelijkheden; de code voor beide zit in de repo.
+praten. De server draait op Cloudflare Workers; wie hem liever zelf draait, vindt daaronder hoe.
 
-**A. Cloudflare Workers (aanbevolen, gratis plan)**
+**A. Cloudflare Workers (gratis plan)**
 
 1. Maak een account op <https://dash.cloudflare.com> en kies een `workers.dev`-subdomein.
-2. *Workers & Pages → Create → Import a repository*, kies deze repo en vul in (de namen in het dashboard kunnen licht
-   afwijken):
-   - Project name: `muziek-tijdlijn` (moet gelijk zijn aan `name` in `server/wrangler.jsonc`)
-   - Deploy command: `npx wrangler deploy --config server/wrangler.jsonc`
-   - Root directory: leeg laten (hoofdmap)
+2. *Workers & Pages → Create → Import a repository* en kies deze repo. Laat de voorgestelde instellingen staan:
+   - Project name: `muziek-tijdlijn` (moet gelijk zijn aan `name` in `wrangler.jsonc`)
+   - Deploy command: `npx wrangler deploy`
+   - Root directory: de hoofdmap
+   
+   De namen in het dashboard kunnen licht afwijken. Een build command is niet nodig.
 3. Na het uitrollen krijg je een adres zoals `https://muziek-tijdlijn.<jouw-subdomein>.workers.dev`. Zet dat in
    `web/src/config.js` (`DEFAULT_SERVER_URL`).
 
-Liever vanaf je eigen pc (met Node.js): `npx wrangler login` en daarna `npm run deploy:cf`.
+Controleren of de server draait: open `https://<dat-adres>/api/health`; je krijgt `{"ok":true,...}`.
 
-Het gratis plan volstaat ruim; de server slaapt niet en bewaart elk spel, dus een spel overleeft ook een herstart.
-Kamers die een halve dag stil liggen, ruimt hij zelf op.
+Vanaf dan rolt Cloudflare de server opnieuw uit bij elke push naar `main`. Liever vanaf je eigen pc (met Node.js):
+`npx wrangler login` en daarna `npm run deploy:cf`.
 
-**B. Eigen server**
+Het gratis plan volstaat ruim: wie over een daglimiet gaat, krijgt fouten tot middernacht (UTC), geen factuur. De server
+bewaart elk spel, dus een spel overleeft ook een herstart. Kamers die een halve dag stil liggen, ruimt hij zelf op.
+
+**B. Eigen server (alternatief)**
 
 ```bash
 docker build -f server/Dockerfile -t muziek-tijdlijn-server .
@@ -106,8 +110,11 @@ docker run -d --restart unless-stopped -p 127.0.0.1:8787:8787 -v muziek-tijdlijn
 ```
 
 De server luistert dan alleen lokaal op poort 8787. Maak hem bereikbaar via HTTPS met een tunnel, bijvoorbeeld
-Tailscale Funnel (`tailscale funnel --bg 8787`) of Cloudflare Tunnel. Zo gaat er geen poort open op je router. Port
-forwarding raad ik af. Zet het HTTPS-adres van de tunnel in `web/src/config.js`.
+Tailscale Funnel (`tailscale funnel --bg 8787`) of Cloudflare Tunnel. Zo gaat er geen poort open op je router; port
+forwarding is af te raden. Zet het HTTPS-adres van de tunnel in `web/src/config.js`.
+
+Het Dockerfile is niet getest. Zonder Docker kan het ook, en die weg is wel getest: `npm ci --omit=dev` en daarna
+`npm run server` (Node.js 20 of nieuwer; instellingen via omgevingsvariabelen, zie bovenaan `server/node/server.js`).
 
 De server bevat geen geheimen: geen wachtwoorden en geen Spotify-tokens, alleen namen en tijdlijnen.
 

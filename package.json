@@ -12,8 +12,8 @@
     "build": "vite build --config web/vite.config.js",
     "preview": "vite preview --config web/vite.config.js",
     "server": "node server/node/server.js",
-    "server:cf": "wrangler dev --config server/wrangler.jsonc",
-    "deploy:cf": "wrangler deploy --config server/wrangler.jsonc",
+    "server:cf": "wrangler dev",
+    "deploy:cf": "wrangler deploy",
     "test": "node --test \"tests/unit/*.test.js\"",
     "test:py": "python3 -m unittest discover -s tools -p \"test_*.py\"",
     "test:e2e": "playwright test"

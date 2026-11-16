@@ -1,9 +1,10 @@
 // Instellingen voor de spelserver op Cloudflare Workers.
-// Uitrollen: `npx wrangler deploy --config server/wrangler.jsonc`
+// Dit bestand staat in de hoofdmap, zodat Cloudflare het vanzelf vindt als je
+// de repo koppelt. Zelf uitrollen kan met `npx wrangler deploy`.
 {
-  "$schema": "../node_modules/wrangler/config-schema.json",
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "muziek-tijdlijn",
-  "main": "cloudflare/worker.js",
+  "main": "server/cloudflare/worker.js",
   "compatibility_date": "2026-06-01",
   "durable_objects": {
     "bindings": [{ "name": "ROOMS", "class_name": "GameRoom" }]
