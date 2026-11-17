@@ -74,15 +74,30 @@ export function Game({ view, send, music, deck, onLeave }) {
     return () => clearTimeout(timer);
   }, [betSend]);
   // De bevestigknop staat bij de gekozen plaats; schuif hem zo nodig in beeld,
-  // boven de plek waar meldingen onderaan verschijnen.
+  // boven de zwevende balk en de plek waar meldingen erboven verschijnen.
   useEffect(() => {
     if (betChoice === null) return;
     const btn = document.querySelector('[data-testid="confirm-bet"]');
     if (!btn) return;
-    const room = window.innerHeight - 120;
+    const room = window.innerHeight - barHeight() - 120;
     const { bottom } = btn.getBoundingClientRect();
     if (bottom > room) window.scrollBy(0, bottom - room);
   }, [betChoice]);
+  // Na de onthulling (of het einde van het spel) staat de uitkomst in beeld,
+  // ook wie onderaan een lange tijdlijn stond: zacht erheen schuiven, en alleen
+  // als ze er nog niet volledig staat.
+  const outcomeKey = reveal ? `${view.game}:${reveal.card.id}:${view.phase}` : null;
+  useEffect(() => {
+    if (!outcomeKey) return;
+    const el = document.querySelector(finished ? '[data-testid="winner"]' : '[data-testid="reveal"]');
+    if (!el) return;
+    // De kopbalk bovenaan blijft staan: de uitkomst moet eronder komen.
+    const head = document.querySelector('.topbar')?.offsetHeight ?? 0;
+    const { top, bottom } = el.getBoundingClientRect();
+    if (top >= head && bottom <= window.innerHeight - barHeight()) return;
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    window.scrollBy({ top: top - head - 12, behavior: still ? 'auto' : 'smooth' });
+  }, [outcomeKey]);
   const nameOf = (id) => (id === me ? 'jij' : byId.get(id)?.name ?? 'iemand');
   // Namen bij de gaten: wie zette waar in (en na de onthulling: juist of fout).
   const marks = (challenge ? bets : reveal?.bets ?? []).map((b) => ({
@@ -117,12 +132,41 @@ export function Game({ view, send, music, deck, onLeave }) {
 
   const pendingIndex = playing ? (myTurn ? pick : view.turn.pendingIndex) : challenge ? betChoice : null;
   const canContinue = view.phase === 'reveal' && (me === reveal.playerId || isHost);
+  const waitNames = waiting.map((id) => (id === me ? 'jou' : byId.get(id)?.name ?? 'iemand'));
+
+  // De hoofdknop van de beurt staat altijd op dezelfde plek: in de zwevende
+  // balk onderaan. Na elkaar: leggen, je eigen keuze in de tussenfase (een
+  // host die moet kiezen, kiest eerst), onthullen en de volgende beurt.
+  let action = null;
+  if (myTurn) {
+    action = {
+      kind: 'place',
+      testid: 'confirm-place',
+      label: placing ? 'Even geduld…' : pick === null ? 'Kies eerst een plaats' : `Leg het ${slotLabel(active.timeline, pick)}`,
+      onClick: confirmPlace,
+      disabled: placing || pick === null,
+    };
+  } else if (canBet) {
+    // Een plaats aangetikt? Dan is bevestigen bij die plaats de hoofdknop.
+    action = { kind: 'pass', testid: 'pass-bet', label: 'Ik zet geen token in', onClick: () => send({ t: 'pass' }), secondary: betChoice !== null };
+  } else if (challenge && (activeId === me || isHost)) {
+    action = {
+      kind: 'reveal',
+      testid: 'reveal-now',
+      label: 'Onthul',
+      onClick: revealNow,
+      disabled: waiting.length > 0,
+      note: waiting.length ? `Nog wachten op ${joinNames(waitNames)}.` : null,
+    };
+  } else if (canContinue) {
+    action = { kind: 'next', testid: 'next-turn', label: 'Volgende beurt', onClick: () => send({ t: 'next' }) };
+  }
   // Het token geven mag wie ook mag doorgaan, en ook nog na de beslissende
   // kaart; de anderen kunnen het alleen voor zichzelf opeisen.
   const canGiveToken = Boolean(reveal) && (me === reveal.playerId || isHost);
 
   return (
-    <main class={`page game${myTurn && pick !== null ? ' has-bar' : ''}`}>
+    <main class="page game">
       {finished && <Winners view={view} byId={byId} />}
 
       {playing && (
@@ -144,10 +188,8 @@ export function Game({ view, send, music, deck, onLeave }) {
           key={turnKey}
           view={view}
           send={send}
-          onReveal={revealNow}
           activeName={nameOf(activeId)}
-          waitNames={waiting.map((id) => (id === me ? 'jou' : byId.get(id)?.name ?? 'iemand'))}
-          canReveal={activeId === me || isHost}
+          waitNames={waitNames}
           isHost={isHost}
           canBet={canBet}
           myBet={myBet}
@@ -182,14 +224,9 @@ export function Game({ view, send, music, deck, onLeave }) {
 
       {reveal && (canGiveToken ? <TokenPicker view={view} send={send} /> : <TokenClaim view={view} send={send} />)}
 
-      {view.phase === 'reveal' &&
-        (canContinue ? (
-          <button class="btn primary big" onClick={() => send({ t: 'next' })} data-testid="next-turn">
-            Volgende beurt
-          </button>
-        ) : (
-          <p class="muted center-text small">Wachten tot {byId.get(reveal.playerId)?.name ?? 'de speler'} of de host doorgaat…</p>
-        ))}
+      {view.phase === 'reveal' && !canContinue && (
+        <p class="muted center-text small">Wachten tot {byId.get(reveal.playerId)?.name ?? 'de speler'} of de host doorgaat…</p>
+      )}
 
       {finished && isHost && (
         <div class="row gap">
@@ -284,19 +321,69 @@ export function Game({ view, send, music, deck, onLeave }) {
         Verlaat het spel
       </button>
 
-      {myTurn && pick !== null && (
-        <div class="confirm-bar">
-          <button class="btn primary big" onClick={confirmPlace} disabled={placing} data-testid="confirm-place">
-            {placing ? 'Even geduld…' : `Leg het ${slotLabel(active.timeline, pick)}`}
-          </button>
-        </div>
-      )}
+      {action && <ActionBar action={action} actionKey={`${action.kind}:${turnKey}`} />}
     </main>
   );
 }
 
 // Zolang wacht je token op een antwoord van de server.
 const BET_TIMEOUT = 5000;
+
+// Zolang reageert een nieuwe hoofdknop niet: een dubbele tik doet zo nooit
+// twee stappen (bv. onthullen en meteen de volgende beurt).
+const ACTION_COOLDOWN = 900;
+
+/** Hoogte van de zwevende balk onderaan (0 als er geen is). */
+const barHeight = () => document.querySelector('[data-testid="action-bar"]')?.offsetHeight ?? 0;
+
+/**
+ * Zwevende balk onderaan met de hoofdknop van de beurt, altijd in beeld en op
+ * dezelfde plek. Een nieuwe knop staat even uit (ACTION_COOLDOWN). De hoogte
+ * gaat naar --bar-h, zodat de pagina erboven uit te scrollen is en meldingen
+ * erboven verschijnen.
+ */
+function ActionBar({ action, actionKey }) {
+  // Pas als de tijd voor deze knop om is, komt zijn sleutel hier terecht.
+  const [readyKey, setReadyKey] = useState(null);
+  const cooling = readyKey !== actionKey;
+  useEffect(() => {
+    const timer = setTimeout(() => setReadyKey(actionKey), ACTION_COOLDOWN);
+    return () => clearTimeout(timer);
+  }, [actionKey]);
+  const bar = useRef(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const measure = () => root.style.setProperty('--bar-h', `${bar.current?.offsetHeight ?? 0}px`);
+    measure();
+    root.classList.add('has-bar');
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    observer?.observe(bar.current);
+    return () => {
+      observer?.disconnect();
+      root.classList.remove('has-bar');
+      root.style.removeProperty('--bar-h');
+    };
+  }, []);
+  return (
+    <div class="confirm-bar" ref={bar} data-testid="action-bar" data-kind={action.kind}>
+      {action.note && (
+        <p class="bar-note" data-testid="bar-note">
+          {action.note}
+        </p>
+      )}
+      <button
+        type="button"
+        class={`btn${action.secondary ? '' : ' primary'} big`}
+        onClick={() => !cooling && !action.disabled && action.onClick()}
+        disabled={cooling || action.disabled}
+        data-testid={action.testid}
+        data-cooling={cooling ? 'yes' : 'no'}
+      >
+        {action.label}
+      </button>
+    </div>
+  );
+}
 
 // Zoveel tokens kost een kaart kopen (LIMITS.buyCost op de server).
 const BUY_COST = 3;
@@ -318,11 +405,12 @@ function joinNames(names) {
 
 /**
  * Tussenfase na het leggen. Wie een token heeft, kiest: een andere plaats
- * aantikken en bevestigen, of geen token inzetten. Pas als iedereen koos, kan
- * de speler aan beurt of de host onthullen; de host heeft een noodknop voor
- * wie verbonden is maar niet reageert.
+ * aantikken en bevestigen, of geen token inzetten (knop in de zwevende balk).
+ * Pas als iedereen koos, kan de speler aan beurt of de host onthullen (ook in
+ * de balk); de host heeft hier een noodknop voor wie verbonden is maar niet
+ * reageert.
  */
-function ChallengeBanner({ view, send, onReveal, activeName, waitNames, canReveal, isHost, canBet, myBet, myPassed, tokens, slotsFull, picking }) {
+function ChallengeBanner({ view, send, activeName, waitNames, isHost, canBet, myBet, myPassed, tokens, slotsFull, picking }) {
   const [forcing, setForcing] = useState(false);
   const mineTurn = view.turn.playerId === view.you;
   const waiting = view.turn.waiting ?? [];
@@ -334,10 +422,10 @@ function ChallengeBanner({ view, send, onReveal, activeName, waitNames, canRevea
   if (mineTurn) {
     text = blocked
       ? 'Wie een token heeft, kiest nu: een andere plaats of geen token. Onthullen kan zodra iedereen koos.'
-      : 'Iedereen koos. Tik op Onthul.';
+      : 'Iedereen koos. Tik onderaan op Onthul.';
   } else if (myBet) text = <>Je zette een token in en hebt nog {count}. {later}</>;
   else if (myPassed) text = <>Je zet deze beurt geen token in en houdt je {count}. {later}</>;
-  else if (canBet) text = <>Ligt {activeName} fout? Tik hieronder een andere plaats aan en bevestig, of zet deze beurt geen token in. Je hebt {count}.</>;
+  else if (canBet) text = <>Ligt {activeName} fout? Tik hieronder een andere plaats aan en bevestig, of tik onderaan op «Ik zet geen token in». Je hebt {count}.</>;
   else if (slotsFull) text = <>Alle andere plaatsen zijn al bezet. Je houdt je {count}. Wachten op de onthulling…</>;
   else text = `${who} legde het nummer. Wie een token heeft, kan nog inzetten. Wachten op de onthulling…`;
   return (
@@ -354,26 +442,10 @@ function ChallengeBanner({ view, send, onReveal, activeName, waitNames, canRevea
           {mineTurn ? 'Je kaart ligt vast' : myBet ? 'Token ingezet' : myPassed ? 'Geen token ingezet' : canBet ? 'Token inzetten?' : 'Even wachten'}
         </p>
         <p class="now-what">{text}</p>
-        {canBet && (
-          <button type="button" class="btn big challenge-pass" onClick={() => send({ t: 'pass' })} data-testid="pass-bet">
-            Ik zet geen token in
-          </button>
-        )}
         {blocked && (
           <p class="challenge-wait" data-testid="waiting-for" role="status">
             Nog wachten op {joinNames(waitNames)}.
           </p>
-        )}
-        {/* Heb je zelf een plaats aangetikt, dan is bevestigen bij die plaats de hoofdknop. */}
-        {canReveal && (
-          <button
-            class={`btn${picking ? '' : ' primary'} big challenge-reveal`}
-            onClick={onReveal}
-            disabled={blocked}
-            data-testid="reveal-now"
-          >
-            Onthul
-          </button>
         )}
         {isHost && blocked && !forcing && (
           <button type="button" class="btn link challenge-force" onClick={() => setForcing(true)} data-testid="force-reveal">

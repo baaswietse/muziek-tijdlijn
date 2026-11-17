@@ -630,9 +630,11 @@ test('token inzetten: komt de bevestiging niet aan, dan zegt het scherm dat en i
   await expect(host.getByTestId('bet-pick')).toContainText('Nog niet ingezet');
   await expectTokens(pages, counts);
 
-  // Hanne koos dus nog niet: gewoon onthullen kan niet. Met de noodknop van de
-  // host terwijl haar keuze nog openstaat: eerst een vraag in de pagina.
-  await expect(host.getByTestId('reveal-now')).toBeDisabled();
+  // Hanne koos dus nog niet: gewoon onthullen kan niet (haar balk toont eerst
+  // haar eigen keuze). Met de noodknop van de host terwijl haar keuze nog
+  // openstaat: eerst een vraag in de pagina.
+  await expect(host.getByTestId('reveal-now')).toHaveCount(0);
+  await expect(host.getByTestId('pass-bet')).toBeVisible();
   let dialogs = 0;
   host.on('dialog', () => dialogs++);
   await host.getByTestId('force-reveal').click();
@@ -666,9 +668,12 @@ async function bobPlaced(browser) {
 test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen allebei', async ({ browser }) => {
   const { host, bob, cas, pages, ids, turn } = await bobPlaced(browser);
   const [hanne, , casId] = ids;
-  // Bob en de host zien Onthul, maar uitgeschakeld, en op wie er gewacht wordt.
+  // Bob ziet Onthul, maar uitgeschakeld, en op wie er gewacht wordt. De host
+  // moet zelf nog kiezen: zijn balk toont eerst zijn eigen keuze.
+  await expect(bob.getByTestId('reveal-now')).toBeDisabled();
+  await expect(bob.getByTestId('bar-note')).toHaveText(/^Nog wachten op (Hanne en Cas|Cas en Hanne)\.$/);
+  await expect(host.getByTestId('reveal-now')).toHaveCount(0);
   for (const p of [bob, host]) {
-    await expect(p.getByTestId('reveal-now')).toBeDisabled();
     // In beurtvolgorde, en die begint bij een willekeurige speler.
     await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-waiting', new RegExp(`^(${hanne},${casId}|${casId},${hanne})$`));
   }
@@ -707,7 +712,10 @@ test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen all
     await expect(p.getByTestId('waiting-for')).toHaveCount(0);
   }
   await expect(host.getByTestId('force-reveal')).toHaveCount(0);
-  await expect(bob.getByTestId('challenge-banner')).toContainText('Iedereen koos. Tik op Onthul.');
+  await expect(bob.getByTestId('challenge-banner')).toContainText('Iedereen koos. Tik onderaan op Onthul.');
+  // Nu kan ook de host onthullen: zijn balk toont Onthul.
+  await expect(host.getByTestId('reveal-now')).toBeEnabled();
+  await expect(host.getByTestId('pass-bet')).toHaveCount(0);
   // Nog steeds een bewuste tik: niets onthult vanzelf.
   await bob.waitForTimeout(300);
   for (const p of pages) await expect(p.getByTestId('reveal')).toHaveCount(0);

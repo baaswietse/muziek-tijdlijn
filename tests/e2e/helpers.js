@@ -167,8 +167,11 @@ export async function playTurn({ pages, hostPage, ids, want = 'correct', playsSo
       await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-active', activeId);
       await expect(p.getByTestId('active-timeline').getByTestId('placed-card')).toBeVisible();
       await expect(p.getByTestId('reveal')).toHaveCount(0);
-      // Alleen de speler aan beurt en de host zien de knop om te onthullen.
-      await expect(p.getByTestId('reveal-now')).toHaveCount(p === activePage || p === hostPage ? 1 : 0);
+      // Alleen de speler aan beurt en de host zien de knop om te onthullen; een
+      // host die zelf nog moet kiezen, ziet eerst zijn eigen keuze.
+      const choosing = (await p.getByTestId('challenge-banner').getAttribute('data-must-choose')) === 'yes';
+      await expect(p.getByTestId('reveal-now')).toHaveCount(p === activePage || (p === hostPage && !choosing) ? 1 : 0);
+      await expect(p.getByTestId('pass-bet')).toHaveCount(choosing ? 1 : 0);
     }
     await expect(activePage.getByTestId('challenge-banner')).toHaveAttribute('data-can-bet', 'no');
     // Ook in de tussenfase lekt niets en start de muziek niet opnieuw.
@@ -177,6 +180,7 @@ export async function playTurn({ pages, hostPage, ids, want = 'correct', playsSo
     // Onthullen kan pas als iedereen met een token koos. Niemand zet in: de
     // anderen passen, daarna onthult de speler aan beurt zelf.
     await passWaiting(pages, activePage);
+    await expect(hostPage.getByTestId('reveal-now')).toHaveCount(1);
     await activePage.getByTestId('reveal-now').click();
   }
   for (const p of pages) {
