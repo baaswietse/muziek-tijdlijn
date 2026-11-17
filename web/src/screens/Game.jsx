@@ -3,7 +3,7 @@ import { Timeline, YearChips, slotLabel } from '../components/Timeline.jsx';
 import { MusicPanel } from '../components/MusicPanel.jsx';
 import { Rules } from '../components/Rules.jsx';
 
-export function Game({ view, send, music, onLeave }) {
+export function Game({ view, send, music, deck, onLeave }) {
   const me = view.you;
   const isHost = me === view.hostId;
   const byId = new Map(view.players.map((p) => [p.id, p]));
@@ -17,6 +17,12 @@ export function Game({ view, send, music, onLeave }) {
   const mine = byId.get(me);
   const myTurn = playing && activeId === me;
   const target = view.settings.target;
+
+  // Wat er tijdens het spel bij de eigen playlist bijkwam, eerst naar de server.
+  async function playAgain() {
+    await deck?.flush();
+    send({ t: 'start' });
+  }
 
   // Jouw voorlopige keuze: meteen zichtbaar bij jou, en via de server bij de rest.
   // De fase hoort erbij: na "Ander nummer" in de tussenfase begint je keuze opnieuw.
@@ -177,7 +183,7 @@ export function Game({ view, send, music, onLeave }) {
 
       {finished && isHost && (
         <div class="row gap">
-          <button class="btn primary big grow" onClick={() => send({ t: 'start' })} disabled={!music.ready} data-testid="play-again">
+          <button class="btn primary big grow" onClick={playAgain} disabled={!music.ready} data-testid="play-again">
             Nog een spel
           </button>
           <button class="btn big" onClick={() => send({ t: 'lobby' })}>
@@ -261,7 +267,7 @@ export function Game({ view, send, music, onLeave }) {
         </p>
       </section>
 
-      {isHost && <HostControls view={view} send={send} music={music} />}
+      {isHost && <HostControls view={view} send={send} music={music} deck={deck} />}
 
       <Rules target={target} />
       <button class="btn link danger" onClick={() => confirm('Dit spel verlaten?') && onLeave()}>
@@ -491,7 +497,7 @@ function PlayerRow({ p, view, isActive, isHost, send }) {
   );
 }
 
-function HostControls({ view, send, music }) {
+function HostControls({ view, send, music, deck }) {
   const [settings, setSettings] = useState(false);
   // Ook in de tussenfase loopt de beurt nog: overslaan kan dan ook.
   const playing = view.phase === 'playing' || view.phase === 'challenge';
@@ -541,6 +547,12 @@ function HostControls({ view, send, music }) {
         )}
       </div>
       {(settings || needsSetup) && <MusicPanel music={music} />}
+      {deck?.job?.phase === 'years' && (
+        <p class="muted small" data-testid="deck-background">
+          Jaartallen opzoeken voor «{deck.job.name}»: {deck.job.ready} klaar, nog {deck.left} te gaan
+          {deck.left > 0 && <> (ongeveer {deck.minutes} min)</>}. Wat erbij komt, doet mee vanaf het volgende spel.
+        </p>
+      )}
     </section>
   );
 }

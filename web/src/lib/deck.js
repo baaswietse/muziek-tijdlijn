@@ -3,27 +3,51 @@
 // Spotify-playlist kiezen: dan leest zijn browser de nummers, zoekt de
 // jaartallen op bij MusicBrainz en stuurt de lijst naar de server.
 //
+// Wat al gekend is (een eigen verbetering, tracks.json, de gedeelde lijst op
+// de server, de lokale cache) is er meteen. De rest wordt op de achtergrond
+// opgezocht, in willekeurige volgorde: de host kan starten zodra er genoeg
+// nummers een jaartal hebben, en het opzoeken loopt door in de wachtkamer en
+// tijdens het spel. Wat er tijdens een spel bijkomt, gaat pas tussen twee
+// spellen naar de server (de server weigert een nieuwe lijst tijdens een
+// spel), dus het doet mee vanaf het volgende spel. Na een herlaad gaat het
+// opzoeken verder waar het was (mt.deckJob).
+//
 // Wat opgezocht is, deelt de server met alle hosts (de gedeelde lijst met
 // jaartallen): een andere host, of dezelfde op een ander toestel, hoeft het
 // dan niet opnieuw op te zoeken. Kent de server die lijst niet (een oudere
 // server, of hij is even onbereikbaar), dan werkt alles zoals voordien met
 // alleen de lokale cache en MusicBrainz.
 
-import { useCallback, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { player } from '../spotify/index.js';
 import { post } from './net.js';
 import { storage } from './session.js';
-import { REMIX_RULES, cleanTitle, decide, isRemix, lookup, mbSearch, songKey, yearOf } from './years.js';
+import { REMIX_RULES, cleanTitle, decide, isRemix, lookup, mbSearch, yearOf } from './years.js';
+import {
+  MIN_DECK,
+  canSendDeck,
+  deckOf,
+  lookupOrder,
+  minutesLeft,
+  pickTracks,
+  secondsPerLookup,
+  uploadWait,
+  withoutDoubles,
+} from './deckplan.js';
 
 // { [trackId]: { y: jaar, s: bron, d: [twijfels], r: regelversie voor remixes } }
 // Oudere items hebben geen r; voor gewone nummers maakt dat niet uit.
 const CACHE = 'mt.years.v1';
 const LAST = 'mt.lastPlaylist'; // { id, name }
-const MAX_DECK = 500;
-const MIN_DECK = 10;
-const SECONDS_PER_LOOKUP = 3;
+// Een opzoeking die nog bezig is, om na een herlaad verder te gaan:
+// { code, id, name, tracks: [{ id, title, artists, spotifyDate }], sampled, total }
+const JOB = 'mt.deckJob';
+const SECONDS_PER_LOOKUP = 2; // schatting tot er in deze opzoeking een paar gemeten zijn
 const SHARED_IDS = 500; // zoveel nummers mag één leesverzoek vragen (server/src/yearlist.js)
 const SHARED_WRITE = 200; // en zoveel per schrijfverzoek: ruim onder de grootte van een verzoek
+const SHARE_EVERY = 20; // tussentijds delen met de server, per zoveel opgezochte nummers
+const UPLOAD_FIRST = 5000; // de lijst gaat ten vroegste zo lang na het begin naar de server
+const UPLOAD_EVERY = 20_000; // en daarna hoogstens om de zoveel ms, tot alles opgezocht is
 const MANUAL = 'handmatig';
 
 let builtin = null;
@@ -78,14 +102,33 @@ async function loadBuiltin() {
   return map;
 }
 
-export function useDeck({ code, token }) {
+function stopped(kind) {
+  const err = new Error('gestopt');
+  err.kind = kind; // 'stop': de host tikte op Stop; 'replace': andere lijst; 'leave': ander spel
+  return err;
+}
+
+const rowOf = (t, entry) => ({
+  id: t.id,
+  title: cleanTitle(t.title),
+  artist: t.artists.join(', '),
+  year: entry.y,
+  source: entry.s,
+  doubts: entry.d || [],
+});
+
+export function useDeck({ code, token, phase }) {
   const [playlists, setPlaylists] = useState(null); // null = nog niet opgevraagd
   const [loading, setLoading] = useState(false);
-  const [job, setJob] = useState(null); // { name, phase, done, total, todo }
-  const [result, setResult] = useState(null); // { name, count, skipped, doubts, note }
+  // { name, phase: 'tracks' | 'years', total, todo, done, ready, sampled, playlistTotal, seconds }
+  const [job, setJob] = useState(null);
+  const [result, setResult] = useState(null); // { name, count, skipped, doubts, note, sampled, total }
   const [error, setError] = useState('');
-  const abort = useRef(null);
-  const current = useRef(null); // { id, name, rows } van de laatst verwerkte playlist
+  const run = useRef(null); // de opzoeking die nu loopt: { controller }
+  // De laatst gekozen playlist: { id, name, rows, sampled, total, note, dirty, lastUpload, startedAt, timer, finished }
+  const current = useRef(null);
+  const phaseRef = useRef(phase);
+  const sending = useRef(Promise.resolve());
 
   const available = typeof player.playlists === 'function';
 
@@ -101,53 +144,112 @@ export function useDeck({ code, token }) {
     }
   }, []);
 
-  /** Stuurt de lijst naar de server. Alleen nummers met een jaartal tellen mee. */
-  const upload = useCallback(
-    async (note = '') => {
-      const { name, rows } = current.current;
-      const withYear = rows.filter((r) => r.year);
-      const deck = withYear.slice(0, MAX_DECK).map((r) => ({ id: r.id, artist: r.artist, title: r.title, year: r.year }));
-      if (deck.length < MIN_DECK) {
-        throw new Error(`Deze playlist heeft maar ${deck.length} bruikbare nummers; er zijn er minstens ${MIN_DECK} nodig.`);
-      }
-      await post(`/api/rooms/${code}/deck`, { token, name, tracks: deck });
-      setResult({
-        name,
-        count: deck.length,
-        skipped: rows.length - deck.length,
-        doubts: rows.filter((r) => r.doubts.length > 0 && r.source !== 'handmatig'),
-        note,
+  /** Toont wat er nu klaar is: aantal, twijfels om na te kijken, wat niet meedoet. */
+  const refresh = useCallback((data) => {
+    if (data !== current.current) return;
+    const { rows } = data;
+    setResult({
+      name: data.name,
+      count: rows.filter((r) => r.year).length,
+      skipped: rows.filter((r) => !r.year).length,
+      doubts: rows.filter((r) => r.doubts.length > 0 && r.source !== MANUAL),
+      note: data.note || '',
+      sampled: data.sampled,
+      total: data.total,
+      finished: data.finished,
+    });
+  }, []);
+
+  /**
+   * Stuurt de lijst naar de server, één verzoek tegelijk. Tijdens een spel
+   * kan dat niet: dan blijft ze `dirty` en gaat ze mee zodra het spel gedaan
+   * is (zie het effect op `phase` hieronder). `quiet`: te weinig nummers is
+   * dan geen fout, maar gewoon nog niet.
+   */
+  const sendDeck = useCallback(
+    (data, { quiet = false } = {}) => {
+      const step = sending.current.catch(() => {}).then(async () => {
+        if (!data || data !== current.current) return false;
+        if (!canSendDeck(phaseRef.current)) {
+          data.dirty = true;
+          return false;
+        }
+        const deck = deckOf(data.rows);
+        if (deck.length < MIN_DECK) {
+          if (quiet) return false;
+          throw new Error(`Deze playlist heeft maar ${deck.length} bruikbare nummers; er zijn er minstens ${MIN_DECK} nodig.`);
+        }
+        data.dirty = false;
+        try {
+          await post(`/api/rooms/${code}/deck`, { token, name: data.name, tracks: deck });
+        } catch (err) {
+          data.dirty = true;
+          throw err;
+        }
+        data.lastUpload = Date.now();
+        storage.write(LAST, { id: data.id, name: data.name });
+        return true;
       });
+      sending.current = step;
+      return step;
     },
     [code, token],
   );
 
-  /** Leest een playlist, zoekt de ontbrekende jaartallen op en stuurt ze door. */
-  const choose = useCallback(
-    async (playlist) => {
+  /** Plant een tussentijdse upload tijdens het opzoeken (niet bij elk nummer). */
+  const schedule = useCallback(
+    (data) => {
+      if (data.timer) return;
+      const wait = uploadWait({ now: Date.now(), startedAt: data.startedAt, lastUpload: data.lastUpload, first: UPLOAD_FIRST, every: UPLOAD_EVERY });
+      data.timer = setTimeout(() => {
+        data.timer = null;
+        if (data.dirty) sendDeck(data, { quiet: true }).catch(() => {});
+      }, wait);
+    },
+    [sendDeck],
+  );
+
+  const stopRun = useCallback((kind) => {
+    const r = run.current;
+    if (!r) return;
+    run.current = null;
+    r.controller.abort(stopped(kind));
+  }, []);
+
+  /**
+   * Leest de nummers (of neemt ze uit een bewaarde opzoeking), neemt wat al
+   * gekend is en zoekt de rest op de achtergrond op.
+   */
+  const start = useCallback(
+    async (spec, { resume = false } = {}) => {
       const controller = new AbortController();
-      abort.current = controller;
+      const me = { controller };
+      run.current = me;
       const { signal } = controller;
+      const mine = () => run.current === me;
+      const update = (fn) => mine() && setJob((j) => (j ? fn(j) : j));
+      let data = null;
+      let share = []; // wat de server nog niet (zo) heeft
+      let shared = null;
       setError('');
-      setResult(null);
-      setJob({ name: playlist.name, phase: 'tracks', done: 0, total: 0, todo: 0 });
+      if (!resume) setResult(null);
+      setJob({ name: spec.name, phase: 'tracks', total: 0, todo: 0, done: 0, ready: 0 });
       try {
-        const raw = await player.playlistTracks(playlist.id);
-        // Hetzelfde nummer twee keer (album- en singleversie) geeft twee dezelfde kaarten.
-        const seen = new Set();
-        const tracks = raw.filter((t) => {
-          const key = songKey(t.title, t.artists);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        let tracks = spec.tracks;
+        let sampled = Boolean(spec.sampled);
+        let total = spec.total ?? tracks?.length ?? 0;
+        if (!tracks) {
+          const picked = pickTracks(withoutDoubles(await player.playlistTracks(spec.id)));
+          ({ tracks, sampled, total } = picked);
+        }
+        if (signal.aborted) throw signal.reason;
         const known = await loadBuiltin();
-        const cache = storage.read(CACHE) || {};
         // De gedeelde lijst van de server, voor alles wat niet op de site staat.
         // null: de server kon niet antwoorden; dan zoals vroeger, zonder.
         const ask = tracks.filter((t) => !known.has(t.id)).map((t) => t.id);
-        const shared = ask.length ? await sharedLookup(code, token, ask) : {};
+        shared = ask.length ? await sharedLookup(code, token, ask) : {};
         if (signal.aborted) throw signal.reason;
+        const cache = storage.read(CACHE) || {};
         // Remixes kregen vroeger meestal het jaar van het origineel. Wat zonder
         // de huidige regelversie (r) onthouden is (lokaal of op de server),
         // wordt één keer opnieuw opgezocht; gewone nummers blijven onthouden
@@ -161,42 +263,19 @@ export function useDeck({ code, token }) {
           if (upToDate(cache[id], title)) return { ...cache[id], from: 'cache' };
           return null;
         };
-        const todo = tracks.filter((t) => !stored(t)).length;
-        setJob({ name: playlist.name, phase: 'years', done: 0, total: tracks.length, todo });
+        // Eerst wat gekend is, dan de onbekende nummers in willekeurige volgorde.
+        // Bij verdergaan na een herlaad ligt die volgorde al vast.
+        if (!resume) tracks = lookupOrder(tracks, (t) => Boolean(stored(t)));
 
         const rows = [];
-        const share = []; // wat de server nog niet (zo) heeft
-        let failures = 0; // opeenvolgende mislukte opzoekingen
-        let unreachable = 0;
-        let looked = 0;
-        for (const [i, t] of tracks.entries()) {
-          if (signal.aborted) throw signal.reason;
-          let entry = stored(t);
+        const todo = [];
+        for (const t of tracks) {
+          const entry = stored(t);
           if (!entry) {
-            const spotifyYear = yearOf(t.spotifyDate);
-            let mb = null;
-            let failed = failures >= 2; // MusicBrainz ligt plat: niet bij elk nummer een minuut wachten
-            if (!failed) {
-              try {
-                mb = await lookup(t.title, t.artists, (query) => mbSearch(query, { signal }));
-                failures = 0;
-              } catch (err) {
-                if (signal.aborted) throw err;
-                failures++;
-                failed = true;
-              }
-            }
-            const d = decide({ title: t.title, spotifyYear }, mb);
-            entry = { y: d.year, s: d.source, d: d.doubts, r: REMIX_RULES };
-            if (failed) {
-              unreachable++;
-              entry.d = ['MusicBrainz was niet bereikbaar; jaar van het Spotify-album', ...entry.d];
-            } else {
-              cache[t.id] = entry; // alleen echte antwoorden onthouden en delen
-              share.push(shareable(t.id, entry));
-              if (++looked % 5 === 0) storage.write(CACHE, cache);
-            }
-          } else if (entry.from === 'cache') {
+            todo.push(t);
+            continue;
+          }
+          if (entry.from === 'cache') {
             // Eerder in deze browser opgezocht, maar (nog) niet op de server:
             // zo gaat het werk van vroeger niet verloren.
             share.push(shareable(t.id, entry));
@@ -205,40 +284,160 @@ export function useDeck({ code, token }) {
             // server staat, kan nieuwer zijn (van een andere host): die blijft.
             share.push(shareable(t.id, entry));
           }
-          rows.push({
-            id: t.id,
-            title: cleanTitle(t.title),
-            artist: t.artists.join(', '),
-            year: entry.y,
-            source: entry.s,
-            doubts: entry.d || [],
-          });
-          setJob((j) => (j ? { ...j, done: i + 1 } : j));
+          rows.push(rowOf(t, entry));
         }
-        storage.write(CACHE, cache);
-        current.current = { id: playlist.id, name: playlist.name, rows };
-        setJob((j) => (j ? { ...j, phase: 'upload' } : j));
+        if (todo.length) {
+          storage.write(JOB, { code, id: spec.id, name: spec.name, tracks, sampled, total });
+        }
+        data = { id: spec.id, name: spec.name, rows, size: tracks.length, sampled, total, note: '', dirty: true, lastUpload: 0, startedAt: Date.now(), timer: null, finished: false };
+        current.current = data;
+        const ready = () => rows.filter((r) => r.year).length;
+        const startedAt = Date.now();
+        if (mine()) {
+          setJob({ name: spec.name, phase: 'years', total: tracks.length, todo: todo.length, done: 0, ready: ready(), sampled, playlistTotal: total, seconds: SECONDS_PER_LOOKUP });
+        }
+        refresh(data);
+        if (todo.length) schedule(data);
+
+        let failures = 0; // opeenvolgende mislukte opzoekingen
+        let unreachable = 0;
+        for (const [i, t] of todo.entries()) {
+          if (signal.aborted) throw signal.reason;
+          const spotifyYear = yearOf(t.spotifyDate);
+          let mb = null;
+          let failed = failures >= 2; // MusicBrainz ligt plat: niet bij elk nummer een minuut wachten
+          if (!failed) {
+            try {
+              mb = await lookup(t.title, t.artists, (query) => mbSearch(query, { signal }));
+              failures = 0;
+            } catch (err) {
+              if (signal.aborted) throw signal.reason;
+              failures++;
+              failed = true;
+            }
+          }
+          const d = decide({ title: t.title, spotifyYear }, mb);
+          const entry = { y: d.year, s: d.source, d: d.doubts, r: REMIX_RULES };
+          if (failed) {
+            unreachable++;
+            entry.d = ['MusicBrainz was niet bereikbaar; jaar van het Spotify-album', ...entry.d];
+          } else {
+            // Alleen echte antwoorden onthouden en delen. Opnieuw lezen: de host
+            // kan intussen zelf een jaar verbeterd hebben (setYear).
+            const latest = storage.read(CACHE) || {};
+            if (latest[t.id]?.s !== MANUAL) {
+              latest[t.id] = entry;
+              storage.write(CACHE, latest);
+              share.push(shareable(t.id, entry));
+            }
+          }
+          rows.push(rowOf(t, entry));
+          if (shared && share.length >= SHARE_EVERY) sharedSave(code, token, share.splice(0));
+          data.dirty = true;
+          schedule(data);
+          const seconds = secondsPerLookup({ done: i + 1, elapsedMs: Date.now() - startedAt, fallback: SECONDS_PER_LOOKUP });
+          update((j) => ({ ...j, done: i + 1, ready: ready(), seconds }));
+          refresh(data);
+        }
+
+        // Alles opgezocht.
+        clearTimeout(data.timer);
+        data.timer = null;
+        storage.write(JOB, null);
+        data.finished = true;
+        data.note = unreachable
+          ? `MusicBrainz was niet bereikbaar voor ${unreachable} nummers; die kregen het jaar van het Spotify-album. Kies de playlist later opnieuw om ze alsnog op te zoeken.`
+          : '';
+        refresh(data);
         // Alleen als de server de gedeelde lijst kent (de opvraging lukte).
-        if (shared && share.length) await sharedSave(code, token, share);
-        await upload(
-          unreachable
-            ? `MusicBrainz was niet bereikbaar voor ${unreachable} nummers; die kregen het jaar van het Spotify-album. Kies de playlist later opnieuw om ze alsnog op te zoeken.`
-            : '',
-        );
-        storage.write(LAST, { id: playlist.id, name: playlist.name });
+        if (shared && share.length) await sharedSave(code, token, share.splice(0));
+        await sendDeck(data);
       } catch (err) {
-        if (!signal.aborted) setError(err?.message || 'Er liep iets mis bij het lezen van de playlist.');
+        const kind = signal.aborted ? signal.reason?.kind : null;
+        if (data) {
+          clearTimeout(data.timer);
+          data.timer = null;
+        }
+        if (kind !== 'leave') {
+          // Wat al opgezocht is, blijft geldig: delen met de server.
+          if (shared && share.length) sharedSave(code, token, share.splice(0));
+        }
+        if (kind === 'stop' && data) {
+          // De host stopt het opzoeken: wat al klaar is, blijft (als het genoeg is).
+          storage.write(JOB, null);
+          data.finished = true;
+          const left = data.size - data.rows.length;
+          data.note = `Opzoeken gestopt: ${left} nummers zijn niet opgezocht. Kies de playlist opnieuw om ze alsnog op te zoeken.`;
+          refresh(data);
+          sendDeck(data, { quiet: true }).catch(() => {});
+        } else if (!kind) {
+          storage.write(JOB, null);
+          if (mine()) setError(err?.message || 'Er liep iets mis bij het lezen van de playlist.');
+        }
       } finally {
-        setJob(null);
-        abort.current = null;
+        if (mine()) {
+          run.current = null;
+          setJob(null);
+        } else if (!run.current) {
+          setJob(null);
+        }
       }
     },
-    [code, token, upload],
+    [code, token, refresh, schedule, sendDeck],
   );
 
-  const cancel = useCallback(() => {
-    abort.current?.abort(new Error('gestopt'));
-  }, []);
+  /** Kiest een playlist: een opzoeking die nog loopt, stopt eerst. */
+  const choose = useCallback(
+    (playlist) => {
+      stopRun('replace');
+      storage.write(JOB, null);
+      if (current.current) clearTimeout(current.current.timer);
+      current.current = null;
+      return start({ id: playlist.id, name: playlist.name });
+    },
+    [start, stopRun],
+  );
+
+  /** Stop: niet verder opzoeken. Wat al klaar is, blijft. */
+  const cancel = useCallback(() => stopRun('stop'), [stopRun]);
+
+  // Na een herlaad: een opzoeking voor dit spel gaat verder. Een ander spel
+  // (de host maakte een nieuw): die oude opzoeking vervalt.
+  useEffect(() => {
+    if (!code || !token) return undefined;
+    const saved = storage.read(JOB);
+    if (saved && saved.code !== code) storage.write(JOB, null);
+    else if (saved && Array.isArray(saved.tracks) && !run.current) start(saved, { resume: true });
+    return () => {
+      stopRun('leave');
+      if (current.current) clearTimeout(current.current.timer);
+      current.current = null;
+      setResult(null);
+    };
+  }, [code, token]);
+
+  // Tussen twee spellen (wachtkamer, of na de laatste kaart) gaat wat er
+  // tijdens het spel bijkwam alsnog naar de server.
+  useEffect(() => {
+    phaseRef.current = phase;
+    const data = current.current;
+    if (data?.dirty && canSendDeck(phase)) sendDeck(data, { quiet: true }).catch(() => {});
+  }, [phase, sendDeck]);
+
+  /** Vlak voor de start: de lijst met alles wat er nu klaar is, staat zeker op de server. */
+  const flush = useCallback(async () => {
+    const data = current.current;
+    if (!data) return;
+    clearTimeout(data.timer);
+    data.timer = null;
+    try {
+      if (data.dirty) await sendDeck(data, { quiet: true });
+      else await sending.current;
+    } catch {
+      // Lukt het niet, dan start het spel met de lijst die de server al had.
+    }
+    if (run.current && !data.finished) schedule(data);
+  }, [sendDeck, schedule]);
 
   /**
    * De host verbetert zelf een jaartal; dat wordt onthouden, meteen
@@ -255,23 +454,33 @@ export function useDeck({ code, token }) {
       const cache = storage.read(CACHE) || {};
       cache[id] = { y, s: MANUAL, d: [] };
       storage.write(CACHE, cache);
+      refresh(data);
       // Faalt de server hier, dan gaat de verbetering mee bij een volgende keuze van de playlist.
       const sharing = sharedSave(code, token, [shareable(id, cache[id])]);
+      clearTimeout(data.timer);
+      data.timer = null;
       try {
-        await upload();
+        await sendDeck(data, { quiet: !data.finished });
       } catch (err) {
         setError(err.message);
       }
+      if (run.current && !data.finished) schedule(data);
       await sharing;
     },
-    [code, token, upload],
+    [code, token, refresh, schedule, sendDeck],
   );
 
+  /** Terug naar de standaardlijst: een opzoeking die nog loopt, stopt. */
   const reset = useCallback(() => {
+    stopRun('replace');
+    storage.write(JOB, null);
+    if (current.current) clearTimeout(current.current.timer);
+    current.current = null;
     setResult(null);
     setError('');
-  }, []);
+  }, [stopRun]);
 
+  const left = job?.phase === 'years' ? job.todo - job.done : 0;
   return {
     available,
     playlists,
@@ -280,11 +489,16 @@ export function useDeck({ code, token }) {
     result,
     error,
     last: storage.read(LAST),
-    /** Geschatte wachttijd in minuten voor de lopende opzoeking. */
-    minutes: job ? Math.max(1, Math.round((job.todo * SECONDS_PER_LOOKUP) / 60)) : 0,
+    /** Nog op te zoeken nummers en de geschatte tijd daarvoor in minuten. */
+    left,
+    minutes: job ? minutesLeft(left, job.seconds ?? SECONDS_PER_LOOKUP) : 0,
+    /** Kan de host starten? Zonder opzoeking altijd; tijdens een opzoeking zodra er genoeg nummers klaar zijn. */
+    canStart: !job || (job.phase === 'years' && job.ready >= MIN_DECK),
+    minDeck: MIN_DECK,
     loadPlaylists,
     choose,
     cancel,
+    flush,
     setYear,
     reset,
   };

@@ -478,6 +478,12 @@ h2 {
   color: var(--amber-ink);
 }
 
+.notice.ok {
+  background: var(--good-soft);
+  color: var(--ink);
+  border-left: 4px solid var(--good);
+}
+
 .notice.error {
   background: var(--bad-soft);
   color: var(--ink);

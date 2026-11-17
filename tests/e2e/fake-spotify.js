@@ -149,13 +149,15 @@ export function fakeIds() {
 
 /**
  * Nagebootste MusicBrainz. `answers`: titel -> { artist, date }; andere titels
- * vindt ze niet. Geeft { queries } terug om de verzoeken te tellen.
+ * vindt ze niet. Geeft { queries } terug om de verzoeken te tellen. Met
+ * `delay` (ms) antwoordt ze trager, om "nog bezig" te kunnen testen.
  */
-export async function fakeMusicBrainz(context, answers) {
-  const mb = { queries: [] };
+export async function fakeMusicBrainz(context, answers, { delay = 0 } = {}) {
+  const mb = { queries: [], delay };
   await context.route('https://musicbrainz.org/ws/2/recording**', async (route) => {
     const query = new URL(route.request().url()).searchParams.get('query');
     mb.queries.push(query);
+    if (mb.delay) await new Promise((resolve) => setTimeout(resolve, mb.delay));
     const title = query.match(/recording:"([^"]*)"/)?.[1];
     const hit = answers[title];
     const recordings = hit
@@ -169,7 +171,8 @@ export async function fakeMusicBrainz(context, answers) {
           },
         ]
       : [];
-    await route.fulfill({ headers: CORS, json: { count: recordings.length, recordings } });
+    // Na een herlaad of gestopte opzoeking is het verzoek er niet meer.
+    await route.fulfill({ headers: CORS, json: { count: recordings.length, recordings } }).catch(() => {});
   });
   return mb;
 }
