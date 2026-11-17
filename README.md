@@ -24,6 +24,9 @@ Spotify van de host.
    Lag de speler aan beurt juist, dan houdt hij de kaart.
    Lag hij fout, dan krijgt de eerste inzetter die juist lag de kaart op zijn eigen tijdlijn. Ingezette tokens zijn
    altijd op.
+9. Een kaart kopen: op je eigen beurt, voor je een plaats bevestigt, kan je 3 tokens betalen om de kaart van het
+   nummer dat speelt meteen juist op je tijdlijn te krijgen. Je laatste kaart (bij een doel van 10 je 10e, dus wanneer
+   je er al 9 hebt) kan je niet kopen: die moet je verdienen door juist te leggen.
 
 Details:
 
@@ -49,6 +52,10 @@ Details:
   (geen verbinding, of geen antwoord binnen enkele seconden), dan blijft je keuze staan en zegt het scherm dat je token
   nog niet ingezet is. Wordt er onthuld voor je bevestigde, dan zegt je scherm dat je token niet ingezet is en dat je
   het nog hebt (dat kan alleen nog na de noodknop van de host, of als je verbinding wegviel).
+- Kopen gaat in twee stappen (*Koop deze kaart voor 3 tokens* en dan bevestigen), zodat een verkeerde tik niets kost.
+  Na het kopen komt er geen tussenfase (niemand kan tegen een gekochte kaart inzetten), wel de gewone onthulling,
+  gemarkeerd als gekocht en met hoeveel tokens de koper nog heeft. Het raad-token kan daarbij nog gegeven worden. Met
+  minder dan 3 tokens zie je geen koopknop; ben je één kaart van het doel, dan zegt het scherm waarom kopen niet kan.
 - Kiezen voor de onthulling: *Onthul* blijft uitgeschakeld zolang er nog iemand moet kiezen, en elk scherm zegt op wie
   er gewacht wordt. Moeten kiezen doet elke andere speler die nu kán inzetten: hij heeft een token, zette deze beurt
   nog niet in, paste nog niet, en er is nog een vrije plaats. Wie geen token heeft, of wie geen vrije plaats meer vindt
@@ -88,7 +95,7 @@ gsm host  ──┘        │
 - **Acties.** Een gsm stuurt `{ t: 'hello', token }` om zich aan te melden en daarna een van deze acties: `start`,
   `settings`, `clearDeck`, `select`, `place`, `challenge` (met `index`: een token inzetten), `pass` (deze beurt geen
   token inzetten), `reveal` (einde van het inzetten, pas als iedereen koos; de host kan met `force: true` toch
-  onthullen), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
+  onthullen), `buy` (op je eigen beurt de kaart kopen voor 3 tokens), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
   `skipTrack`, `skipTurn`, `remove` en `lobby`. De server antwoordt met `{ t: 'state' }` of
   `{ t: 'error', code, message }`. Zie `server/src/room.js`.
 - **Spotify blijft bij de host.** De host logt in met Authorization Code + PKCE, volledig in de browser. Er is geen
@@ -378,7 +385,8 @@ Gedekt, automatisch:
   dat een aangetikte maar niet bevestigde plaats niets kost en dat het scherm dat zegt, dat de bevestigknop op een
   kleine gsm (390×600) in beeld en niet bedekt is, en wat je ziet als bevestigen mislukt (geen verbinding, of een
   verbinding die niets doorlaat). En dat *Onthul* uit blijft tot iedereen met een token koos (passen of inzetten), dat
-  wie wegvalt niets blokkeert maar na zijn terugkeer weer moet kiezen, en de noodknop van de host.
+  wie wegvalt niets blokkeert maar na zijn terugkeer weer moet kiezen, en de noodknop van de host. En een kaart kopen:
+  een derde token verdienen, kopen in twee stappen, wat iedereen dan ziet, en niet voor de laatste kaart.
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
 - Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag

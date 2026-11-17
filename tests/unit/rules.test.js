@@ -1274,3 +1274,131 @@ test('room: acties pass en reveal met wie verbonden is en de noodknop', async ()
   assert.equal(forced.phase, 'reveal');
   assert.equal(tokensOf(forced, 'p2'), 1);
 });
+
+// ---------- een kaart kopen met tokens ----------
+
+const C = rules.LIMITS.buyCost;
+
+test('kopen: kost 3 tokens, de kaart komt juist op je tijdlijn, zonder tussenfase', () => {
+  assert.equal(C, 3);
+  const short = betSetup({ tokens: { p1: C - 1, p2: 2 } });
+  assert.throws(() => rules.buyCard(short, 'p1'), (e) => e.code === 'NO_TOKEN' && /kost 3 tokens; je hebt er 2/.test(e.message));
+  assert.equal(tokensOf(short, 'p1'), C - 1);
+  assert.equal(short.phase, 'playing');
+
+  const state = betSetup({ cardYear: 1975, tokens: { p1: C + 1, p2: 2, p3: 1 } });
+  // Voor het kopen lekt niets van het antwoord.
+  for (const p of state.players) {
+    const json = JSON.stringify(rules.viewFor(state, p.id));
+    assert.ok(!json.includes('Geheime') && !json.includes('1975'), 'het antwoord lekt niet voor het kopen');
+  }
+  rules.selectSlot(state, 'p1', 3); // een voorlopige (foute) keuze telt niet
+  rules.buyCard(state, 'p1');
+  assert.equal(tokensOf(state, 'p1'), 1);
+  // Geen tussenfase, ook al hebben anderen tokens: meteen de onthulling.
+  assert.equal(state.phase, 'reveal');
+  assert.equal(state.turn, null);
+  assert.deepEqual(rules.findPlayer(state, 'p1').timeline.map((c) => c.year), [1970, 1975, 1980, 1990]);
+  assert.deepEqual(state.reveal, {
+    playerId: 'p1',
+    card: { id: 'geheim01', artist: 'Geheime Artiest', title: 'Geheime Titel', year: 1975 },
+    index: 1,
+    correct: true,
+    bought: true,
+  });
+  throwsCode(() => rules.placeBet(state, 'p2', 0), 'BAD_PHASE');
+  assert.equal(tokensOf(state, 'p2'), 2);
+  // Iedereen ziet dat de kaart gekocht is, en de tellers.
+  for (const p of state.players) {
+    const v = rules.viewFor(state, p.id);
+    assert.equal(v.reveal.bought, true);
+    assert.equal(v.reveal.correct, true);
+    assert.equal(v.reveal.cardTo, 'p1');
+    assert.deepEqual(v.reveal.bets, []);
+    assert.equal(v.reveal.card.title, 'Geheime Titel');
+    assert.equal(v.players.find((x) => x.id === 'p1').guessTokens, 1);
+  }
+  // Het raad-token kan nog gewoon gegeven worden, ook aan de koper.
+  rules.giveToken(state, 'p1', 'p2');
+  assert.equal(tokensOf(state, 'p2'), 3);
+  rules.giveToken(state, 'p0', 'p1');
+  assert.equal(tokensOf(state, 'p1'), 2);
+  assert.equal(tokensOf(state, 'p2'), 2);
+  // Daarna gewoon de volgende beurt.
+  rules.nextTurn(state, 'p1');
+  assert.equal(state.turn.playerId, 'p2');
+  // Een gewone onthulling is niet gekocht.
+  rules.placeCard(state, 'p2', 0);
+  passAll(state);
+  rules.revealTurn(state, 'p2');
+  assert.equal(rules.viewFor(state, 'p0').reveal.bought, false);
+});
+
+test('kopen: niet je laatste kaart (één voor het doel), ook bij een ander doel', () => {
+  // Doel 10: met 9 kaarten kan het niet meer, met 8 wel (dan heb je er 9).
+  const nine = betSetup({ years: [1951, 1952, 1953, 1954, 1955, 1956, 1957, 1958, 1959], cardYear: 1975, tokens: { p1: 5 } });
+  assert.equal(nine.settings.target, 10);
+  assert.throws(() => rules.buyCard(nine, 'p1'), (e) => e.code === 'LAST_CARD' && /10e/.test(e.message));
+  assert.equal(tokensOf(nine, 'p1'), 5);
+  assert.equal(nine.phase, 'playing');
+  // Juist leggen kan wel, en dan win je.
+  rules.placeCard(nine, 'p1', 9); // de anderen hebben geen tokens: meteen de onthulling
+  assert.equal(nine.phase, 'finished');
+
+  const eight = betSetup({ years: [1951, 1952, 1953, 1954, 1955, 1956, 1957, 1958], cardYear: 1975, tokens: { p1: 3 } });
+  rules.buyCard(eight, 'p1');
+  assert.equal(eight.phase, 'reveal', 'kopen doet niemand winnen');
+  assert.equal(rules.findPlayer(eight, 'p1').timeline.length, 9);
+  assert.deepEqual(eight.winnerIds, []);
+
+  // Doel 5: met 4 kaarten niet, met 3 wel.
+  const four = betSetup({ years: [1970, 1980, 1990, 2000], tokens: { p1: 3 }, target: 5 });
+  throwsCode(() => rules.buyCard(four, 'p1'), 'LAST_CARD');
+  const three = betSetup({ years: [1970, 1980, 1990], tokens: { p1: 3 }, target: 5 });
+  rules.buyCard(three, 'p1');
+  assert.equal(rules.findPlayer(three, 'p1').timeline.length, 4);
+  // De regel staat ook los op te vragen (voor het scherm).
+  assert.equal(rules.buyBlock(three, rules.findPlayer(three, 'p0')).code, 'NO_TOKEN');
+  assert.equal(rules.buyBlock(four, rules.findPlayer(four, 'p1')).code, 'LAST_CARD');
+});
+
+test('kopen: alleen op je eigen beurt en voor je bevestigt', () => {
+  const state = betSetup({ tokens: { p1: 3, p2: 3 } });
+  throwsCode(() => rules.buyCard(state, 'p2'), 'NOT_YOUR_TURN');
+  throwsCode(() => rules.buyCard(state, 'onbekend'), 'NOT_IN_ROOM');
+  rules.placeCard(state, 'p1', 2);
+  assert.equal(state.phase, 'challenge');
+  throwsCode(() => rules.buyCard(state, 'p1'), 'BAD_PHASE');
+  rules.passBet(state, 'p2');
+  rules.revealTurn(state, 'p1');
+  throwsCode(() => rules.buyCard(state, 'p1'), 'BAD_PHASE');
+  assert.equal(tokensOf(state, 'p1'), 3);
+  const lobby = newRoom();
+  throwsCode(() => rules.buyCard(lobby, 'p0'), 'BAD_PHASE');
+});
+
+test('kopen: bij gelijke jaartallen een geldige plaats', () => {
+  const state = betSetup({ years: [1970, 1980, 1980, 1990], cardYear: 1980, tokens: { p1: 3 } });
+  const before = rules.findPlayer(state, 'p1').timeline.slice();
+  rules.buyCard(state, 'p1');
+  assert.ok(rules.isCorrectPlacement(before, 1980, state.reveal.index), 'een juiste plaats');
+  const years = rules.findPlayer(state, 'p1').timeline.map((c) => c.year);
+  assert.deepEqual(years, [1970, 1980, 1980, 1980, 1990]);
+  // Een kaart ouder of nieuwer dan alles komt aan de rand.
+  const old = betSetup({ cardYear: 1950, tokens: { p1: 3 } });
+  rules.buyCard(old, 'p1');
+  assert.equal(old.reveal.index, 0);
+  const late = betSetup({ cardYear: 2020, tokens: { p1: 3 } });
+  rules.buyCard(late, 'p1');
+  assert.equal(late.reveal.index, 3);
+});
+
+test('room: actie buy', async () => {
+  const state = betSetup({ tokens: { p1: 3, p2: 2 } });
+  const opts = { loadTracks: async () => makeTracks(30), online: new Set(['p0', 'p1', 'p2', 'p3']) };
+  await assert.rejects(room.applyAction(state, 'p2', { t: 'buy' }, opts), (e) => e.code === 'NOT_YOUR_TURN');
+  await room.applyAction(state, 'p1', { t: 'buy' }, opts);
+  assert.equal(state.phase, 'reveal');
+  assert.equal(state.reveal.bought, true);
+  assert.equal(tokensOf(state, 'p1'), 0);
+});

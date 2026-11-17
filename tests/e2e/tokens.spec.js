@@ -784,3 +784,112 @@ test('kiezen: de host kan toch onthullen als iemand niet reageert, na een vraag 
   expect(dialogs, 'geen venster van de browser').toBe(0);
   for (const p of pages) await p.context().close();
 });
+
+// ---- Een kaart kopen met 3 tokens ----
+// Op je eigen beurt, voor je een plaats bevestigt. Niet je laatste kaart (één
+// voor het doel): die moet je verdienen door juist te leggen.
+
+/** Hanne (host) en Bob, gestart met doel `target`; geeft ook de eerste beurt van Bob. */
+async function duo(browser, target) {
+  const host = await openPhone(browser);
+  const code = await hostGame(host, 'Hanne');
+  await setupMusic(host);
+  const bob = await openPhone(browser);
+  await joinGame(bob, code, 'Bob');
+  const pages = [host, bob];
+  const ids = await Promise.all(pages.map(myId));
+  if (target) await setTarget(host, target);
+  await host.getByTestId('start-game').click();
+  for (const p of pages) await expect(p.getByTestId('turn-banner')).toBeVisible();
+  return { host, bob, pages, ids, hanne: ids[0], bobId: ids[1] };
+}
+
+/**
+ * Bob legt juist (Hanne past), daarna geeft de host hem het raad-token: zo
+ * heeft hij 3 tokens. Geeft het nieuwe aantal gestarte nummers terug.
+ */
+async function bobEarnsThird({ host, bob, pages, ids, bobId, hanne }, n) {
+  n = await skipUntil({ host, ids }, n, bobId);
+  const turn = await currentTurn({ pages, host, ids, n });
+  // Met 2 tokens is er geen koopknop en ook geen uitleg.
+  await expect(bob.getByTestId('buy-card')).toHaveCount(0);
+  await expect(bob.getByTestId('buy-blocked')).toHaveCount(0);
+  await place(pages, turn, rightSlot(turn.years, turn.year), { challenge: true });
+  await revealNow(pages, bob, turn.trackId);
+  await expect(bob.getByTestId('reveal')).toHaveAttribute('data-bought', 'no');
+  await tokenButton(host, bobId).click();
+  await expectTokens(pages, { [bobId]: START + 1, [hanne]: START });
+  await bob.getByTestId('next-turn').click();
+  return n + 1;
+}
+
+test('kaart kopen: een derde token verdienen en op je beurt de kaart kopen in twee stappen', async ({ browser }) => {
+  const phones = await duo(browser);
+  const { host, bob, pages, ids, hanne, bobId } = phones;
+  let n = await bobEarnsThird(phones, 1);
+
+  n = await skipUntil({ host, ids }, n, bobId);
+  const turn = await currentTurn({ pages, host, ids, n });
+  const cards = await cardCount(host, bobId);
+  // Alleen Bob, op zijn beurt, ziet de koopknop; Hanne niet.
+  await expect(host.getByTestId('buy-card')).toHaveCount(0);
+  const buy = bob.getByTestId('buy-card');
+  await expect(buy).toHaveText('Koop deze kaart voor 3 tokens');
+  await expect(buy).toBeInViewport();
+  // Eerste tik kost niets: eerst een vraag in de pagina. "Nee" laat alles zoals het was.
+  await buy.click();
+  await expect(bob.getByTestId('buy-box')).toContainText('Je betaalt 3 van je 3 tokens');
+  await bob.getByTestId('buy-cancel').click();
+  await expect(bob.getByTestId('buy-box')).toHaveCount(0);
+  await expectTokens(pages, { [bobId]: 3 });
+  for (const p of pages) await expect(p.getByTestId('turn-banner')).toBeVisible();
+  // Tot hier kent geen enkele gast het antwoord.
+  expect(leaked(bob, turn.trackId), 'antwoord lekte voor het kopen').toBe(false);
+
+  await buy.click();
+  await bob.getByTestId('buy-confirm').click();
+  // Geen tussenfase: meteen de onthulling, voor iedereen, gemarkeerd als gekocht.
+  for (const p of pages) {
+    const reveal = p.getByTestId('reveal');
+    await expect(reveal).toHaveAttribute('data-track', turn.trackId);
+    await expect(reveal).toHaveAttribute('data-bought', 'yes');
+    await expect(reveal).toContainText(String(turn.year));
+    await expect(reveal).toContainText(TRACKS.find((t) => t.id === turn.trackId).title);
+    await expect(p.getByTestId('challenge-banner')).toHaveCount(0);
+    expect(await cardCount(p, bobId)).toBe(cards + 1);
+  }
+  await expect(host.getByTestId('reveal')).toContainText('Bob kocht de kaart voor 3 tokens');
+  await expect(host.getByTestId('reveal-bought')).toHaveText('Bob heeft nog 0 tokens.');
+  await expect(bob.getByTestId('reveal')).toContainText('Je kocht de kaart voor 3 tokens');
+  await expect(bob.getByTestId('reveal-bought')).toHaveText('Je hebt nog 0 tokens.');
+  await expectTokens(pages, { [bobId]: 0, [hanne]: START });
+  // De kaart ligt juist op zijn tijdlijn.
+  const years = await bob
+    .getByTestId('active-timeline')
+    .locator('li.tl-card[data-year]')
+    .evaluateAll((els) => els.map((el) => Number(el.dataset.year)));
+  expect(years).toContain(turn.year);
+  expect(years).toEqual([...years].sort((a, b) => a - b));
+  expect((await plays(host)).length, 'het nummer start niet opnieuw').toBe(n);
+  // Het raad-token kan nog gegeven worden.
+  await tokenButton(host, hanne).click();
+  await expectTokens(pages, { [bobId]: 0, [hanne]: START + 1 });
+  await bob.getByTestId('next-turn').click();
+  await expect(host.getByTestId('turn-banner')).toBeVisible();
+  for (const p of pages) await p.context().close();
+});
+
+test('kaart kopen: je laatste kaart (één voor het doel) kan je niet kopen', async ({ browser }) => {
+  // Doel 3: na één juiste beurt heeft Bob 2 kaarten en 3 tokens.
+  const phones = await duo(browser, 3);
+  const { host, bob, pages, ids, bobId } = phones;
+  let n = await bobEarnsThird(phones, 1);
+  n = await skipUntil({ host, ids }, n, bobId);
+  await currentTurn({ pages, host, ids, n });
+  expect(await cardCount(host, bobId)).toBe(2);
+  await expect(bob.getByTestId('buy-card')).toHaveCount(0);
+  await expect(bob.getByTestId('buy-blocked')).toContainText('je laatste kaart (de 3e) moet je verdienen');
+  await expect(host.getByTestId('buy-blocked')).toHaveCount(0);
+  await expectTokens(pages, { [bobId]: 3 });
+  for (const p of pages) await p.context().close();
+});

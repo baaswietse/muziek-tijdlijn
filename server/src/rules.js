@@ -14,6 +14,8 @@ export const LIMITS = {
   maxDeckName: 60,
   // Tokens waarmee elke speler een spel begint (ook wie laat instapt).
   startTokens: 2,
+  // Zoveel tokens kost het om op je eigen beurt de kaart te kopen.
+  buyCost: 3,
 };
 
 /** Fout met een code voor de client en een Nederlandse boodschap voor de speler. */
@@ -72,7 +74,8 @@ export function createRoom({ code, now }) {
     // en passes: [playerId] (wie bevestigde deze beurt geen token in te zetten).
     turn: null, // { playerId, card, pendingIndex, number }
     turnCount: 0, // aantal beurten in het lopende spel
-    // Na ingezette tokens ook bets: [{ playerId, index, correct }] en cardTo.
+    // Na ingezette tokens ook bets: [{ playerId, index, correct }] en cardTo;
+    // na een gekochte kaart bought: true.
     reveal: null, // { playerId, card, index, correct, guessTokenTo? }
     winnerIds: [],
     game: 0,
@@ -280,6 +283,48 @@ export function placeCard(state, actorId, index) {
     return;
   }
   resolveTurn(state, index, []);
+}
+
+/**
+ * Kan `player` nu de kaart kopen? Geeft null als het mag, anders een fout
+ * (code en boodschap). De kaart die het doel haalt, koop je niet: die moet je
+ * verdienen door juist te leggen. Bij een doel van 10 kan je dus kopen tot en
+ * met je 9e kaart (met 8 kaarten), niet je 10e.
+ */
+export function buyBlock(state, player) {
+  const cost = LIMITS.buyCost;
+  const have = player.guessTokens ?? 0;
+  if (have < cost) return { code: 'NO_TOKEN', message: `Een kaart kopen kost ${cost} tokens; je hebt er ${have}.` };
+  const target = state.settings.target;
+  if (player.timeline.length >= target - 1) {
+    return {
+      code: 'LAST_CARD',
+      message: `Je laatste kaart (de ${target}e) kan je niet kopen: die moet je verdienen door juist te leggen.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * De speler aan beurt koopt de kaart van het nummer dat nu speelt, voor hij een
+ * plaats bevestigt. Ze komt meteen juist op zijn tijdlijn; er komt geen
+ * tussenfase (tegen een gekochte kaart kan niemand inzetten), wel de gewone
+ * onthulling, waarbij het raad-token nog gegeven kan worden.
+ */
+export function buyCard(state, actorId) {
+  requireActive(state, actorId);
+  const player = findPlayer(state, actorId);
+  const block = buyBlock(state, player);
+  if (block) fail(block.code, block.message);
+  const { card } = state.turn;
+  player.guessTokens -= LIMITS.buyCost;
+  const index = slotFor(player.timeline, card.year);
+  player.timeline.splice(index, 0, card);
+  state.reveal = { playerId: player.id, card, index, correct: true, bought: true };
+  state.turn = null;
+  state.phase = 'reveal';
+  // Kan niet: kopen gaat alleen tot één kaart voor het doel. Voor de zekerheid.
+  if (player.timeline.length >= state.settings.target) finish(state, [player.id]);
 }
 
 /** Waar `year` juist ligt in een gesorteerde tijdlijn (na gelijke jaren). */
@@ -591,6 +636,7 @@ export function viewFor(state, playerId, online = new Set()) {
           index: state.reveal.index,
           correct: state.reveal.correct,
           guessTokenTo: state.reveal.guessTokenTo ?? null,
+          bought: Boolean(state.reveal.bought),
           bets: (state.reveal.bets ?? []).map((b) => ({ ...b })),
           cardTo: state.reveal.cardTo !== undefined ? state.reveal.cardTo : state.reveal.correct ? state.reveal.playerId : null,
         }

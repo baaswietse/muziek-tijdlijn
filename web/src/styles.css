@@ -793,6 +793,15 @@ details ul {
   margin: 0 0 10px;
 }
 
+/* Kaart kopen: ondergeschikt aan gewoon leggen. */
+.buy-card {
+  align-self: flex-start;
+}
+
+.buy-box p {
+  margin: 0 0 10px;
+}
+
 .eq {
   display: flex;
   align-items: flex-end;

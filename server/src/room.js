@@ -73,6 +73,9 @@ export async function applyAction(state, playerId, msg, { loadTracks, online = n
     case 'place':
       rules.placeCard(state, playerId, Number(msg.index));
       break;
+    case 'buy':
+      rules.buyCard(state, playerId);
+      break;
     case 'next':
       rules.nextTurn(state, playerId);
       break;

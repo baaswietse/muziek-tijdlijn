@@ -137,6 +137,8 @@ export function Game({ view, send, music, deck, onLeave }) {
         </section>
       )}
 
+      {myTurn && !placing && <BuyCard key={turnKey} tokens={myTokens} cards={mine.timeline.length} target={target} send={send} />}
+
       {challenge && (
         <ChallengeBanner
           key={turnKey}
@@ -165,6 +167,7 @@ export function Game({ view, send, music, deck, onLeave }) {
           cardTo={reveal.cardTo ? (reveal.cardTo === me ? 'Jij krijgt' : `${byId.get(reveal.cardTo)?.name ?? 'Iemand'} krijgt`) : null}
           myBet={reveal.bets.find((b) => b.playerId === me)}
           myTokens={myTokens}
+          buyerTokens={byId.get(reveal.playerId)?.guessTokens ?? 0}
         />
       )}
 
@@ -295,6 +298,9 @@ export function Game({ view, send, music, deck, onLeave }) {
 // Zolang wacht je token op een antwoord van de server.
 const BET_TIMEOUT = 5000;
 
+// Zoveel tokens kost een kaart kopen (LIMITS.buyCost op de server).
+const BUY_COST = 3;
+
 const tokenText = (n) => `${n} ${n === 1 ? 'token' : 'tokens'}`;
 
 function Score({ n, target }) {
@@ -395,13 +401,61 @@ function ChallengeBanner({ view, send, onReveal, activeName, waitNames, canRevea
   );
 }
 
-function Reveal({ reveal, name, own, tokenName, cardTo, myBet, myTokens }) {
-  const { card, correct } = reveal;
-  return (
-    <section class={`reveal ${correct ? 'good' : 'bad'}`} data-testid="reveal" data-correct={correct ? 'yes' : 'no'} data-track={card.id}>
-      <p class="reveal-verdict">
-        {correct ? `Juist! ${name} houdt de kaart.` : `Fout. ${own ? 'Je bent' : `${name} is`} de kaart kwijt.`}
+/**
+ * Op je eigen beurt, voor je een plaats bevestigt: de kaart kopen voor
+ * BUY_COST tokens, in twee stappen zodat een verkeerde tik niets kost. Niet
+ * voor je laatste kaart (één voor het doel): die moet je verdienen.
+ */
+function BuyCard({ tokens, cards, target, send }) {
+  const [asking, setAsking] = useState(false);
+  if (tokens < BUY_COST) return null;
+  if (cards >= target - 1) {
+    return (
+      <p class="muted small buy-note" data-testid="buy-blocked">
+        Kopen kan niet: je laatste kaart (de {target}e) moet je verdienen door juist te leggen.
       </p>
+    );
+  }
+  if (!asking) {
+    return (
+      <button type="button" class="btn link buy-card" onClick={() => setAsking(true)} data-testid="buy-card">
+        Koop deze kaart voor {BUY_COST} tokens
+      </button>
+    );
+  }
+  return (
+    <div class="notice warn buy-box" data-testid="buy-box" role="alertdialog" aria-label="Kaart kopen?">
+      <p>
+        Je betaalt {BUY_COST} van je {tokens} tokens en de kaart komt meteen juist op je tijdlijn. Niemand kan er een token
+        tegen inzetten. Kopen?
+      </p>
+      <div class="row gap">
+        <button type="button" class="btn grow" onClick={() => send({ t: 'buy' })} data-testid="buy-confirm">
+          Ja, koop voor {BUY_COST} tokens
+        </button>
+        <button type="button" class="btn grow" onClick={() => setAsking(false)} data-testid="buy-cancel">
+          Nee
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Reveal({ reveal, name, own, tokenName, cardTo, myBet, myTokens, buyerTokens }) {
+  const { card, correct, bought } = reveal;
+  let verdict;
+  if (bought) verdict = `Gekocht! ${own ? 'Je kocht' : `${name} kocht`} de kaart voor ${BUY_COST} tokens.`;
+  else if (correct) verdict = `Juist! ${name} houdt de kaart.`;
+  else verdict = `Fout. ${own ? 'Je bent' : `${name} is`} de kaart kwijt.`;
+  return (
+    <section
+      class={`reveal ${correct ? 'good' : 'bad'}`}
+      data-testid="reveal"
+      data-correct={correct ? 'yes' : 'no'}
+      data-bought={bought ? 'yes' : 'no'}
+      data-track={card.id}
+    >
+      <p class="reveal-verdict">{verdict}</p>
       <p class="reveal-year">{card.year}</p>
       <p class="reveal-title">{card.title}</p>
       <p class="reveal-artist">{card.artist}</p>
@@ -414,6 +468,11 @@ function Reveal({ reveal, name, own, tokenName, cardTo, myBet, myTokens }) {
         </p>
       )}
       {reveal.bets.length > 0 && correct && <p class="reveal-token">De ingezette tokens zijn verloren.</p>}
+      {bought && (
+        <p class="reveal-token" data-testid="reveal-bought">
+          {own ? 'Je hebt' : `${name} heeft`} nog {tokenText(buyerTokens)}.
+        </p>
+      )}
       {myBet && (
         <p class="reveal-token" data-testid="reveal-my-bet" data-correct={myBet.correct ? 'yes' : 'no'}>
           Jouw token lag {myBet.correct ? 'juist' : 'fout'}. Een ingezet token ben je altijd kwijt: je hebt nog {tokenText(myTokens)}.
