@@ -4,6 +4,7 @@
 
 import * as rules from './rules.js';
 import { GameError } from './rules.js';
+import { normaliseTracks } from './tracks.js';
 
 // Geen I en O: die lijken te veel op 1 en 0.
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -53,10 +54,14 @@ export async function applyAction(state, playerId, msg, { loadTracks, random = s
     case 'start': {
       // Eerst controleren, dan pas de nummers ophalen.
       if (state.hostId !== playerId) throw new GameError('HOST_ONLY', 'Alleen de host kan dit doen.');
-      const tracks = await loadTracks();
+      // Een eigen lijst van de host gaat voor op de standaardlijst.
+      const tracks = state.custom ? state.custom.tracks : await loadTracks();
       rules.startGame(state, playerId, tracks, random);
       break;
     }
+    case 'clearDeck':
+      rules.clearDeck(state, playerId);
+      break;
     case 'settings':
       rules.setSettings(state, playerId, { target: msg.target });
       break;
@@ -84,6 +89,20 @@ export async function applyAction(state, playerId, msg, { loadTracks, random = s
     default:
       throw new GameError('UNKNOWN', 'Onbekende actie.');
   }
+  state.updatedAt = now;
+}
+
+/** Grootste toegelaten verzoek voor een eigen lijst (ruim voor 500 nummers). */
+export const MAX_DECK_BODY = 200_000;
+
+/**
+ * De host stuurt een eigen lijst met nummers door (apart verzoek, want te
+ * groot voor een gewoon bericht). Gooit een GameError bij een ongeldig verzoek.
+ */
+export function setDeck(state, body, now = Date.now()) {
+  const playerId = authenticate(state, body?.token);
+  if (!playerId) throw new GameError('BAD_TOKEN', 'Je zit niet (meer) in dit spel.');
+  rules.setDeck(state, playerId, { name: body.name, tracks: normaliseTracks(body.tracks) });
   state.updatedAt = now;
 }
 

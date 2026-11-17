@@ -2,9 +2,10 @@ import { useMemo } from 'preact/hooks';
 import { inviteUrl } from '../lib/session.js';
 import { qrPath } from '../lib/qr.js';
 import { MusicPanel } from '../components/MusicPanel.jsx';
+import { DeckPanel } from '../components/DeckPanel.jsx';
 import { Rules } from '../components/Rules.jsx';
 
-export function Lobby({ view, send, music, onLeave, notify }) {
+export function Lobby({ view, send, music, deck, onLeave, notify }) {
   const isHost = view.you === view.hostId;
   const url = inviteUrl(view.code);
   const qr = useMemo(() => qrPath(url), [url]);
@@ -65,6 +66,7 @@ export function Lobby({ view, send, music, onLeave, notify }) {
       {isHost ? (
         <>
           <MusicPanel music={music} />
+          <DeckPanel view={view} send={send} deck={deck} loggedIn={music.loggedIn} />
           <section class="card">
             <h2>Spel</h2>
             <div class="row between">
@@ -79,16 +81,27 @@ export function Lobby({ view, send, music, onLeave, notify }) {
                 </button>
               </span>
             </div>
-            <button class="btn primary big" disabled={!music.ready} onClick={() => send({ t: 'start' })} data-testid="start-game">
+            <button
+              class="btn primary big"
+              disabled={!music.ready || Boolean(deck.job)}
+              onClick={() => send({ t: 'start' })}
+              data-testid="start-game"
+            >
               Start het spel
             </button>
             {!music.ready && <p class="muted small center-text">Stel eerst de muziek in.</p>}
+            {music.ready && deck.job && <p class="muted small center-text">Even wachten tot de jaartallen opgezocht zijn.</p>}
           </section>
         </>
       ) : (
         <section class="card center-text">
           <p class="waiting" data-testid="waiting">Wachten tot de host het spel start…</p>
           <p class="muted small">Je speelt naar {target} kaarten.</p>
+          {view.playlist && (
+            <p class="muted small" data-testid="lobby-playlist">
+              Nummers: playlist «{view.playlist.name}» ({view.playlist.count})
+            </p>
+          )}
         </section>
       )}
 

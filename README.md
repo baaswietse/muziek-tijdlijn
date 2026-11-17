@@ -23,6 +23,7 @@ Details:
 - Later instappen kan: je krijgt een startkaart en sluit achteraan aan.
 - De host kan een ander nummer vragen (als er een niet afspeelt), een beurt overslaan en een speler verwijderen.
 - Een tweede spel in dezelfde kamer herhaalt geen nummers zolang er genoeg ongespeelde zijn.
+- De host kiest de nummers: de standaardlijst van het spel of een van zijn eigen Spotify-playlists.
 
 ## Hoe het in elkaar zit
 
@@ -51,6 +52,12 @@ gsm host  ──┘        │
   dus te vinden voor wie echt wil zoeken; dat kan niet anders zolang zijn gsm de muziek start.
 - **Spotify blijft bij de host.** De host logt in met Authorization Code + PKCE, volledig in de browser. Er is geen
   Client Secret, en de tokens gaan nooit naar de spelserver.
+- **Twee manieren om geluid te maken.** De site stuurt een Spotify-toestel aan (Spotify Connect): een gsm, laptop, tv
+  of box waarop Spotify actief is. Of ze speelt zelf af in de browser van de host («Dit toestel»), met de Web Playback
+  SDK van Spotify; dan is er geen Spotify-app nodig.
+- **Eigen playlist.** Kiest de host een eigen playlist, dan leest zijn browser de nummers bij Spotify, zoekt de
+  jaartallen op bij MusicBrainz en stuurt de lijst naar de server. Die lijst blijft op de server; de andere spelers
+  zien alleen de naam en het aantal nummers.
 
 ## Eenmalige opzet
 
@@ -70,9 +77,14 @@ Wat je moet weten over een Spotify-app in «development mode» (toestand novembe
   host logt in, dus dat is enkel van belang als iemand anders dan jij host is.
 - Afspelen sturen (`PUT /me/player/play`, scopes `user-modify-playback-state` en `user-read-playback-state`) werkt
   alleen met Premium.
-- Een playlist uitlezen (`GET /playlists/{id}/items`) lukt alleen voor playlists waarvan je eigenaar of medewerker bent.
-- Het Developer Policy van Spotify zegt dat je met hun platform geen spellen of quizzen mag bouwen. Voor een privéspel
-  onder vrienden is het risico dat Spotify de toegang van de app intrekt.
+- Een playlist uitlezen (`GET /playlists/{id}/items`, scopes `playlist-read-private` en `playlist-read-collaborative`)
+  lukt alleen voor playlists waarvan je eigenaar of medewerker bent.
+- Afspelen in de browser (Web Playback SDK) vraagt de scopes `streaming`, `user-read-email` en `user-read-private`.
+  Daarom vraagt Spotify bij het inloggen ook toegang tot je e-mailadres en je abonnement; het spel doet daar zelf niets
+  mee.
+- Het Developer Policy van Spotify zegt dat je met hun platform geen spellen of quizzen mag bouwen, en dat een app die
+  zelf afspeelt titel en hoes moet tonen. Dit spel doet bewust het omgekeerde. Voor een privéspel onder vrienden is
+  het risico dat Spotify de toegang van de app intrekt.
 
 ### 2. Spelserver
 
@@ -126,17 +138,35 @@ zelf aan te zetten. Lukt dat niet (GitHub laat dat niet altijd toe aan een workf
 
 ## Een spelavond
 
-1. **Host:** hang het toestel met Spotify aan de box, open de Spotify-app en speel even iets af. Zo wordt het toestel
-   zichtbaar voor Spotify.
-2. **Host:** open de site, kies *Nieuw spel*, log in bij Spotify, kies het toestel en tik op *Test het geluid*.
-3. **Spelers:** scan de QR-code of tik de code van 4 letters in.
-4. **Host:** start het spel. Elke beurt begint het nummer vanzelf.
+1. **Host:** open de site, kies *Nieuw spel* en log in bij Spotify.
+2. **Host:** kies waar het geluid vandaan komt:
+   - *Dit toestel*: het toestel waarop je de site open hebt speelt zelf, via zijn luidspreker of de box waaraan het
+     hangt. Er is geen Spotify-app nodig. Laat het scherm aan staan.
+   - Een ander toestel uit de lijst: een toestel waarop Spotify actief is. Staat het er niet bij, open er dan de
+     Spotify-app, speel even iets af en kom terug.
+3. **Host:** tik op *Test het geluid*, en kies eventueel een eigen playlist (zie hieronder).
+4. **Spelers:** scan de QR-code of tik de code van 4 letters in.
+5. **Host:** start het spel. Elke beurt begint het nummer vanzelf.
+
+### Spelen met een eigen playlist
+
+In de wachtkamer kiest de host onder *Nummers* een van zijn Spotify-playlists. Spotify toont alleen playlists die hij
+zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van de eerste release op bij MusicBrainz.
+
+- Dat opzoeken duurt de eerste keer ongeveer 3 seconden per nummer (MusicBrainz laat 1 verzoek per seconde toe). Alles
+  wat opgezocht is, onthoudt de browser van de host; een tweede keer gaat het meteen.
+- Nummers uit de standaardlijst van het spel zijn al nagekeken en worden niet opnieuw opgezocht.
+- Na afloop toont het spel de jaartallen waar Spotify en MusicBrainz het oneens zijn. De host kan ze daar verbeteren;
+  ook dat wordt onthouden. Die lijst verklapt wel antwoorden.
+- Een lijst telt minstens 10 en hoogstens 500 nummers. Dubbels en nummers zonder jaartal doen niet mee.
 
 ### De titel geheim houden voor de host
 
 De Spotify-app op het toestel van de host toont titel en hoes in de melding, op het vergrendelscherm en in de app zelf.
 Een box of auto met een schermpje kan de titel ook tonen.
 
+- Speel je met *Dit toestel*, dan toont het toestel geen titel: de speler in de browser zet niets in de
+  mediabediening.
 - Het spel houdt het scherm wakker, zodat het vergrendelscherm niet verschijnt zolang de pagina open staat.
 - Trek de meldingenbalk niet open en open de Spotify-app niet tijdens een beurt.
 - Android: zet *Instellingen → Geluid → Media → Media op vergrendelscherm tonen* uit (de naam verschilt per merk).
@@ -147,7 +177,8 @@ Een box of auto met een schermpje kan de titel ook tonen.
 
 | Probleem | Oplossing |
 | --- | --- |
-| Geen toestel in de lijst | Open de Spotify-app op dat toestel, speel even iets af en tik op *Zoek opnieuw*. |
+| Toestel niet in de lijst | Open de Spotify-app op dat toestel, speel even iets af en kom terug. Of kies *Dit toestel*. |
+| *Dit toestel* geeft geen geluid | Tik op *Opnieuw afspelen*. Na het herladen van de pagina eerst opnieuw op *Dit toestel* tikken. |
 | «Spotify vindt het toestel niet» | Hetzelfde; tik daarna op *Opnieuw afspelen*. |
 | «Spotify weigert dit commando» | Geen Premium, of het account staat niet bij *User Management* van de app. |
 | Een nummer speelt niet af | *Ander nummer* (host): dezelfde speler krijgt een nieuw nummer. |
@@ -155,6 +186,9 @@ Een box of auto met een schermpje kan de titel ook tonen.
 | Scherm was vergrendeld | Niets doen: de gsm herverbindt vanzelf. |
 
 ## Nummers en jaartallen bijwerken
+
+Dit gaat over de standaardlijst van het spel, de lijst waarmee iedereen kan spelen zonder iets te kiezen. Voor een
+eigen playlist is het script niet nodig: zie *Spelen met een eigen playlist*.
 
 `web/public/tracks.json` bevat per nummer: Spotify track-ID, artiest, titel, jaar en de bron van dat jaar
 (`musicbrainz`, `spotify` of `handmatig`). Het script `tools/tracks.py` maakt dat bestand.
@@ -237,9 +271,13 @@ Gedekt, automatisch:
 - De Spotify-laag van de site tegen een nagebootste Spotify op netwerkniveau: inloggen met PKCE (zonder Client
   Secret), een toestel kiezen, het juiste nummer op het juiste toestel starten, een verlopen token vernieuwen en
   foutmeldingen bij een verdwenen toestel of een account zonder Premium.
+- Afspelen op *Dit toestel* tegen een nagebootste Spotify-speler, en een eigen playlist tegen een nagebootste
+  MusicBrainz: nummers lezen, jaartallen kiezen, twijfelgevallen verbeteren en ermee spelen.
+- De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script).
 - Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.
 
 Niet gedekt, alleen in het echt te testen:
 
 - Inloggen bij de echte Spotify en het echte afspelen op een toestel.
+- De echte Spotify-speler in de browser (*Dit toestel*), zeker op een gsm.
 - Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.

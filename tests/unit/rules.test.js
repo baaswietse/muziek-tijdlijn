@@ -309,6 +309,64 @@ test('viewFor verbergt het antwoord voor iedereen behalve het track-ID voor de h
   }
 });
 
+test('eigen lijst van de host: alleen host, tussen spellen, met grenzen', () => {
+  const state = newRoom();
+  const deck = makeTracks(40, 1980);
+  throwsCode(() => rules.setDeck(state, 'p1', { name: 'X', tracks: deck }), 'HOST_ONLY');
+  throwsCode(() => rules.setDeck(state, 'p0', { name: 'X', tracks: makeTracks(3) }), 'DECK_TOO_SMALL');
+  throwsCode(() => rules.setDeck(state, 'p0', { name: 'X', tracks: makeTracks(501) }), 'DECK_TOO_LARGE');
+  throwsCode(() => rules.setDeck(state, 'p0', { name: 'X', tracks: 'rommel' }), 'DECK_TOO_SMALL');
+  rules.setDeck(state, 'p0', { name: '  Mijn   playlist  ', tracks: deck });
+  assert.equal(state.custom.name, 'Mijn playlist');
+  assert.equal(state.custom.tracks.length, 40);
+  // Spelers zien alleen naam en aantal, niet de nummers.
+  const v = rules.viewFor(state, 'p1');
+  assert.deepEqual(v.playlist, { name: 'Mijn playlist', count: 40 });
+  assert.ok(!JSON.stringify(v).includes(deck[0].title));
+  rules.startGame(state, 'p0', state.custom.tracks, seeded(3));
+  throwsCode(() => rules.setDeck(state, 'p0', { name: 'X', tracks: deck }), 'BAD_PHASE');
+  throwsCode(() => rules.clearDeck(state, 'p0'), 'BAD_PHASE');
+  rules.backToLobby(state, 'p0');
+  throwsCode(() => rules.clearDeck(state, 'p1'), 'HOST_ONLY');
+  rules.clearDeck(state, 'p0');
+  assert.equal(state.custom, null);
+  assert.equal(rules.viewFor(state, 'p0').playlist, null);
+});
+
+test('room: een eigen lijst gaat voor op de standaardlijst en vraagt het token van de host', async () => {
+  const state = room.createRoomState('ABCD', 0);
+  const host = room.join(state, 'Host');
+  const guest = room.join(state, 'Gast');
+  const own = makeTracks(30, 2000).map((t) => ({ ...t, id: `eigen${t.id}`, extra: 'weg', source: 'musicbrainz' }));
+  assert.throws(() => room.setDeck(state, { token: 'fout-token-123', name: 'X', tracks: own }), (e) => e.code === 'BAD_TOKEN');
+  assert.throws(() => room.setDeck(state, { token: guest.token, name: 'X', tracks: own }), (e) => e.code === 'HOST_ONLY');
+  // Ongeldige nummers vallen weg; blijven er te weinig over, dan wordt de lijst geweigerd.
+  assert.throws(
+    () => room.setDeck(state, { token: host.token, name: 'X', tracks: own.map((t) => ({ ...t, year: 'geen' })) }),
+    (e) => e.code === 'DECK_TOO_SMALL',
+  );
+  room.setDeck(state, { token: host.token, name: 'Rock', tracks: own });
+  assert.deepEqual(Object.keys(state.custom.tracks[0]).sort(), ['artist', 'id', 'title', 'year']);
+
+  let loads = 0;
+  const loadTracks = async () => {
+    loads++;
+    return makeTracks(30);
+  };
+  await room.applyAction(state, host.playerId, { t: 'start' }, { loadTracks });
+  assert.equal(loads, 0, 'de standaardlijst wordt niet opgehaald');
+  const ids = [...state.players.flatMap((p) => p.timeline), state.turn.card, ...state.deck].map((c) => c.id);
+  assert.ok(ids.every((id) => id.startsWith('eigen')));
+  assert.equal(ids.length, 30);
+
+  // Terug naar de standaardlijst.
+  await room.applyAction(state, host.playerId, { t: 'lobby' }, { loadTracks });
+  await room.applyAction(state, host.playerId, { t: 'clearDeck' }, { loadTracks });
+  await room.applyAction(state, host.playerId, { t: 'start' }, { loadTracks });
+  assert.equal(loads, 1);
+  assert.ok(!state.turn.card.id.startsWith('eigen'));
+});
+
 test('room: join, authenticate en applyAction', async () => {
   const state = room.createRoomState('ABCD', 0);
   const host = room.join(state, 'Host');
