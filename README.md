@@ -82,6 +82,19 @@ gsm host  ──┘        │
 - **Eigen playlist.** Kiest de host een eigen playlist, dan leest zijn browser de nummers bij Spotify, zoekt de
   jaartallen op bij MusicBrainz en stuurt de lijst naar de server. Die lijst blijft op de server; de andere spelers
   zien alleen de naam en het aantal nummers.
+- **Gedeelde jaartallen.** Wat een host opzocht, bewaart de server in één gedeelde lijst voor alle spellen: per
+  Spotify-track-ID het jaar, de bron (`musicbrainz`, `spotify`, `onbekend` of `handmatig`), eventuele twijfels en de
+  regelversie voor remixes. Geen titels, geen namen, geen persoonsgegevens. Alleen de host van een bestaand spel kan
+  erin lezen of schrijven (met de geheime sleutel van zijn plaats in dat spel); gasten niet, want de lijst verklapt
+  antwoorden. Een handmatige verbetering gaat voor op een opgezocht jaar en wordt daar nooit door overschreven; een
+  nieuwere verbetering vervangt een oudere. Op Cloudflare staat de lijst in een tweede Durable Object (`YearStore`,
+  één exemplaar, SQLite); de Node-server houdt ze in het geheugen en in `DATA_FILE` als dat ingesteld is.
+- **Routes.** `POST /api/rooms` (spel maken), `POST /api/rooms/:code/join`, `POST /api/rooms/:code/deck` (eigen
+  lijst van de host), de WebSocket `/api/rooms/:code/ws`, en voor de gedeelde jaartallen
+  `POST /api/rooms/:code/years/lookup` met `{ token, ids }` (hoogstens 500 track-ID's; antwoord `{ years: { id: { y,
+  s, d, r } } }` met alleen wat gekend is) en `POST /api/rooms/:code/years` met `{ token, entries: [{ id, y, s, d, r
+  }] }` (hoogstens 500; antwoord `{ ok, saved, skipped }`). Ongeldige items worden overgeslagen; zie
+  `server/src/yearlist.js`.
 
 ## Eenmalige opzet
 
@@ -134,6 +147,8 @@ Vanaf dan rolt Cloudflare de server opnieuw uit bij elke push naar `main`. Lieve
 
 Het gratis plan volstaat ruim: wie over een daglimiet gaat, krijgt fouten tot middernacht (UTC), geen factuur. De server
 bewaart elk spel, dus een spel overleeft ook een herstart. Kamers die een halve dag stil liggen, ruimt hij zelf op.
+De gedeelde lijst met jaartallen blijft wel staan. Ook die maakt `wrangler deploy` zelf aan (de migratie `v2` in
+`wrangler.jsonc`); in het dashboard hoeft daarvoor niets.
 
 **B. Eigen server (alternatief)**
 
@@ -152,7 +167,8 @@ forwarding is af te raden. Zet het HTTPS-adres van de tunnel in `web/src/config.
 Het Dockerfile is niet getest. Zonder Docker kan het ook, en die weg is wel getest: `npm ci --omit=dev` en daarna
 `npm run server` (Node.js 20 of nieuwer; instellingen via omgevingsvariabelen, zie bovenaan `server/node/server.js`).
 
-De server bevat geen geheimen: geen wachtwoorden en geen Spotify-tokens, alleen namen en tijdlijnen.
+De server bevat geen geheimen: geen wachtwoorden en geen Spotify-tokens, alleen namen en tijdlijnen, en de gedeelde
+lijst met jaartallen (track-ID, jaar, bron, twijfels).
 
 ### 3. GitHub Pages
 
@@ -199,13 +215,18 @@ In de wachtkamer kiest de host onder *Nummers* een van zijn Spotify-playlists. S
 zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van de eerste release op bij MusicBrainz.
 
 - Dat opzoeken duurt de eerste keer ongeveer 3 seconden per nummer (MusicBrainz laat 1 verzoek per seconde toe). Alles
-  wat opgezocht is, onthoudt de browser van de host; een tweede keer gaat het meteen.
+  wat opgezocht is, onthoudt de browser van de host en gaat ook naar de gedeelde lijst op de server. Een tweede keer
+  gaat het meteen, ook op een ander toestel, in een andere browser of bij een andere host. Op de server staan alleen
+  track-ID, jaar, bron en twijfels; alleen een host van een lopend spel kan ze lezen of aanvullen.
+- Is de server even niet bereikbaar of kent hij de gedeelde lijst nog niet, dan gaat alles zoals voordien, met wat
+  de browser onthield en MusicBrainz.
 - Nummers uit de standaardlijst van het spel zijn al nagekeken en worden niet opnieuw opgezocht.
 - Een remix krijgt het jaar van de remix, niet dat van het origineel: de spelers horen de remix. Dat zie je aan de
   titel ("- X Remix", "(X Remix)", ook "Rework", "Bootleg", "Mashup" en "Refix"). "Radio Edit", "Extended Mix" of
   "Remastered" tellen als het origineel. Kent MusicBrainz de remix niet, dan geldt het jaar van het Spotify-album.
 - Na afloop toont het spel de jaartallen waar Spotify en MusicBrainz het oneens zijn. De host kan ze daar verbeteren;
-  ook dat wordt onthouden. Die lijst verklapt wel antwoorden.
+  ook dat wordt onthouden en gedeeld, apart gemarkeerd als handmatig, zodat het ook voor andere hosts geldt. Die lijst
+  verklapt wel antwoorden.
 - Een lijst telt minstens 10 en hoogstens 500 nummers. Dubbels en nummers zonder jaartal doen niet mee.
 
 ### De titel geheim houden voor de host
@@ -328,6 +349,10 @@ Gedekt, automatisch:
   foutmeldingen bij een verdwenen toestel of een account zonder Premium.
 - Afspelen op *Dit toestel* tegen een nagebootste Spotify-speler, en een eigen playlist tegen een nagebootste
   MusicBrainz: nummers lezen, jaartallen kiezen, twijfelgevallen verbeteren en ermee spelen.
+- De gedeelde jaartallen: een tweede host (ander toestel, ander spel) doet geen enkel verzoek naar MusicBrainz en krijgt
+  de verbeteringen van de eerste; gasten en onbestaande spellen worden geweigerd; zonder die routes op de server (een
+  oudere server, of onbereikbaar) werkt een playlist zoals vroeger. De verzonnen nummers krijgen bij elke run nieuwe
+  ID's, zodat ook `npm run test:live` herhaalbaar is; zo'n run laat 8 rijen achter in de echte gedeelde lijst.
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script).
 - Installeren als app: het manifest, de iconen (bestaan, PNG, juiste afmetingen), de meta's voor iOS, en dat Chromium
   de site installeerbaar vindt. De iconen maak je opnieuw met `node tools/iconen.mjs`.

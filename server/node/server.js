@@ -8,7 +8,8 @@
 //   TRACKS_URL       waar tracks.json staat (de GitHub Pages-site)
 //   TRACKS_FILE      of: pad naar een lokale tracks.json (voorrang op TRACKS_URL)
 //   ALLOWED_ORIGINS  komma-gescheiden lijst van toegelaten sites, of * (standaard)
-//   DATA_FILE        optioneel: bestand om lopende spellen in te bewaren
+//   DATA_FILE        optioneel: bestand om lopende spellen en de gedeelde lijst
+//                    met jaartallen in te bewaren
 
 import http from 'node:http';
 import { readFile, writeFile, rename } from 'node:fs/promises';
@@ -17,6 +18,7 @@ import { WebSocketServer } from 'ws';
 import * as room from '../src/room.js';
 import { GameError } from '../src/rules.js';
 import { normaliseTracks } from '../src/tracks.js';
+import * as yearlist from '../src/yearlist.js';
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -34,6 +36,9 @@ const MAX_BODY = 2048;
 
 /** code -> { state, sockets:Set<WebSocket> } */
 const rooms = new Map();
+
+/** De gedeelde lijst met jaartallen (zie ../src/yearlist.js): id -> { id, y, s, d, r? } */
+const years = new Map();
 
 // ---------- nummers ----------
 
@@ -65,7 +70,7 @@ function scheduleSave() {
   saveTimer = setTimeout(async () => {
     saveTimer = null;
     try {
-      const data = JSON.stringify([...rooms.values()].map((r) => r.state));
+      const data = JSON.stringify({ rooms: [...rooms.values()].map((r) => r.state), years: [...years.values()] });
       await writeFile(DATA_FILE + '.tmp', data);
       await rename(DATA_FILE + '.tmp', DATA_FILE);
     } catch (err) {
@@ -77,10 +82,17 @@ function scheduleSave() {
 function loadSaved() {
   if (!DATA_FILE || !existsSync(DATA_FILE)) return;
   try {
-    for (const state of JSON.parse(readFileSync(DATA_FILE, 'utf8'))) {
+    const data = JSON.parse(readFileSync(DATA_FILE, 'utf8'));
+    // Oudere bestanden zijn alleen een lijst met spellen.
+    const saved = Array.isArray(data) ? data : data?.rooms || [];
+    for (const state of saved) {
       if (state?.code) rooms.set(state.code, { state, sockets: new Set() });
     }
-    console.log(`${rooms.size} spel(len) hersteld uit ${DATA_FILE}`);
+    for (const raw of Array.isArray(data?.years) ? data.years : []) {
+      const entry = yearlist.normaliseEntry(raw);
+      if (entry) years.set(entry.id, entry);
+    }
+    console.log(`${rooms.size} spel(len) en ${years.size} jaartallen hersteld uit ${DATA_FILE}`);
   } catch (err) {
     console.error('herstellen mislukt:', err.message);
   }
@@ -200,6 +212,25 @@ const server = http.createServer(async (req, res) => {
       room.setDeck(r.state, body);
       broadcast(r);
       return sendJson(req, res, 200, { ok: true, count: r.state.custom.tracks.length });
+    }
+    const y = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/years(\/lookup)?$/);
+    if (req.method === 'POST' && y) {
+      // De gedeelde lijst met jaartallen: lezen (/years/lookup) of aanvullen
+      // (/years). Alleen voor de host van een bestaand spel.
+      const body = await readJson(req, yearlist.MAX_YEARS_BODY);
+      room.authenticateHost(getRoom(y[1]).state, body.token);
+      if (y[2]) {
+        const found = {};
+        for (const id of yearlist.parseLookup(body).ids) {
+          if (years.has(id)) found[id] = yearlist.publicEntry(years.get(id));
+        }
+        return sendJson(req, res, 200, { years: found });
+      }
+      const { entries, skipped } = yearlist.parseEntries(body);
+      const changed = yearlist.mergeEntries(years, entries, yearlist.MAX_ROWS - years.size);
+      for (const e of changed) years.set(e.id, e);
+      if (changed.length) scheduleSave();
+      return sendJson(req, res, 200, { ok: true, saved: changed.length, skipped: skipped + entries.length - changed.length });
     }
     return sendJson(req, res, 404, { error: 'NOT_FOUND', message: 'Niet gevonden.' });
   } catch (err) {
