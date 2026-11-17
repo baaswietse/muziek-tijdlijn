@@ -287,7 +287,7 @@ function onConnection(ws, code) {
     }
     if (!ws.playerId) return;
     try {
-      await room.applyAction(r.state, ws.playerId, msg, { loadTracks });
+      await room.applyAction(r.state, ws.playerId, msg, { loadTracks, online: onlineSet(r) });
       // Een verwijderde speler krijgt nog één melding en wordt dan afgesloten.
       for (const other of r.sockets) {
         if (other.playerId && !r.state.players.some((p) => p.id === other.playerId)) {

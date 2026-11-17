@@ -471,13 +471,21 @@ export function useDeck({ code, token, phase }) {
   );
 
   /** Terug naar de standaardlijst: een opzoeking die nog loopt, stopt. */
-  const reset = useCallback(() => {
+  // Geeft een promise: pas als die klaar is (en true geeft), mag de standaardlijst gevraagd
+  // worden. Een upload van de playlist die al onderweg is (bv. na een
+  // verbetering), kan niet meer terug; kwam die na het wissen aan, dan stond
+  // de playlist weer op de server. Uploads die nog wachten, slaan zichzelf over
+  // (current is dan leeg).
+  const reset = useCallback(async () => {
     stopRun('replace');
     storage.write(JOB, null);
     if (current.current) clearTimeout(current.current.timer);
     current.current = null;
     setResult(null);
     setError('');
+    await sending.current.catch(() => {});
+    // Koos de host intussen al een (andere) playlist, dan geldt die.
+    return !current.current && !run.current;
   }, [stopRun]);
 
   const left = job?.phase === 'years' ? job.todo - job.done : 0;

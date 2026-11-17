@@ -173,8 +173,9 @@ code {
   flex: 1;
 }
 
-.page.has-bar {
-  padding-bottom: calc(110px + env(safe-area-inset-bottom));
+/* Met een zwevende balk onderaan: de laatste inhoud is erboven uit te scrollen. */
+.page.game {
+  padding-bottom: calc(var(--bar-h, 0px) + 32px + env(safe-area-inset-bottom));
 }
 
 .card {
@@ -507,6 +508,11 @@ h2 {
   animation: rise 0.2s ease-out;
 }
 
+/* Een melding verschijnt boven de zwevende balk, nooit over de knop. */
+html.has-bar .toast {
+  bottom: calc(var(--bar-h, 0px) + 10px);
+}
+
 @keyframes rise {
   from {
     transform: translateY(12px);
@@ -764,8 +770,33 @@ details ul {
   border: 2px dashed var(--amber);
 }
 
-.challenge-reveal {
-  margin-top: 12px;
+.challenge-wait {
+  margin-top: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* Noodknop van de host: bewust ondergeschikt aan Onthul. */
+.challenge-force {
+  margin-top: 6px;
+  font-size: 0.9rem;
+}
+
+.challenge-force-box {
+  margin-top: 10px;
+}
+
+.challenge-force-box p {
+  margin: 0 0 10px;
+}
+
+/* Kaart kopen: ondergeschikt aan gewoon leggen. */
+.buy-card {
+  align-self: flex-start;
+}
+
+.buy-box p {
+  margin: 0 0 10px;
 }
 
 .eq {
@@ -1030,6 +1061,14 @@ details ul {
   max-width: 528px;
   margin: 0 auto;
   display: block;
+}
+
+.bar-note {
+  max-width: 528px;
+  margin: 0 auto 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
 }
 
 /* onthulling */

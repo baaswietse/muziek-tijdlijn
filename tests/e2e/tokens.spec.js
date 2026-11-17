@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { openPhone, hostGame, setupMusic, joinGame, setTarget, myId, YEAR, TRACKS } from './helpers.js';
+import { openPhone, hostGame, setupMusic, joinGame, setTarget, myId, passWaiting, YEAR, TRACKS } from './helpers.js';
 
 // Tokens: iedereen begint een spel met 2 tokens; wie artiest en nummer als
 // eerste juist raadt (hardop aan tafel), krijgt na de onthulling een token
@@ -95,8 +95,8 @@ async function place(pages, turn, slot, { challenge }) {
       await expect(p.getByTestId('active-timeline').getByTestId('placed-card')).toBeVisible();
       await expect(p.getByTestId('reveal')).toHaveCount(0);
     }
-    // De speler aan beurt ziet meteen dat hij moet onthullen.
-    await expect(turn.active.getByTestId('challenge-banner')).toContainText('Tik op Onthul');
+    // De speler aan beurt ziet meteen de knop om te onthullen, en wanneer dat kan.
+    await expect(turn.active.getByTestId('challenge-banner')).toContainText(/Onthullen kan zodra iedereen koos|Tik op Onthul/);
     await expect(turn.active.getByTestId('reveal-now')).toBeVisible();
   } else {
     for (const p of pages) {
@@ -106,8 +106,12 @@ async function place(pages, turn, slot, { challenge }) {
   }
 }
 
-/** Einde van de tussenfase: `page` tikt op Onthul en iedereen ziet de kaart. */
+/**
+ * Einde van de tussenfase: wie nog moet kiezen, zet geen token in; daarna tikt
+ * `page` op Onthul en iedereen ziet de kaart.
+ */
 async function revealNow(pages, page, trackId) {
+  await passWaiting(pages, page);
   await page.getByTestId('reveal-now').click();
   for (const p of pages) await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', trackId);
 }
@@ -515,8 +519,20 @@ test('token inzetten: aangetikt is nog niet ingezet, de knop staat bij de plaats
   await expectTokens(pages, counts);
   await expect(host.getByTestId('my-tokens')).toHaveText('2 tokens');
 
-  // Bob onthult voor Hanne bevestigt: haar token is niet ingezet en dat zegt haar scherm.
-  await revealNow(pages, bob, turn.trackId);
+  // Bob kan niet onthullen zolang Hanne niet koos; zijn scherm zegt op wie hij wacht.
+  await expect(bob.getByTestId('reveal-now')).toBeDisabled();
+  await expect(bob.getByTestId('waiting-for')).toHaveText('Nog wachten op Hanne.');
+  await expect(bob.getByTestId('force-reveal')).toHaveCount(0);
+  // Hanne (host) onthult toch met de noodknop voor ze bevestigde: eerst een
+  // vraag in de pagina, dan zegt haar scherm dat haar token niet ingezet is.
+  let dialogs = 0;
+  host.on('dialog', () => dialogs++);
+  await host.getByTestId('force-reveal').click();
+  await expect(host.getByTestId('force-reveal-box')).toContainText('Nog niet gekozen: jou');
+  await expect(host.getByTestId('force-reveal-box')).toContainText('Je eigen token is nog niet ingezet');
+  await host.getByTestId('force-reveal-confirm').click();
+  for (const p of pages) await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', turn.trackId);
+  expect(dialogs, 'geen venster van de browser').toBe(0);
   await expect(host.getByTestId('bet-missed')).toContainText('niet ingezet');
   await expect(host.getByTestId('bet-missed')).toContainText('Je hebt nog 2 tokens');
   await expect(host.getByTestId('bet-missed')).toHaveAttribute('data-reason', 'picked');
@@ -614,13 +630,274 @@ test('token inzetten: komt de bevestiging niet aan, dan zegt het scherm dat en i
   await expect(host.getByTestId('bet-pick')).toContainText('Nog niet ingezet');
   await expectTokens(pages, counts);
 
-  // De host onthult zelf terwijl zijn keuze nog openstaat: eerst een vraag.
-  const asked = new Promise((resolve) => host.once('dialog', (d) => resolve(d.message())));
-  await host.getByTestId('reveal-now').click();
-  expect(await asked).toContain('nog niet ingezet');
+  // Hanne koos dus nog niet: gewoon onthullen kan niet (haar balk toont eerst
+  // haar eigen keuze). Met de noodknop van de host terwijl haar keuze nog
+  // openstaat: eerst een vraag in de pagina.
+  await expect(host.getByTestId('reveal-now')).toHaveCount(0);
+  await expect(host.getByTestId('pass-bet')).toBeVisible();
+  let dialogs = 0;
+  host.on('dialog', () => dialogs++);
+  await host.getByTestId('force-reveal').click();
+  await expect(host.getByTestId('force-reveal-box')).toContainText('nog niet ingezet');
+  await host.getByTestId('force-reveal-confirm').click();
   for (const p of pages) await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', turn.trackId);
+  expect(dialogs, 'geen venster van de browser').toBe(0);
   await expect(host.getByTestId('bet-missed')).toHaveAttribute('data-reason', 'sent');
   await expect(host.getByTestId('bet-missed')).toContainText('Je hebt nog 2 tokens');
   await expectTokens(pages, counts);
+  for (const p of pages) await p.context().close();
+});
+
+// ---- Onthullen pas als iedereen koos ----
+// Wie een token heeft, zet het in of zegt dat hij het niet doet; pas dan kan de
+// speler aan beurt onthullen. Wie wegvalt, houdt niets tegen; de host heeft
+// een noodknop voor wie verbonden is maar niet reageert.
+
+/** Drie gsm's, een gast (Bob) aan de beurt en het nummer gelegd: de tussenfase. */
+async function bobPlaced(browser) {
+  const phones = await threePhones(browser);
+  const { host, pages, ids } = phones;
+  await host.getByTestId('start-game').click();
+  for (const p of pages) await expect(p.getByTestId('turn-banner')).toBeVisible();
+  const n = await skipUntil({ host, ids }, 1, ids[1]);
+  const turn = await currentTurn({ pages, host, ids, n });
+  await place(pages, turn, rightSlot(turn.years, turn.year), { challenge: true });
+  return { ...phones, turn, n };
+}
+
+test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen allebei', async ({ browser }) => {
+  const { host, bob, cas, pages, ids, turn } = await bobPlaced(browser);
+  const [hanne, , casId] = ids;
+  // Bob ziet Onthul, maar uitgeschakeld, en op wie er gewacht wordt. De host
+  // moet zelf nog kiezen: zijn balk toont eerst zijn eigen keuze.
+  await expect(bob.getByTestId('reveal-now')).toBeDisabled();
+  await expect(bob.getByTestId('bar-note')).toHaveText(/^Nog wachten op (Hanne en Cas|Cas en Hanne)\.$/);
+  await expect(host.getByTestId('reveal-now')).toHaveCount(0);
+  for (const p of [bob, host]) {
+    // In beurtvolgorde, en die begint bij een willekeurige speler.
+    await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-waiting', new RegExp(`^(${hanne},${casId}|${casId},${hanne})$`));
+  }
+  await expect(bob.getByTestId('waiting-for')).toHaveText(/^Nog wachten op (Hanne en Cas|Cas en Hanne)\.$/);
+  await expect(bob.getByTestId('challenge-banner')).toContainText('Onthullen kan zodra iedereen koos');
+  await expect(cas.getByTestId('waiting-for')).toHaveText(/^Nog wachten op (Hanne en jou|jou en Hanne)\.$/);
+  // Wie moet kiezen, heeft de twee mogelijkheden: een plaats aantikken of passen.
+  for (const p of [host, cas]) {
+    await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-must-choose', 'yes');
+    await expect(p.getByTestId('pass-bet')).toBeVisible();
+    await expect(p.getByTestId('active-timeline').locator('.slot-btn')).not.toHaveCount(0);
+  }
+  await expect(bob.getByTestId('pass-bet')).toHaveCount(0);
+  // Een gewone speler aan beurt heeft geen noodknop; de host wel, als tweede keus.
+  await expect(bob.getByTestId('force-reveal')).toHaveCount(0);
+  await expect(host.getByTestId('force-reveal')).toBeVisible();
+
+  // Cas past: definitief, geen plaatsen meer, en hij ziet op wie nog gewacht wordt.
+  await cas.getByTestId('pass-bet').click();
+  await expect(cas.getByTestId('challenge-banner')).toContainText('Geen token ingezet');
+  await expect(cas.getByTestId('challenge-banner')).toContainText('houdt je 2 tokens');
+  await expect(cas.getByTestId('pass-bet')).toHaveCount(0);
+  await expect(cas.getByTestId('active-timeline').locator('.slot-btn')).toHaveCount(0);
+  await expect(cas.getByTestId('waiting-for')).toHaveText('Nog wachten op Hanne.');
+  await expect(bob.getByTestId('waiting-for')).toHaveText('Nog wachten op Hanne.');
+  await expect(bob.getByTestId('reveal-now')).toBeDisabled();
+  await expectTokens(pages, { [casId]: START });
+
+  // Hanne zet een token in: dat telt ook als kiezen.
+  const slot = rightSlot(turn.years, turn.year) === 0 ? 1 : 0;
+  await host.getByTestId(`slot-${slot}`).click();
+  await host.getByTestId('confirm-bet').click();
+  await expectTokens(pages, { [hanne]: START - 1 });
+  for (const p of pages) {
+    await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-waiting', '');
+    await expect(p.getByTestId('waiting-for')).toHaveCount(0);
+  }
+  await expect(host.getByTestId('force-reveal')).toHaveCount(0);
+  await expect(bob.getByTestId('challenge-banner')).toContainText('Iedereen koos. Tik onderaan op Onthul.');
+  // Nu kan ook de host onthullen: zijn balk toont Onthul.
+  await expect(host.getByTestId('reveal-now')).toBeEnabled();
+  await expect(host.getByTestId('pass-bet')).toHaveCount(0);
+  // Nog steeds een bewuste tik: niets onthult vanzelf.
+  await bob.waitForTimeout(300);
+  for (const p of pages) await expect(p.getByTestId('reveal')).toHaveCount(0);
+  for (const p of pages) if (p !== host) expect(leaked(p, turn.trackId), 'antwoord lekte in de tussenfase').toBe(false);
+  await expect(bob.getByTestId('reveal-now')).toBeEnabled();
+  await bob.getByTestId('reveal-now').click();
+  for (const p of pages) await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', turn.trackId);
+  await expect(host.getByTestId('reveal-my-bet')).toHaveAttribute('data-correct', 'no');
+  await expect(host.getByTestId('bet-missed')).toHaveCount(0);
+  await expectTokens(pages, { [hanne]: START - 1, [casId]: START });
+  for (const p of pages) await p.context().close();
+});
+
+test('kiezen: wie wegvalt, houdt het onthullen niet tegen en moet na terugkeer weer kiezen', async ({ browser }) => {
+  const { host, bob, cas, pages, ids, turn } = await bobPlaced(browser);
+  const [hanne, , casId] = ids;
+  // Cas zijn verbinding valt weg.
+  await cas.context().setOffline(true);
+  await cas.evaluate(() => window.__mt.drop());
+  await expect(host.locator(`[data-testid="board-row"][data-player="${casId}"]`)).toContainText('offline');
+  await expect(bob.getByTestId('challenge-banner')).toHaveAttribute('data-waiting', hanne);
+  await expect(bob.getByTestId('waiting-for')).toHaveText('Nog wachten op Hanne.');
+  await host.getByTestId('pass-bet').click();
+  // Zonder Cas koos iedereen: Bob kan onthullen.
+  await expect(bob.getByTestId('challenge-banner')).toHaveAttribute('data-waiting', '');
+  await expect(bob.getByTestId('reveal-now')).toBeEnabled();
+
+  // Cas komt terug voor Bob onthult: dan moet hij weer kiezen.
+  await cas.context().setOffline(false);
+  await expect(cas.getByTestId('net-status')).toHaveAttribute('data-status', 'online', { timeout: 15_000 });
+  await expect(bob.getByTestId('challenge-banner')).toHaveAttribute('data-waiting', casId);
+  await expect(bob.getByTestId('reveal-now')).toBeDisabled();
+  await expect(bob.getByTestId('waiting-for')).toHaveText('Nog wachten op Cas.');
+  await expect(cas.getByTestId('challenge-banner')).toHaveAttribute('data-must-choose', 'yes');
+  await expect(cas.getByTestId('pass-bet')).toBeVisible();
+  // Hanne paste al: dat blijft zo.
+  await expect(host.getByTestId('challenge-banner')).toContainText('Geen token ingezet');
+  await cas.getByTestId('pass-bet').click();
+  await expect(bob.getByTestId('reveal-now')).toBeEnabled();
+  await bob.getByTestId('reveal-now').click();
+  for (const p of pages) await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', turn.trackId);
+  await expectTokens(pages, Object.fromEntries(ids.map((id) => [id, START])));
+  for (const p of pages) await p.context().close();
+});
+
+test('kiezen: de host kan toch onthullen als iemand niet reageert, na een vraag in de pagina', async ({ browser }) => {
+  const { host, bob, cas, pages, ids, turn } = await bobPlaced(browser);
+  const casId = ids[2];
+  let dialogs = 0;
+  for (const p of pages) p.on('dialog', () => dialogs++);
+  await host.getByTestId('pass-bet').click();
+  // Cas is verbonden maar reageert niet: Bob kan niets, alleen de host.
+  await expect(bob.getByTestId('waiting-for')).toHaveText('Nog wachten op Cas.');
+  await expect(bob.getByTestId('reveal-now')).toBeDisabled();
+  await expect(bob.getByTestId('force-reveal')).toHaveCount(0);
+  await expect(cas.getByTestId('force-reveal')).toHaveCount(0);
+  await expect(host.getByTestId('reveal-now')).toBeDisabled();
+  // De noodknop is ondergeschikt: een link, geen grote knop.
+  await expect(host.getByTestId('force-reveal')).toHaveClass(/\blink\b/);
+  await host.getByTestId('force-reveal').click();
+  const box = host.getByTestId('force-reveal-box');
+  await expect(box).toContainText('Nog niet gekozen: Cas');
+  await expect(box).not.toContainText('Je eigen token');
+  // Eerst nog even wachten: er gebeurt niets.
+  await host.getByTestId('force-reveal-cancel').click();
+  await expect(box).toHaveCount(0);
+  for (const p of pages) await expect(p.getByTestId('reveal')).toHaveCount(0);
+  await host.getByTestId('force-reveal').click();
+  await host.getByTestId('force-reveal-confirm').click();
+  for (const p of pages) await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', turn.trackId);
+  // Cas heeft niets ingezet en houdt zijn tokens.
+  await expectTokens(pages, { [casId]: START });
+  await expect(cas.getByTestId('reveal-my-bet')).toHaveCount(0);
+  expect(dialogs, 'geen venster van de browser').toBe(0);
+  for (const p of pages) await p.context().close();
+});
+
+// ---- Een kaart kopen met 3 tokens ----
+// Op je eigen beurt, voor je een plaats bevestigt. Niet je laatste kaart (één
+// voor het doel): die moet je verdienen door juist te leggen.
+
+/** Hanne (host) en Bob, gestart met doel `target`; geeft ook de eerste beurt van Bob. */
+async function duo(browser, target) {
+  const host = await openPhone(browser);
+  const code = await hostGame(host, 'Hanne');
+  await setupMusic(host);
+  const bob = await openPhone(browser);
+  await joinGame(bob, code, 'Bob');
+  const pages = [host, bob];
+  const ids = await Promise.all(pages.map(myId));
+  if (target) await setTarget(host, target);
+  await host.getByTestId('start-game').click();
+  for (const p of pages) await expect(p.getByTestId('turn-banner')).toBeVisible();
+  return { host, bob, pages, ids, hanne: ids[0], bobId: ids[1] };
+}
+
+/**
+ * Bob legt juist (Hanne past), daarna geeft de host hem het raad-token: zo
+ * heeft hij 3 tokens. Geeft het nieuwe aantal gestarte nummers terug.
+ */
+async function bobEarnsThird({ host, bob, pages, ids, bobId, hanne }, n) {
+  n = await skipUntil({ host, ids }, n, bobId);
+  const turn = await currentTurn({ pages, host, ids, n });
+  // Met 2 tokens is er geen koopknop en ook geen uitleg.
+  await expect(bob.getByTestId('buy-card')).toHaveCount(0);
+  await expect(bob.getByTestId('buy-blocked')).toHaveCount(0);
+  await place(pages, turn, rightSlot(turn.years, turn.year), { challenge: true });
+  await revealNow(pages, bob, turn.trackId);
+  await expect(bob.getByTestId('reveal')).toHaveAttribute('data-bought', 'no');
+  await tokenButton(host, bobId).click();
+  await expectTokens(pages, { [bobId]: START + 1, [hanne]: START });
+  await bob.getByTestId('next-turn').click();
+  return n + 1;
+}
+
+test('kaart kopen: een derde token verdienen en op je beurt de kaart kopen in twee stappen', async ({ browser }) => {
+  const phones = await duo(browser);
+  const { host, bob, pages, ids, hanne, bobId } = phones;
+  let n = await bobEarnsThird(phones, 1);
+
+  n = await skipUntil({ host, ids }, n, bobId);
+  const turn = await currentTurn({ pages, host, ids, n });
+  const cards = await cardCount(host, bobId);
+  // Alleen Bob, op zijn beurt, ziet de koopknop; Hanne niet.
+  await expect(host.getByTestId('buy-card')).toHaveCount(0);
+  const buy = bob.getByTestId('buy-card');
+  await expect(buy).toHaveText('Koop deze kaart voor 3 tokens');
+  await expect(buy).toBeInViewport();
+  // Eerste tik kost niets: eerst een vraag in de pagina. "Nee" laat alles zoals het was.
+  await buy.click();
+  await expect(bob.getByTestId('buy-box')).toContainText('Je betaalt 3 van je 3 tokens');
+  await bob.getByTestId('buy-cancel').click();
+  await expect(bob.getByTestId('buy-box')).toHaveCount(0);
+  await expectTokens(pages, { [bobId]: 3 });
+  for (const p of pages) await expect(p.getByTestId('turn-banner')).toBeVisible();
+  // Tot hier kent geen enkele gast het antwoord.
+  expect(leaked(bob, turn.trackId), 'antwoord lekte voor het kopen').toBe(false);
+
+  await buy.click();
+  await bob.getByTestId('buy-confirm').click();
+  // Geen tussenfase: meteen de onthulling, voor iedereen, gemarkeerd als gekocht.
+  for (const p of pages) {
+    const reveal = p.getByTestId('reveal');
+    await expect(reveal).toHaveAttribute('data-track', turn.trackId);
+    await expect(reveal).toHaveAttribute('data-bought', 'yes');
+    await expect(reveal).toContainText(String(turn.year));
+    await expect(reveal).toContainText(TRACKS.find((t) => t.id === turn.trackId).title);
+    await expect(p.getByTestId('challenge-banner')).toHaveCount(0);
+    expect(await cardCount(p, bobId)).toBe(cards + 1);
+  }
+  await expect(host.getByTestId('reveal')).toContainText('Bob kocht de kaart voor 3 tokens');
+  await expect(host.getByTestId('reveal-bought')).toHaveText('Bob heeft nog 0 tokens.');
+  await expect(bob.getByTestId('reveal')).toContainText('Je kocht de kaart voor 3 tokens');
+  await expect(bob.getByTestId('reveal-bought')).toHaveText('Je hebt nog 0 tokens.');
+  await expectTokens(pages, { [bobId]: 0, [hanne]: START });
+  // De kaart ligt juist op zijn tijdlijn.
+  const years = await bob
+    .getByTestId('active-timeline')
+    .locator('li.tl-card[data-year]')
+    .evaluateAll((els) => els.map((el) => Number(el.dataset.year)));
+  expect(years).toContain(turn.year);
+  expect(years).toEqual([...years].sort((a, b) => a - b));
+  expect((await plays(host)).length, 'het nummer start niet opnieuw').toBe(n);
+  // Het raad-token kan nog gegeven worden.
+  await tokenButton(host, hanne).click();
+  await expectTokens(pages, { [bobId]: 0, [hanne]: START + 1 });
+  await bob.getByTestId('next-turn').click();
+  await expect(host.getByTestId('turn-banner')).toBeVisible();
+  for (const p of pages) await p.context().close();
+});
+
+test('kaart kopen: je laatste kaart (één voor het doel) kan je niet kopen', async ({ browser }) => {
+  // Doel 3: na één juiste beurt heeft Bob 2 kaarten en 3 tokens.
+  const phones = await duo(browser, 3);
+  const { host, bob, pages, ids, bobId } = phones;
+  let n = await bobEarnsThird(phones, 1);
+  n = await skipUntil({ host, ids }, n, bobId);
+  await currentTurn({ pages, host, ids, n });
+  expect(await cardCount(host, bobId)).toBe(2);
+  await expect(bob.getByTestId('buy-card')).toHaveCount(0);
+  await expect(bob.getByTestId('buy-blocked')).toContainText('je laatste kaart (de 3e) moet je verdienen');
+  await expect(host.getByTestId('buy-blocked')).toHaveCount(0);
+  await expectTokens(pages, { [bobId]: 3 });
   for (const p of pages) await p.context().close();
 });

@@ -51,11 +51,14 @@ export function Game({ view, send, music, deck, onLeave }) {
 
   const bets = challenge ? view.turn.bets : [];
   const myBet = bets.find((b) => b.playerId === me);
+  // Op wie het onthullen nog wacht (inzetten of passen), en of jij al paste.
+  const waiting = challenge ? view.turn.waiting ?? [] : [];
+  const myPassed = challenge && (view.turn.passes ?? []).includes(me);
   const taken = new Set(challenge ? [view.turn.placedIndex, ...bets.map((b) => b.index)] : []);
   // Zijn alle andere plaatsen al bezet, dan valt er niets meer in te zetten.
   const slotsFull = challenge && taken.size >= (active?.timeline.length ?? 0) + 1;
   const hasTokens = (mine?.guessTokens ?? 0) > 0;
-  const canBet = challenge && activeId !== me && !myBet && hasTokens && !slotsFull;
+  const canBet = challenge && activeId !== me && !myBet && !myPassed && hasTokens && !slotsFull;
   // Nam iemand anders jouw plaats net in, dan vervalt je keuze.
   const betChoice = canBet && betPick !== null && !taken.has(betPick) ? betPick : null;
   const myTokens = mine?.guessTokens ?? 0;
@@ -71,15 +74,30 @@ export function Game({ view, send, music, deck, onLeave }) {
     return () => clearTimeout(timer);
   }, [betSend]);
   // De bevestigknop staat bij de gekozen plaats; schuif hem zo nodig in beeld,
-  // boven de plek waar meldingen onderaan verschijnen.
+  // boven de zwevende balk en de plek waar meldingen erboven verschijnen.
   useEffect(() => {
     if (betChoice === null) return;
     const btn = document.querySelector('[data-testid="confirm-bet"]');
     if (!btn) return;
-    const room = window.innerHeight - 120;
+    const room = window.innerHeight - barHeight() - 120;
     const { bottom } = btn.getBoundingClientRect();
     if (bottom > room) window.scrollBy(0, bottom - room);
   }, [betChoice]);
+  // Na de onthulling (of het einde van het spel) staat de uitkomst in beeld,
+  // ook wie onderaan een lange tijdlijn stond: zacht erheen schuiven, en alleen
+  // als ze er nog niet volledig staat.
+  const outcomeKey = reveal ? `${view.game}:${reveal.card.id}:${view.phase}` : null;
+  useEffect(() => {
+    if (!outcomeKey) return;
+    const el = document.querySelector(finished ? '[data-testid="winner"]' : '[data-testid="reveal"]');
+    if (!el) return;
+    // De kopbalk bovenaan blijft staan: de uitkomst moet eronder komen.
+    const head = document.querySelector('.topbar')?.offsetHeight ?? 0;
+    const { top, bottom } = el.getBoundingClientRect();
+    if (top >= head && bottom <= window.innerHeight - barHeight()) return;
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    window.scrollBy({ top: top - head - 12, behavior: still ? 'auto' : 'smooth' });
+  }, [outcomeKey]);
   const nameOf = (id) => (id === me ? 'jij' : byId.get(id)?.name ?? 'iemand');
   // Namen bij de gaten: wie zette waar in (en na de onthulling: juist of fout).
   const marks = (challenge ? bets : reveal?.bets ?? []).map((b) => ({
@@ -104,7 +122,6 @@ export function Game({ view, send, music, deck, onLeave }) {
   }
 
   function revealNow() {
-    if (betChoice !== null && !confirm('Je token is nog niet ingezet. Toch onthullen?')) return;
     send({ t: 'reveal' });
   }
 
@@ -115,12 +132,41 @@ export function Game({ view, send, music, deck, onLeave }) {
 
   const pendingIndex = playing ? (myTurn ? pick : view.turn.pendingIndex) : challenge ? betChoice : null;
   const canContinue = view.phase === 'reveal' && (me === reveal.playerId || isHost);
+  const waitNames = waiting.map((id) => (id === me ? 'jou' : byId.get(id)?.name ?? 'iemand'));
+
+  // De hoofdknop van de beurt staat altijd op dezelfde plek: in de zwevende
+  // balk onderaan. Na elkaar: leggen, je eigen keuze in de tussenfase (een
+  // host die moet kiezen, kiest eerst), onthullen en de volgende beurt.
+  let action = null;
+  if (myTurn) {
+    action = {
+      kind: 'place',
+      testid: 'confirm-place',
+      label: placing ? 'Even geduld…' : pick === null ? 'Kies eerst een plaats' : `Leg het ${slotLabel(active.timeline, pick)}`,
+      onClick: confirmPlace,
+      disabled: placing || pick === null,
+    };
+  } else if (canBet) {
+    // Een plaats aangetikt? Dan is bevestigen bij die plaats de hoofdknop.
+    action = { kind: 'pass', testid: 'pass-bet', label: 'Ik zet geen token in', onClick: () => send({ t: 'pass' }), secondary: betChoice !== null };
+  } else if (challenge && (activeId === me || isHost)) {
+    action = {
+      kind: 'reveal',
+      testid: 'reveal-now',
+      label: 'Onthul',
+      onClick: revealNow,
+      disabled: waiting.length > 0,
+      note: waiting.length ? `Nog wachten op ${joinNames(waitNames)}.` : null,
+    };
+  } else if (canContinue) {
+    action = { kind: 'next', testid: 'next-turn', label: 'Volgende beurt', onClick: () => send({ t: 'next' }) };
+  }
   // Het token geven mag wie ook mag doorgaan, en ook nog na de beslissende
   // kaart; de anderen kunnen het alleen voor zichzelf opeisen.
   const canGiveToken = Boolean(reveal) && (me === reveal.playerId || isHost);
 
   return (
-    <main class={`page game${myTurn && pick !== null ? ' has-bar' : ''}`}>
+    <main class="page game">
       {finished && <Winners view={view} byId={byId} />}
 
       {playing && (
@@ -135,16 +181,21 @@ export function Game({ view, send, music, deck, onLeave }) {
         </section>
       )}
 
+      {myTurn && !placing && <BuyCard key={turnKey} tokens={myTokens} cards={mine.timeline.length} target={target} send={send} />}
+
       {challenge && (
         <ChallengeBanner
+          key={turnKey}
           view={view}
-          onReveal={revealNow}
+          send={send}
           activeName={nameOf(activeId)}
-          canReveal={activeId === me || isHost}
+          waitNames={waitNames}
+          isHost={isHost}
           canBet={canBet}
           myBet={myBet}
+          myPassed={myPassed}
           tokens={myTokens}
-          slotsFull={slotsFull && activeId !== me && !myBet && hasTokens}
+          slotsFull={slotsFull && activeId !== me && !myBet && !myPassed && hasTokens}
           picking={betChoice !== null}
         />
       )}
@@ -158,6 +209,7 @@ export function Game({ view, send, music, deck, onLeave }) {
           cardTo={reveal.cardTo ? (reveal.cardTo === me ? 'Jij krijgt' : `${byId.get(reveal.cardTo)?.name ?? 'Iemand'} krijgt`) : null}
           myBet={reveal.bets.find((b) => b.playerId === me)}
           myTokens={myTokens}
+          buyerTokens={byId.get(reveal.playerId)?.guessTokens ?? 0}
         />
       )}
 
@@ -172,14 +224,9 @@ export function Game({ view, send, music, deck, onLeave }) {
 
       {reveal && (canGiveToken ? <TokenPicker view={view} send={send} /> : <TokenClaim view={view} send={send} />)}
 
-      {view.phase === 'reveal' &&
-        (canContinue ? (
-          <button class="btn primary big" onClick={() => send({ t: 'next' })} data-testid="next-turn">
-            Volgende beurt
-          </button>
-        ) : (
-          <p class="muted center-text small">Wachten tot {byId.get(reveal.playerId)?.name ?? 'de speler'} of de host doorgaat…</p>
-        ))}
+      {view.phase === 'reveal' && !canContinue && (
+        <p class="muted center-text small">Wachten tot {byId.get(reveal.playerId)?.name ?? 'de speler'} of de host doorgaat…</p>
+      )}
 
       {finished && isHost && (
         <div class="row gap">
@@ -274,19 +321,72 @@ export function Game({ view, send, music, deck, onLeave }) {
         Verlaat het spel
       </button>
 
-      {myTurn && pick !== null && (
-        <div class="confirm-bar">
-          <button class="btn primary big" onClick={confirmPlace} disabled={placing} data-testid="confirm-place">
-            {placing ? 'Even geduld…' : `Leg het ${slotLabel(active.timeline, pick)}`}
-          </button>
-        </div>
-      )}
+      {action && <ActionBar action={action} actionKey={`${action.kind}:${turnKey}`} />}
     </main>
   );
 }
 
 // Zolang wacht je token op een antwoord van de server.
 const BET_TIMEOUT = 5000;
+
+// Zolang reageert een nieuwe hoofdknop niet: een dubbele tik doet zo nooit
+// twee stappen (bv. onthullen en meteen de volgende beurt).
+const ACTION_COOLDOWN = 900;
+
+/** Hoogte van de zwevende balk onderaan (0 als er geen is). */
+const barHeight = () => document.querySelector('[data-testid="action-bar"]')?.offsetHeight ?? 0;
+
+/**
+ * Zwevende balk onderaan met de hoofdknop van de beurt, altijd in beeld en op
+ * dezelfde plek. Een nieuwe knop staat even uit (ACTION_COOLDOWN). De hoogte
+ * gaat naar --bar-h, zodat de pagina erboven uit te scrollen is en meldingen
+ * erboven verschijnen.
+ */
+function ActionBar({ action, actionKey }) {
+  // Pas als de tijd voor deze knop om is, komt zijn sleutel hier terecht.
+  const [readyKey, setReadyKey] = useState(null);
+  const cooling = readyKey !== actionKey;
+  useEffect(() => {
+    const timer = setTimeout(() => setReadyKey(actionKey), ACTION_COOLDOWN);
+    return () => clearTimeout(timer);
+  }, [actionKey]);
+  const bar = useRef(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const measure = () => root.style.setProperty('--bar-h', `${bar.current?.offsetHeight ?? 0}px`);
+    measure();
+    root.classList.add('has-bar');
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    observer?.observe(bar.current);
+    return () => {
+      observer?.disconnect();
+      root.classList.remove('has-bar');
+      root.style.removeProperty('--bar-h');
+    };
+  }, []);
+  return (
+    <div class="confirm-bar" ref={bar} data-testid="action-bar" data-kind={action.kind}>
+      {action.note && (
+        <p class="bar-note" data-testid="bar-note">
+          {action.note}
+        </p>
+      )}
+      <button
+        type="button"
+        class={`btn${action.secondary ? '' : ' primary'} big`}
+        onClick={() => !cooling && !action.disabled && action.onClick()}
+        disabled={cooling || action.disabled}
+        data-testid={action.testid}
+        data-cooling={cooling ? 'yes' : 'no'}
+      >
+        {action.label}
+      </button>
+    </div>
+  );
+}
+
+// Zoveel tokens kost een kaart kopen (LIMITS.buyCost op de server).
+const BUY_COST = 3;
 
 const tokenText = (n) => `${n} ${n === 1 ? 'token' : 'tokens'}`;
 
@@ -298,43 +398,136 @@ function Score({ n, target }) {
   );
 }
 
+/** "Bob", "Bob en Cas", "Ann, Bob en Cas" */
+function joinNames(names) {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} en ${names.at(-1)}`;
+}
+
 /**
- * Tussenfase na het leggen. De speler aan beurt en de host kunnen onthullen;
- * wie een token heeft, kan het inzetten op een andere plaats.
+ * Tussenfase na het leggen. Wie een token heeft, kiest: een andere plaats
+ * aantikken en bevestigen, of geen token inzetten (knop in de zwevende balk).
+ * Pas als iedereen koos, kan de speler aan beurt of de host onthullen (ook in
+ * de balk); de host heeft hier een noodknop voor wie verbonden is maar niet
+ * reageert.
  */
-function ChallengeBanner({ view, onReveal, activeName, canReveal, canBet, myBet, tokens, slotsFull, picking }) {
+function ChallengeBanner({ view, send, activeName, waitNames, isHost, canBet, myBet, myPassed, tokens, slotsFull, picking }) {
+  const [forcing, setForcing] = useState(false);
   const mineTurn = view.turn.playerId === view.you;
+  const waiting = view.turn.waiting ?? [];
+  const blocked = waiting.length > 0;
   const who = activeName[0].toUpperCase() + activeName.slice(1);
   const count = <strong data-testid="my-tokens">{tokenText(tokens)}</strong>;
+  const later = `Wachten tot ${activeName} of de host onthult…`;
   let text;
-  if (mineTurn) text = 'Wie een token heeft, kan nog een andere plaats kiezen. Tik op Onthul als iedereen klaar is.';
-  else if (myBet) text = <>Je zette een token in en hebt nog {count}. Wachten tot {activeName} of de host onthult…</>;
-  else if (canBet) text = <>Ligt {activeName} fout? Tik een andere plaats aan en zet er een token in. Je hebt {count}.</>;
+  if (mineTurn) {
+    text = blocked
+      ? 'Wie een token heeft, kiest nu: een andere plaats of geen token. Onthullen kan zodra iedereen koos.'
+      : 'Iedereen koos. Tik onderaan op Onthul.';
+  } else if (myBet) text = <>Je zette een token in en hebt nog {count}. {later}</>;
+  else if (myPassed) text = <>Je zet deze beurt geen token in en houdt je {count}. {later}</>;
+  else if (canBet) text = <>Ligt {activeName} fout? Tik hieronder een andere plaats aan en bevestig, of tik onderaan op «Ik zet geen token in». Je hebt {count}.</>;
   else if (slotsFull) text = <>Alle andere plaatsen zijn al bezet. Je houdt je {count}. Wachten op de onthulling…</>;
   else text = `${who} legde het nummer. Wie een token heeft, kan nog inzetten. Wachten op de onthulling…`;
   return (
-    <section class="now challenge" data-testid="challenge-banner" data-active={view.turn.playerId} data-can-bet={canBet ? 'yes' : 'no'}>
+    <section
+      class="now challenge"
+      data-testid="challenge-banner"
+      data-active={view.turn.playerId}
+      data-can-bet={canBet ? 'yes' : 'no'}
+      data-must-choose={waiting.includes(view.you) ? 'yes' : 'no'}
+      data-waiting={waiting.join(',')}
+    >
       <div class="grow">
-        <p class="now-who">{mineTurn ? 'Je kaart ligt vast' : myBet ? 'Token ingezet' : canBet ? 'Token inzetten?' : 'Even wachten'}</p>
+        <p class="now-who">
+          {mineTurn ? 'Je kaart ligt vast' : myBet ? 'Token ingezet' : myPassed ? 'Geen token ingezet' : canBet ? 'Token inzetten?' : 'Even wachten'}
+        </p>
         <p class="now-what">{text}</p>
-        {/* Heb je zelf een plaats aangetikt, dan is bevestigen bij die plaats de hoofdknop. */}
-        {canReveal && (
-          <button class={`btn${picking ? '' : ' primary'} big challenge-reveal`} onClick={onReveal} data-testid="reveal-now">
-            Onthul
+        {blocked && (
+          <p class="challenge-wait" data-testid="waiting-for" role="status">
+            Nog wachten op {joinNames(waitNames)}.
+          </p>
+        )}
+        {isHost && blocked && !forcing && (
+          <button type="button" class="btn link challenge-force" onClick={() => setForcing(true)} data-testid="force-reveal">
+            Reageert er iemand niet? Toch onthullen…
           </button>
+        )}
+        {isHost && blocked && forcing && (
+          <div class="notice warn challenge-force-box" data-testid="force-reveal-box" role="alertdialog" aria-label="Toch onthullen?">
+            <p>
+              Nog niet gekozen: <strong>{joinNames(waitNames)}</strong>. Wie niet koos, zet niets in en houdt zijn tokens.
+              {picking && ' Je eigen token is nog niet ingezet.'} Toch onthullen?
+            </p>
+            <div class="row gap">
+              <button type="button" class="btn grow" onClick={() => send({ t: 'reveal', force: true })} data-testid="force-reveal-confirm">
+                Ja, onthul nu
+              </button>
+              <button type="button" class="btn grow" onClick={() => setForcing(false)} data-testid="force-reveal-cancel">
+                Nee, wacht nog
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </section>
   );
 }
 
-function Reveal({ reveal, name, own, tokenName, cardTo, myBet, myTokens }) {
-  const { card, correct } = reveal;
-  return (
-    <section class={`reveal ${correct ? 'good' : 'bad'}`} data-testid="reveal" data-correct={correct ? 'yes' : 'no'} data-track={card.id}>
-      <p class="reveal-verdict">
-        {correct ? `Juist! ${name} houdt de kaart.` : `Fout. ${own ? 'Je bent' : `${name} is`} de kaart kwijt.`}
+/**
+ * Op je eigen beurt, voor je een plaats bevestigt: de kaart kopen voor
+ * BUY_COST tokens, in twee stappen zodat een verkeerde tik niets kost. Niet
+ * voor je laatste kaart (één voor het doel): die moet je verdienen.
+ */
+function BuyCard({ tokens, cards, target, send }) {
+  const [asking, setAsking] = useState(false);
+  if (tokens < BUY_COST) return null;
+  if (cards >= target - 1) {
+    return (
+      <p class="muted small buy-note" data-testid="buy-blocked">
+        Kopen kan niet: je laatste kaart (de {target}e) moet je verdienen door juist te leggen.
       </p>
+    );
+  }
+  if (!asking) {
+    return (
+      <button type="button" class="btn link buy-card" onClick={() => setAsking(true)} data-testid="buy-card">
+        Koop deze kaart voor {BUY_COST} tokens
+      </button>
+    );
+  }
+  return (
+    <div class="notice warn buy-box" data-testid="buy-box" role="alertdialog" aria-label="Kaart kopen?">
+      <p>
+        Je betaalt {BUY_COST} van je {tokens} tokens en de kaart komt meteen juist op je tijdlijn. Niemand kan er een token
+        tegen inzetten. Kopen?
+      </p>
+      <div class="row gap">
+        <button type="button" class="btn grow" onClick={() => send({ t: 'buy' })} data-testid="buy-confirm">
+          Ja, koop voor {BUY_COST} tokens
+        </button>
+        <button type="button" class="btn grow" onClick={() => setAsking(false)} data-testid="buy-cancel">
+          Nee
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Reveal({ reveal, name, own, tokenName, cardTo, myBet, myTokens, buyerTokens }) {
+  const { card, correct, bought } = reveal;
+  let verdict;
+  if (bought) verdict = `Gekocht! ${own ? 'Je kocht' : `${name} kocht`} de kaart voor ${BUY_COST} tokens.`;
+  else if (correct) verdict = `Juist! ${name} houdt de kaart.`;
+  else verdict = `Fout. ${own ? 'Je bent' : `${name} is`} de kaart kwijt.`;
+  return (
+    <section
+      class={`reveal ${correct ? 'good' : 'bad'}`}
+      data-testid="reveal"
+      data-correct={correct ? 'yes' : 'no'}
+      data-bought={bought ? 'yes' : 'no'}
+      data-track={card.id}
+    >
+      <p class="reveal-verdict">{verdict}</p>
       <p class="reveal-year">{card.year}</p>
       <p class="reveal-title">{card.title}</p>
       <p class="reveal-artist">{card.artist}</p>
@@ -347,6 +540,11 @@ function Reveal({ reveal, name, own, tokenName, cardTo, myBet, myTokens }) {
         </p>
       )}
       {reveal.bets.length > 0 && correct && <p class="reveal-token">De ingezette tokens zijn verloren.</p>}
+      {bought && (
+        <p class="reveal-token" data-testid="reveal-bought">
+          {own ? 'Je hebt' : `${name} heeft`} nog {tokenText(buyerTokens)}.
+        </p>
+      )}
       {myBet && (
         <p class="reveal-token" data-testid="reveal-my-bet" data-correct={myBet.correct ? 'yes' : 'no'}>
           Jouw token lag {myBet.correct ? 'juist' : 'fout'}. Een ingezet token ben je altijd kwijt: je hebt nog {tokenText(myTokens)}.

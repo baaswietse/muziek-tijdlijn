@@ -19,10 +19,14 @@ Spotify van de host.
    Dan mag de volgende in de beurtvolgorde, enzovoort. Wie het eerst juist heeft, krijgt een token extra: na de onthulling
    tikt de speler aan beurt of de host op diens naam, of eist die speler het zelf op.
 8. Een token inzetten: heeft iemand anders dan de speler aan beurt een token, dan ligt na het leggen de gekozen plaats
-   eerst vast en kan wie een token heeft een ándere, nog vrije plaats op diens tijdlijn kiezen (1 token, één keer per
-   beurt). Daarna tikt de speler aan beurt of de host op *Onthul*. Lag de speler aan beurt juist, dan houdt hij de kaart.
+   eerst vast en kiest elke andere speler met een token: een ándere, nog vrije plaats op diens tijdlijn (1 token, één
+   keer per beurt) of *Ik zet geen token in*. Pas als iedereen koos, tikt de speler aan beurt of de host op *Onthul*.
+   Lag de speler aan beurt juist, dan houdt hij de kaart.
    Lag hij fout, dan krijgt de eerste inzetter die juist lag de kaart op zijn eigen tijdlijn. Ingezette tokens zijn
    altijd op.
+9. Een kaart kopen: op je eigen beurt, voor je een plaats bevestigt, kan je 3 tokens betalen om de kaart van het
+   nummer dat speelt meteen juist op je tijdlijn te krijgen. Je laatste kaart (bij een doel van 10 je 10e, dus wanneer
+   je er al 9 hebt) kan je niet kopen: die moet je verdienen door juist te leggen.
 
 Details:
 
@@ -43,11 +47,30 @@ Details:
   plaats. Gelijke jaren mogen ook hier aan beide kanten. Krijgt een inzetter zo zijn laatste kaart, dan wint hij.
   *Ander nummer* of *Sla beurt over* tijdens het inzetten geeft de tokens terug, net als het verwijderen van de speler
   aan beurt. Het raad-token van een beurt kan je pas in een latere beurt inzetten.
+- De knop die je nodig hebt, staat altijd op dezelfde plek: in een zwevende balk onderaan, in beeld zonder scrollen,
+  ook bij een lange tijdlijn. Na elkaar: *Leg het …* (aan beurt), *Ik zet geen token in* (wie nog moet kiezen; een
+  host die moet kiezen, kiest eerst en krijgt daarna *Onthul*), *Onthul* (aan beurt en host; uitgeschakeld met op wie
+  er gewacht wordt) en *Volgende beurt*. Een nieuwe knop reageert even (0,9 s) niet, zodat een dubbele tik nooit twee
+  stappen doet. Meldingen verschijnen boven de balk. Na de onthulling schuift de uitkomst vanzelf in beeld.
 - Inzetten gaat in twee stappen: een plaats aantikken zet nog niets in (daar staat "Nog niet ingezet"), pas de knop
   *Zet token …* bij die plaats doet het. Daarna zie je meteen hoeveel tokens je nog hebt. Lukt het versturen niet
   (geen verbinding, of geen antwoord binnen enkele seconden), dan blijft je keuze staan en zegt het scherm dat je token
   nog niet ingezet is. Wordt er onthuld voor je bevestigde, dan zegt je scherm dat je token niet ingezet is en dat je
-  het nog hebt. De host die zelf een plaats aantikte, krijgt bij *Onthul* eerst die vraag.
+  het nog hebt (dat kan alleen nog na de noodknop van de host, of als je verbinding wegviel).
+- Kopen gaat in twee stappen (*Koop deze kaart voor 3 tokens* en dan bevestigen), zodat een verkeerde tik niets kost.
+  Na het kopen komt er geen tussenfase (niemand kan tegen een gekochte kaart inzetten), wel de gewone onthulling,
+  gemarkeerd als gekocht en met hoeveel tokens de koper nog heeft. Het raad-token kan daarbij nog gegeven worden. Met
+  minder dan 3 tokens zie je geen koopknop; ben je één kaart van het doel, dan zegt het scherm waarom kopen niet kan.
+- Kiezen voor de onthulling: *Onthul* blijft uitgeschakeld zolang er nog iemand moet kiezen, en elk scherm zegt op wie
+  er gewacht wordt. Moeten kiezen doet elke andere speler die nu kán inzetten: hij heeft een token, zette deze beurt
+  nog niet in, paste nog niet, en er is nog een vrije plaats. Wie geen token heeft, of wie geen vrije plaats meer vindt
+  (bv. omdat een ander net de laatste nam), hoeft niets te doen. *Ik zet geen token in* is definitief voor die beurt.
+  Wie laat instapt, heeft 2 tokens en kiest dus ook mee; wie verwijderd wordt, telt niet meer. *Ander nummer* en *Sla
+  beurt over* wissen alle keuzes. Onthullen gebeurt nooit vanzelf: ook als iedereen koos, blijft het een tik.
+- Niemand kan het spel blokkeren: wie niet verbonden is, telt niet mee (komt hij terug voor de onthulling, dan moet hij
+  weer kiezen). Reageert iemand niet terwijl hij wel verbonden is, dan kan de host (ook als hij niet aan beurt is) met
+  *Reageert er iemand niet? Toch onthullen…* toch onthullen, na een bevestiging die zegt op wie er nog gewacht wordt.
+  Wie zo niet koos, zet niets in en houdt zijn tokens. Een speler aan beurt die geen host is, kan dat niet.
 
 ## Hoe het in elkaar zit
 
@@ -75,8 +98,9 @@ gsm host  ──┘        │
   spelers. Alleen de gsm van de host krijgt het track-ID eerder, omdat die Spotify moet aansturen. Voor de host is het
   dus te vinden voor wie echt wil zoeken; dat kan niet anders zolang zijn gsm de muziek start.
 - **Acties.** Een gsm stuurt `{ t: 'hello', token }` om zich aan te melden en daarna een van deze acties: `start`,
-  `settings`, `clearDeck`, `select`, `place`, `challenge` (met `index`: een token inzetten), `reveal` (einde van het
-  inzetten), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
+  `settings`, `clearDeck`, `select`, `place`, `challenge` (met `index`: een token inzetten), `pass` (deze beurt geen
+  token inzetten), `reveal` (einde van het inzetten, pas als iedereen koos; de host kan met `force: true` toch
+  onthullen), `buy` (op je eigen beurt de kaart kopen voor 3 tokens), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
   `skipTrack`, `skipTurn`, `remove` en `lobby`. De server antwoordt met `{ t: 'state' }` of
   `{ t: 'error', code, message }`. Zie `server/src/room.js`.
 - **Spotify blijft bij de host.** De host logt in met Authorization Code + PKCE, volledig in de browser. Er is geen
@@ -365,7 +389,12 @@ Gedekt, automatisch:
   alle plaatsen bezet, zonder lek van het antwoord), en meteen onthullen zodra de anderen hun tokens op hebben. Ook
   dat een aangetikte maar niet bevestigde plaats niets kost en dat het scherm dat zegt, dat de bevestigknop op een
   kleine gsm (390×600) in beeld en niet bedekt is, en wat je ziet als bevestigen mislukt (geen verbinding, of een
-  verbinding die niets doorlaat).
+  verbinding die niets doorlaat). En dat *Onthul* uit blijft tot iedereen met een token koos (passen of inzetten), dat
+  wie wegvalt niets blokkeert maar na zijn terugkeer weer moet kiezen, en de noodknop van de host. En een kaart kopen:
+  een derde token verdienen, kopen in twee stappen, wat iedereen dan ziet, en niet voor de laatste kaart.
+- De zwevende balk: *Leg het*, *Onthul* en *Volgende beurt* op exact dezelfde plek, een dubbele tik doet geen twee
+  stappen, een melding bedekt de knop niet, en op een lage gsm (390×500) staat elke verplichte knop voor elke rol en
+  fase in beeld zonder scrollen, net als de uitkomst na de onthulling.
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
 - Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag
@@ -384,7 +413,8 @@ Gedekt, automatisch:
 - Een eigen playlist zonder wachten, tegen een trage nagebootste MusicBrainz: starten terwijl er nog opgezocht wordt,
   doorzoeken tijdens het spel zonder de stapel van dat spel te raken en meer nummers in het volgende spel, verder na
   een herlaad, een willekeurige greep uit een playlist van meer dan 500 nummers, en stoppen, een andere playlist of
-  de standaardlijst kiezen midden in het opzoeken. Een run laat hoogstens 28 rijen achter in de gedeelde lijst.
+  de standaardlijst kiezen midden in het opzoeken of terwijl een upload nog onderweg is. Een run laat hoogstens 31
+  rijen achter in de gedeelde lijst.
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script), ook met een nagebootste
   MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet.
 - Installeren als app: het manifest, de iconen (bestaan, PNG, juiste afmetingen), de meta's voor iOS, en dat Chromium
