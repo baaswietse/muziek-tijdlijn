@@ -12,6 +12,8 @@ export const LIMITS = {
   minDeck: 10,
   maxDeck: 500,
   maxDeckName: 60,
+  // Tokens waarmee elke speler een spel begint (ook wie laat instapt).
+  startTokens: 2,
 };
 
 /** Fout met een code voor de client en een Nederlandse boodschap voor de speler. */
@@ -103,9 +105,11 @@ export function addPlayer(state, { id, token, name }) {
   if (state.players.some((p) => p.name.toLowerCase() === lower)) {
     fail('NAME_TAKEN', 'Die naam is al bezet in dit spel. Kies een andere.');
   }
-  // `token` is het geheime sleuteltje van de speler; `guessTokens` telt de
-  // tokens die hij verdiende met het raden van artiest en nummer.
-  const player = { id, token, name: clean, timeline: [], guessTokens: 0 };
+  // `token` is het geheime sleuteltje van de speler; `guessTokens` telt zijn
+  // tokens: de starttokens plus wat hij verdiende met het raden van artiest en
+  // nummer, min wat hij inzette. Wie in de wachtkamer binnenkomt, krijgt ze ook
+  // al (startGame zet ze toch opnieuw), zodat er nergens een ander getal staat.
+  const player = { id, token, name: clean, timeline: [], guessTokens: LIMITS.startTokens };
   // Wie tijdens een spel instapt, krijgt meteen een startkaart en sluit
   // achteraan aan in de beurtvolgorde.
   if (state.phase === 'playing' || state.phase === 'challenge' || state.phase === 'reveal') {
@@ -186,7 +190,7 @@ export function startGame(state, actorId, tracks, random) {
     const card = state.deck.pop();
     state.used.push(card.id);
     p.timeline = [card];
-    p.guessTokens = 0;
+    p.guessTokens = LIMITS.startTokens;
   }
   // Willekeurige startspeler; daarna gewoon de volgorde van de lijst.
   const first = Math.floor(random() * n);
@@ -467,7 +471,7 @@ export function backToLobby(state, actorId) {
   state.deck = [];
   for (const p of state.players) {
     p.timeline = [];
-    p.guessTokens = 0;
+    p.guessTokens = LIMITS.startTokens;
   }
 }
 

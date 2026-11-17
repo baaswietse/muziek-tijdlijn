@@ -9,14 +9,14 @@ Spotify van de host.
 
 ## Spelregels
 
-1. Iedereen begint met één onthulde kaart: een nummer met zijn jaartal.
+1. Iedereen begint met één onthulde kaart (een nummer met zijn jaartal) en 2 tokens.
 2. Wie aan de beurt is, hoort een nummer. Titel en artiest blijven geheim.
 3. Die speler legt het nummer op zijn tijdlijn: vóór, tussen of na de kaarten die hij al heeft.
 4. Juist: hij houdt de kaart. Fout: de kaart is weg.
 5. Het nummer wordt onthuld (artiest, titel, jaar) en de volgende is aan de beurt.
 6. Wie eerst 10 kaarten heeft, wint. De host kan dat aantal in de wachtkamer aanpassen (3 tot 20).
 7. Raden voor een token: vóór de onthulling mag wie aan de beurt is hardop artiest en nummer raden. Fout of geen idee?
-   Dan mag de volgende in de beurtvolgorde, enzovoort. Wie het eerst juist heeft, krijgt een token: na de onthulling
+   Dan mag de volgende in de beurtvolgorde, enzovoort. Wie het eerst juist heeft, krijgt een token extra: na de onthulling
    tikt de speler aan beurt of de host op diens naam, of eist die speler het zelf op.
 8. Een token inzetten: heeft iemand anders dan de speler aan beurt een token, dan ligt na het leggen de gekozen plaats
    eerst vast en kan wie een token heeft een ándere, nog vrije plaats op diens tijdlijn kiezen (1 token, één keer per
@@ -34,9 +34,12 @@ Details:
 - De host kiest de nummers: de standaardlijst van het spel of een van zijn eigen Spotify-playlists.
 - Tokens: hoogstens één per beurt, ook nog bij de kaart die het spel beslist. De host en de speler aan beurt kunnen
   het aan eender wie geven, verplaatsen of terugnemen; een andere speler kan het alleen voor zichzelf opeisen zolang
-  niemand het heeft, en het weer teruggeven. Iedereen ziet de tellers op het bord en op het eindscherm. Een nieuw spel
-  begint weer op 0. Tokens verdien je alleen door te raden; wie laat instapt, begint op 0.
-- Inzetten: heeft geen enkele andere speler een token, dan volgt de onthulling meteen. Wie eerst inzet, heeft die
+  niemand het heeft, en het weer teruggeven. Iedereen ziet de tellers op het bord en op het eindscherm. Elk spel
+  begint weer met 2 tokens per speler, ook "Nog een spel"; wie laat instapt, krijgt er ook 2. Daarbovenop verdien je
+  tokens alleen door te raden.
+- Inzetten: omdat iedereen met tokens begint, komt na het leggen bijna altijd de tussenfase met *Onthul*. Heeft geen
+  enkele andere speler nog een token (allemaal ingezet, of je speelt alleen), dan volgt de onthulling meteen. Zijn
+  alle andere plaatsen al bezet, dan kan je niet meer inzetten en hou je je tokens. Wie eerst inzet, heeft die
   plaats. Gelijke jaren mogen ook hier aan beide kanten. Krijgt een inzetter zo zijn laatste kaart, dan wint hij.
   *Ander nummer* of *Sla beurt over* tijdens het inzetten geeft de tokens terug, net als het verwijderen van de speler
   aan beurt. Het raad-token van een beurt kan je pas in een latere beurt inzetten.
@@ -298,8 +301,8 @@ Gedekt, automatisch:
 
 - De spelregels: plaatsen, gelijke jaren, winnen, lege stapel, overslaan, verwijderen, laat instappen, tokens.
 - Tokens met drie browsers: geven, verplaatsen, opeisen en terugnemen, wie de knoppen ziet, tellers over beurten heen
-  en na herverbinden, terug op 0 bij een nieuw spel, en een token inzetten (gewonnen en verloren, zonder lek van het
-  antwoord).
+  en na herverbinden, 2 tokens bij de start en weer 2 bij een nieuw spel, en een token inzetten (gewonnen en verloren,
+  alle plaatsen bezet, zonder lek van het antwoord), en meteen onthullen zodra de anderen hun tokens op hebben.
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
 - Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag

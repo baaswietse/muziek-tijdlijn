@@ -32,8 +32,11 @@ export function Game({ view, send, music, onLeave }) {
 
   const bets = challenge ? view.turn.bets : [];
   const myBet = bets.find((b) => b.playerId === me);
-  const canBet = challenge && activeId !== me && !myBet && (mine?.guessTokens ?? 0) > 0;
   const taken = new Set(challenge ? [view.turn.placedIndex, ...bets.map((b) => b.index)] : []);
+  // Zijn alle andere plaatsen al bezet, dan valt er niets meer in te zetten.
+  const slotsFull = challenge && taken.size >= (active?.timeline.length ?? 0) + 1;
+  const hasTokens = (mine?.guessTokens ?? 0) > 0;
+  const canBet = challenge && activeId !== me && !myBet && hasTokens && !slotsFull;
   // Nam iemand anders jouw plaats net in, dan vervalt je keuze.
   const betChoice = canBet && betPick !== null && !taken.has(betPick) ? betPick : null;
   const nameOf = (id) => (id === me ? 'jij' : byId.get(id)?.name ?? 'iemand');
@@ -84,6 +87,7 @@ export function Game({ view, send, music, onLeave }) {
           canBet={canBet}
           myBet={myBet}
           tokens={mine?.guessTokens ?? 0}
+          slotsFull={slotsFull && activeId !== me && !myBet && hasTokens}
         />
       )}
 
@@ -204,19 +208,20 @@ function Score({ n, target }) {
  * Tussenfase na het leggen. De speler aan beurt en de host kunnen onthullen;
  * wie een token heeft, kan het inzetten op een andere plaats.
  */
-function ChallengeBanner({ view, send, activeName, canReveal, canBet, myBet, tokens }) {
+function ChallengeBanner({ view, send, activeName, canReveal, canBet, myBet, tokens, slotsFull }) {
   const mineTurn = view.turn.playerId === view.you;
   const who = activeName[0].toUpperCase() + activeName.slice(1);
+  const count = `${tokens} ${tokens === 1 ? 'token' : 'tokens'}`;
   let text;
-  if (mineTurn) text = 'Je kaart ligt vast. Wie een token heeft, kan het nog inzetten op een andere plaats.';
+  if (mineTurn) text = 'Wie een token heeft, kan nog een andere plaats kiezen. Tik op Onthul als iedereen klaar is.';
   else if (myBet) text = `Je zette een token in. Wachten tot ${activeName} of de host onthult…`;
-  else if (canBet) {
-    text = `Ligt ${activeName} fout? Tik een andere plaats aan en zet er een token in. Je hebt ${tokens} ${tokens === 1 ? 'token' : 'tokens'}.`;
-  } else text = `${who} legde het nummer. Wie een token heeft, kan nog inzetten. Wachten op de onthulling…`;
+  else if (canBet) text = `Ligt ${activeName} fout? Tik een andere plaats aan en zet er een token in. Je hebt ${count}.`;
+  else if (slotsFull) text = `Alle andere plaatsen zijn al bezet. Je houdt je ${count}. Wachten op de onthulling…`;
+  else text = `${who} legde het nummer. Wie een token heeft, kan nog inzetten. Wachten op de onthulling…`;
   return (
     <section class="now challenge" data-testid="challenge-banner" data-active={view.turn.playerId} data-can-bet={canBet ? 'yes' : 'no'}>
       <div class="grow">
-        <p class="now-who">{mineTurn ? 'Nog even wachten' : canBet ? 'Token inzetten?' : 'Even wachten'}</p>
+        <p class="now-who">{mineTurn ? 'Je kaart ligt vast' : canBet ? 'Token inzetten?' : 'Even wachten'}</p>
         <p class="now-what">{text}</p>
         {canReveal && (
           <button class="btn primary big challenge-reveal" onClick={() => send({ t: 'reveal' })} data-testid="reveal-now">
@@ -340,7 +345,10 @@ function Winners({ view, byId }) {
   );
 }
 
-/** Op het eindscherm: wie hoeveel tokens verdiende. */
+/**
+ * Op het eindscherm: wie nog hoeveel tokens heeft (de 2 van de start plus wat
+ * hij verdiende, min wat hij inzette). Een nieuw spel begint weer met 2.
+ */
 function TokenSummary({ view }) {
   const withTokens = view.players
     .filter((p) => (p.guessTokens ?? 0) > 0)
@@ -348,8 +356,8 @@ function TokenSummary({ view }) {
   return (
     <p class="winner-tokens" data-testid="winner-tokens">
       {withTokens.length === 0
-        ? 'Geen tokens dit spel.'
-        : `Tokens: ${withTokens.map((p) => `${p.id === view.you ? 'jij' : p.name} ${p.guessTokens}`).join(' · ')}`}
+        ? 'Niemand heeft nog tokens over.'
+        : `Tokens over: ${withTokens.map((p) => `${p.id === view.you ? 'jij' : p.name} ${p.guessTokens}`).join(' · ')}`}
     </p>
   );
 }

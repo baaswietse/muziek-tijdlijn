@@ -148,22 +148,53 @@ export async function playTurn({ pages, hostPage, ids, want = 'correct', playsSo
 
   // Tot hier mag geen enkele gewone speler het antwoord in zijn netwerkdata hebben.
   const track = TRACKS.find((t) => t.id === trackId);
-  for (const p of pages) {
-    if (p === hostPage) continue;
-    // Exacte waarden tussen aanhalingstekens: titels van testnummers lijken op elkaar.
-    const leaked = p.frames_.some((f) => f.includes(`"${trackId}"`) || f.includes(`"title":"${track.title}"`));
-    expect(leaked, 'antwoord lekte naar een gewone speler voor de onthulling').toBe(false);
-  }
+  const expectNoLeak = (when) => {
+    for (const p of pages) {
+      if (p === hostPage) continue;
+      // Exacte waarden tussen aanhalingstekens: titels van testnummers lijken op elkaar.
+      const leaked = p.frames_.some((f) => f.includes(`"${trackId}"`) || f.includes(`"title":"${track.title}"`));
+      expect(leaked, `antwoord lekte naar een gewone speler ${when}`).toBe(false);
+    }
+  };
+  expectNoLeak('voor de onthulling');
 
+  // Heeft een andere speler nog een token (iedereen begint met 2), dan volgt
+  // eerst de tussenfase; anders meteen de onthulling.
+  const challenge = await othersHaveTokens(hostPage, activeId);
   await activePage.getByTestId('confirm-place').click();
+  if (challenge) {
+    for (const p of pages) {
+      await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-active', activeId);
+      await expect(p.getByTestId('active-timeline').getByTestId('placed-card')).toBeVisible();
+      await expect(p.getByTestId('reveal')).toHaveCount(0);
+      // Alleen de speler aan beurt en de host zien de knop om te onthullen.
+      await expect(p.getByTestId('reveal-now')).toHaveCount(p === activePage || p === hostPage ? 1 : 0);
+    }
+    await expect(activePage.getByTestId('challenge-banner')).toHaveAttribute('data-can-bet', 'no');
+    // Ook in de tussenfase lekt niets en start de muziek niet opnieuw.
+    expectNoLeak('in de tussenfase');
+    expect(await playCount(hostPage)).toBe(playsSoFar + 1);
+    // Niemand zet in: de speler aan beurt onthult zelf.
+    await activePage.getByTestId('reveal-now').click();
+  }
   for (const p of pages) {
     const reveal = p.getByTestId('reveal');
     await expect(reveal).toHaveAttribute('data-track', trackId);
     await expect(reveal).toHaveAttribute('data-correct', expectCorrect ? 'yes' : 'no');
     await expect(reveal).toContainText(String(year));
     await expect(reveal).toContainText(track.title);
+    await expect(p.getByTestId('challenge-banner')).toHaveCount(0);
   }
-  return { activeId, activePage, trackId, year, correct: expectCorrect, cardsBefore: years.length };
+  expect(await playCount(hostPage), 'het nummer start niet opnieuw bij de onthulling').toBe(playsSoFar + 1);
+  return { activeId, activePage, trackId, year, correct: expectCorrect, cardsBefore: years.length, challenge };
+}
+
+/** Heeft volgens het bord op `page` een andere speler dan `activeId` nog een token? */
+export async function othersHaveTokens(page, activeId) {
+  const rows = await page
+    .getByTestId('board-row')
+    .evaluateAll((els) => els.map((el) => ({ id: el.dataset.player, tokens: Number(el.dataset.tokens) })));
+  return rows.some((r) => r.id !== activeId && r.tokens > 0);
 }
 
 export async function countOf(page, playerId) {
