@@ -387,6 +387,27 @@ h2 {
   gap: 8px;
 }
 
+/* ---------- binnenkomen via een uitnodigingslink ---------- */
+
+.invite-code {
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.invite-other {
+  align-self: center;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.invite-confirm {
+  width: 100%;
+}
+
+.invite-confirm-title {
+  font-size: clamp(1.4rem, 6vw, 1.8rem);
+}
+
 /* ---------- kleine onderdelen ---------- */
 
 .chip {
