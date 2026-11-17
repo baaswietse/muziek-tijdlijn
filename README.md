@@ -233,10 +233,13 @@ Gedekt, automatisch:
   winnaar, nog een spel.
 - Dat het antwoord niet in de netwerkdata van gewone spelers zit vóór de onthulling.
 - Herverbinden na een weggevallen verbinding en na herladen; een herlaad bij de host start het nummer niet opnieuw.
+- De Spotify-laag van de site tegen een nagebootste Spotify op netwerkniveau: inloggen met PKCE (zonder Client
+  Secret), een toestel kiezen, het juiste nummer op het juiste toestel starten, een verlopen token vernieuwen en
+  foutmeldingen bij een verdwenen toestel of een account zonder Premium.
 - Beide servervarianten (Node en Cloudflare, lokaal).
 
 Niet gedekt, alleen in het echt te testen:
 
-- Inloggen bij Spotify en het echte afspelen op een toestel.
+- Inloggen bij de echte Spotify en het echte afspelen op een toestel.
 - Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.
 - De uitgerolde server op Cloudflare of je eigen server.
