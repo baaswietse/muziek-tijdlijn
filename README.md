@@ -163,6 +163,9 @@ zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van 
 - Dat opzoeken duurt de eerste keer ongeveer 3 seconden per nummer (MusicBrainz laat 1 verzoek per seconde toe). Alles
   wat opgezocht is, onthoudt de browser van de host; een tweede keer gaat het meteen.
 - Nummers uit de standaardlijst van het spel zijn al nagekeken en worden niet opnieuw opgezocht.
+- Een remix krijgt het jaar van de remix, niet dat van het origineel: de spelers horen de remix. Dat zie je aan de
+  titel ("- X Remix", "(X Remix)", ook "Rework", "Bootleg", "Mashup" en "Refix"). "Radio Edit", "Extended Mix" of
+  "Remastered" tellen als het origineel. Kent MusicBrainz de remix niet, dan geldt het jaar van het Spotify-album.
 - Na afloop toont het spel de jaartallen waar Spotify en MusicBrainz het oneens zijn. De host kan ze daar verbeteren;
   ook dat wordt onthouden. Die lijst verklapt wel antwoorden.
 - Een lijst telt minstens 10 en hoogstens 500 nummers. Dubbels en nummers zonder jaartal doen niet mee.
@@ -203,6 +206,8 @@ eigen playlist is het script niet nodig: zie *Spelen met een eigen playlist*.
 Spotify geeft alleen de datum van het album, en dat is vaak een remaster of compilatie. Het script zoekt daarom per
 nummer het jaar van de eerste release op bij MusicBrainz, en neemt het vroegste van de twee. Bij MusicBrainz tellen
 alleen officiële studio-uitgaven: bootlegs, live-albums en demo's zijn er vaak fout of veel te vroeg gedateerd.
+Een remix krijgt het jaar van die remix zelf; vindt MusicBrainz ze niet, dan het jaar van het Spotify-album (en
+nooit dat van het origineel). "Edit", "Mix" en "Remastered" zonder het woord "remix" tellen als het origineel.
 
 Draaien op Windows (Python 3.9 of nieuwer, geen extra pakketten):
 

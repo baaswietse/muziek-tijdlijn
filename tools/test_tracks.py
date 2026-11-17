@@ -275,6 +275,141 @@ class Decide(unittest.TestCase):
         self.assertEqual((r["year"], r["source"], r["reasons"], r["note"]), (1975, "handmatig", [], "single"))
 
 
+class Remix(unittest.TestCase):
+    """Titels zoals Spotify en MusicBrainz ze echt schrijven (nagekeken in november 2026).
+    Dezelfde gevallen als in tests/unit/years.test.js."""
+
+    def test_only_explicit_remix_words_make_a_remix(self):
+        remixes = {
+            "A Little Less Conversation - JXL Radio Edit Remix": ("A Little Less Conversation", "JXL Radio Edit Remix"),
+            "Brimful of Asha - Norman Cook Remix Single Version": ("Brimful of Asha", "Norman Cook Remix Single Version"),
+            "Roses - Imanbek Remix": ("Roses", "Imanbek Remix"),
+            "Roses (Imanbek Remix)": ("Roses", "Imanbek Remix"),
+            "Ignition - Remix": ("Ignition", "Remix"),
+            "Titel (feat. Y) [X Remix]": ("Titel", "X Remix"),
+            "Titel - X Remix - Radio Edit": ("Titel", "X Remix"),
+            "Titel - X Remix (feat. Y)": ("Titel", "X Remix"),
+            "Titel (X Remix) - 2011 Remaster": ("Titel", "X Remix"),
+            "Titel - X Rmx": ("Titel", "X Rmx"),
+            "Titel - X Re-Work": ("Titel", "X Re-Work"),
+            "Titel (X Bootleg)": ("Titel", "X Bootleg"),
+            "Titel - Mash-Up": ("Titel", "Mash-Up"),
+            "Titel - X Refix": ("Titel", "X Refix"),
+            "Titel (Remixed by X)": ("Titel", "Remixed by X"),
+        }
+        for raw, want in remixes.items():
+            self.assertEqual(T.remix_parts(raw), want, raw)
+            self.assertTrue(T.is_remix(raw), raw)
+        for title in [
+            "Smalltown Boy - Extended Mix",
+            "Blue Monday - Club Mix",
+            "One More Time - Radio Edit",
+            "Help! - 2009 Stereo Mix",
+            "Heroes - Single Version",
+            "Something - Remastered 2011",
+            "Bohemian Rhapsody",
+            "Remix",
+            "Mixed Emotions",
+            "Remix to Ignition",
+        ]:
+            self.assertFalse(T.is_remix(title), title)
+
+    def test_clean_title_keeps_the_remix(self):
+        self.assertEqual(T.clean_title("Roses - Imanbek Remix"), "Roses (Imanbek Remix)")
+        self.assertEqual(T.clean_title("A Little Less Conversation - JXL Radio Edit Remix"), "A Little Less Conversation (JXL Radio Edit Remix)")
+        self.assertEqual(T.clean_title("Titel (feat. Y) [X Remix]"), "Titel (X Remix)")
+        self.assertEqual(T.clean_title("Smalltown Boy - Extended Mix"), "Smalltown Boy")
+        self.assertEqual(T.clean_title("One More Time - Radio Edit"), "One More Time")
+        self.assertTrue(T.is_live("Titel (X Remix) - Live"))
+        self.assertFalse(T.is_live("Roses - Imanbek Remix"))
+
+    def test_a_remix_only_matches_the_same_remix(self):
+        jxl = T.clean_title("A Little Less Conversation - JXL Radio Edit Remix")
+        self.assertTrue(T.title_matches("A Little Less Conversation (JXL radio edit remix)", jxl))
+        self.assertTrue(T.title_matches("A Little Less Conversation [JXL radio edit remix]", jxl))
+        self.assertTrue(T.title_matches("A Little Less Conversation (JXL remix)", jxl))
+        self.assertFalse(T.title_matches("A Little Less Conversation", jxl))
+        self.assertFalse(T.title_matches("A Little Less Conversation (vs JXL)", jxl))
+        self.assertFalse(T.title_matches("A Little Less Conversation (JXL radio edit remix) (Elvis vs JXL)", jxl))
+
+        asha = T.clean_title("Brimful of Asha - Norman Cook Remix Single Version")
+        self.assertTrue(T.title_matches("Brimful of Asha (Norman Cook remix)", asha))
+        self.assertTrue(T.title_matches("Brimful of Asha (The Norman Cook remix, single version)", asha))
+        self.assertFalse(T.title_matches("Brimful of Asha (Norman Cook remix extended version)", asha))
+        self.assertFalse(T.title_matches("Brimful of Asha (Norman Cook extended mix)", asha))
+        self.assertFalse(T.title_matches("Brimful of Asha", asha))
+
+        ignition = T.clean_title("Ignition - Remix")
+        self.assertTrue(T.title_matches("Ignition (remix)", ignition))
+        self.assertTrue(T.title_matches("Ignition - Remix", ignition))
+        self.assertTrue(T.title_matches("Ignition (remix) (album version)", ignition))
+        self.assertFalse(T.title_matches("Ignition (remix) (instrumental)", ignition))
+        self.assertFalse(T.title_matches("Ignition (Slang Tech remix)", ignition))
+        self.assertFalse(T.title_matches("Ignition", ignition))
+
+        roses = T.clean_title("Roses (feat. Iemand) [Imanbek Remix]")
+        self.assertTrue(T.title_matches("Roses (Imanbek remix)", roses))
+        self.assertTrue(T.title_matches("Roses (Imanbek remix radio edit)", T.clean_title("Roses - Imanbek Remix - Radio Edit")))
+        self.assertTrue(T.title_matches("Roses (Remix by Imanbek)", roses))
+        self.assertFalse(T.title_matches("Roses (Andere remix)", roses))
+        self.assertFalse(T.title_matches("Roses", roses))
+
+        # Gewone nummers: zoals vroeger, ook als MusicBrainz een remix teruggeeft.
+        self.assertTrue(T.title_matches("Smalltown Boy (extended mix)", T.clean_title("Smalltown Boy - Extended Mix")))
+        self.assertTrue(T.title_matches("Roses (Imanbek remix)", "Roses"))
+
+    def test_lookup_finds_the_remix_not_the_older_original(self):
+        calls = []
+        # Zoals bij MusicBrainz: "Elvis Presley vs. JXL" als twee credits.
+        remix = rec("A Little Less Conversation (JXL radio edit remix)", "Elvis Presley", "2002-06-10", "remix")
+        remix["artist-credit"] = [
+            {"name": "Elvis Presley", "joinphrase": " vs. ", "artist": {"name": "Elvis Presley"}},
+            {"name": "JXL", "artist": {"name": "Junkie XL"}},
+        ]
+
+        def search(query, limit=100):
+            calls.append(query)
+            return [
+                rec("A Little Less Conversation", "Elvis Presley", "1968", "orig"),
+                rec("A Little Less Conversation (JXL remix)", "Elvis Presley", "2007", "later"),
+                remix,
+            ], 3
+
+        found = T.lookup("A Little Less Conversation - JXL Radio Edit Remix", ["Elvis Presley", "JXL"], search=search)
+        self.assertEqual((found["year"], found["mbid"], found["method"]), (2002, "remix", "exact"))
+        self.assertEqual(calls, ['recording:"A Little Less Conversation" AND recording:(jxl AND remix) AND artist:"Elvis Presley"'])
+
+    def test_unknown_remix_gets_the_spotify_year_never_the_original(self):
+        calls = []
+
+        def search(query, limit=100):
+            calls.append(query)
+            return [rec("Roses", "SAINt JHN", "2016", "orig"), rec("Roses (Imanbek remix)", "SAINt JHN", "2019", "imanbek")], 2
+
+        title = "Roses - Bestaat Niet Remix"
+        mb = T.lookup(title, ["SAINt JHN"], search=search)
+        self.assertIsNone(mb["year"])
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[1].startswith("recording:(Roses AND bestaat AND niet AND remix)"))
+
+        track = {"id": "r", "artists": ["SAINt JHN"], "title": title, "spotify_date": "2021-03-01"}
+        r = T.decide(track, mb, None)
+        self.assertEqual((r["year"], r["source"], r["title"]), (2021, "spotify", "Roses (Bestaat Niet Remix)"))
+        self.assertEqual(r["reasons"], ["remix die MusicBrainz niet kent; jaar van het Spotify-album gebruikt"])
+
+        # Gevonden: zoals bij elk nummer het vroegste van de twee.
+        found = T.decide(dict(track, title="Roses - Imanbek Remix", spotify_date="2020"), {"year": 2019, "method": "exact"}, None)
+        self.assertEqual((found["year"], found["source"], found["reasons"]), (2019, "musicbrainz", []))
+
+    def test_cache_key_only_changes_for_remixes(self):
+        # Gewone nummers houden hun sleutel, zodat de cache niet weggegooid wordt;
+        # remixes krijgen een nieuwe en worden dus opnieuw opgezocht.
+        self.assertEqual(T._cache_key({"title": "Bohemian Rhapsody - Remastered 2011", "artists": ["Queen"]}), "v4|bohemian rhapsody|queen")
+        self.assertEqual(T._cache_key({"title": "Smalltown Boy - Extended Mix", "artists": ["Bronski Beat"]}), "v4|smalltown boy|bronski beat")
+        key = T._cache_key({"title": "Roses - Imanbek Remix", "artists": ["SAINt JHN"]})
+        self.assertEqual(key, f"v4-remix{T.REMIX_RULES}|roses imanbek remix|saint jhn")
+
+
 class Misc(unittest.TestCase):
     def test_playlist_id(self):
         pid = "0j9u5m5cCoc3Wnx8XsbjFa"

@@ -99,8 +99,88 @@ _PAREN_TAIL_RE = re.compile(r"\s*[\(\[]([^\)\]]*)[\)\]]\s*$")
 _LIVE_RE = re.compile(r"\blive\b", re.IGNORECASE)
 
 
+# Een remix is een andere opname met een eigen releasedatum: de spelers horen
+# de remix, dus telt het jaar van de remix. Alleen uitdrukkelijke remix-woorden
+# tellen; "Extended Mix", "Club Mix" of "Radio Edit" zijn gewoon het origineel.
+_REMIX_RE = re.compile(r"\b(?:remix(?:ed)?|rmx|re-?work(?:ed)?|bootleg|mash-?up|refix)\b", re.IGNORECASE)
+# Woorden in een remix-aanduiding die niets over de remix zelf zeggen:
+# "JXL Radio Edit Remix" en "JXL remix" zijn dezelfde remix.
+_REMIX_NOISE = {
+    "radio", "edit", "single", "version", "versie", "album", "explicit", "clean",
+    "mono", "stereo", "remaster", "remastered", "by", "the",
+}
+_REMIX_SYNONYMS = {"remixed": "remix", "rmx": "remix", "reworked": "rework"}
+_FEAT_RE = re.compile(r"\s*[\(\[]?\s*\b(?:feat\.?|featuring|ft\.)(?:\s.*)?$", re.IGNORECASE)
+
+# Versie van de regels voor remixes; zit in de cachesleutel van remixes, zodat
+# een oud remix-resultaat niet hergebruikt wordt. Verhoog dit als de regels
+# voor remixes veranderen (dezelfde waarde als REMIX_RULES in years.js).
+REMIX_RULES = 2
+
+
 def clean_title(title: str) -> str:
-    """Haalt versie-aanduidingen van een Spotify-titel af."""
+    """Haalt versie-aanduidingen van een Spotify-titel af; een remix-aanduiding blijft staan."""
+    parts = remix_parts(title)
+    if parts:
+        return f"{parts[0]} ({parts[1]})"
+    return _strip_versions(title)
+
+
+def remix_parts(title: str) -> tuple[str, str] | None:
+    """Splitst een remix-titel in het nummer en de remix-aanduiding.
+
+    "Roses - Imanbek Remix" en "Roses (feat. X) [Imanbek Remix]" geven allebei
+    ("Roses", "Imanbek Remix"). Geen remix: None. Versie-aanduidingen achter
+    de remix ("- Radio Edit") vallen eerst weg.
+    """
+    t = str(title).strip()
+    for _ in range(6):
+        before = t
+        if " - " in t:
+            head, tail = t.rsplit(" - ", 1)
+            if head.strip() and _REMIX_RE.search(tail):
+                return _strip_versions(head), _tidy_remix(tail)
+            if head.strip() and (_VERSION_RE.search(tail) or re.fullmatch(r"\d{4}", tail.strip())):
+                t = head.strip()
+        m = _PAREN_TAIL_RE.search(t)
+        head = t[: m.start()].strip() if m else ""
+        if m and head and _REMIX_RE.search(m.group(1)):
+            return _strip_versions(head), _tidy_remix(m.group(1))
+        if m and head and _VERSION_RE.search(m.group(1)):
+            t = head
+        if t == before:
+            break
+    return None
+
+
+def _tidy_remix(text: str) -> str:
+    """"X Remix (feat. Y)" -> "X Remix": gastartiesten horen niet bij de naam van de remix."""
+    t = _FEAT_RE.sub("", str(text))
+    return re.sub(r"\s+", " ", re.sub(r"[\(\)\[\]]", " ", t)).strip()
+
+
+def is_remix(title: str) -> bool:
+    return remix_parts(title) is not None
+
+
+def remix_key(title: str) -> str | None:
+    """Vergelijkbare vorm van een remix: het nummer en de woorden van de remix,
+    zonder "radio edit" en dergelijke en los van de volgorde ("Remix by X" = "X Remix")."""
+    parts = remix_parts(title)
+    if not parts:
+        return None
+    return norm(parts[0]) + "|" + " ".join(sorted(_remix_words(parts[1])))
+
+
+def _remix_words(remix: str) -> list[str]:
+    text = re.sub(r"\bre-(work|mix)", r"re\1", str(remix), flags=re.IGNORECASE)
+    text = re.sub(r"\bmash-up\b", "mashup", text, flags=re.IGNORECASE)
+    words = (_REMIX_SYNONYMS.get(w, w) for w in norm(text).split(" "))
+    return [w for w in words if w and w not in _REMIX_NOISE]
+
+
+def _strip_versions(title: str) -> str:
+    """Haalt versie-aanduidingen weg, ook een remix-aanduiding die "edit" of "mix" bevat."""
     t = str(title).strip()
     for _ in range(4):
         before = t
@@ -119,7 +199,9 @@ def clean_title(title: str) -> str:
 
 
 def is_live(title: str) -> bool:
-    return clean_title(title) != title.strip() and bool(_LIVE_RE.search(title[len(clean_title(title)) :]))
+    raw = str(title).strip()
+    clean = _strip_versions(raw)
+    return clean != raw and bool(_LIVE_RE.search(raw[len(clean) :]))
 
 
 def norm(text: str) -> str:
@@ -138,10 +220,17 @@ def norm_loose(text: str) -> str:
 
 
 def title_matches(candidate: str, wanted: str) -> bool:
-    a, b = norm(clean_title(candidate)), norm(wanted)
+    # Een remix past alleen bij dezelfde remix: nooit bij het origineel of bij
+    # een andere remix van hetzelfde nummer. De losse terugval hieronder (alles
+    # tussen haakjes weg) zou ze net allemaal gelijk maken.
+    remix = remix_key(wanted)
+    if remix:
+        return remix_key(candidate) == remix
+    # Gewone nummers: zoals altijd (_strip_versions is de vroegere clean_title).
+    a, b = norm(_strip_versions(candidate)), norm(wanted)
     if a and a == b:
         return True
-    a, b = norm_loose(clean_title(candidate)), norm_loose(wanted)
+    a, b = norm_loose(_strip_versions(candidate)), norm_loose(wanted)
     return bool(a) and a == b
 
 
@@ -281,13 +370,25 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
     """Zoekt het eerste releasejaar; geeft {'year': None} als er niets past."""
     wanted = clean_title(title)
     primary = artists[0] if artists else ""
-    queries = [
-        ("exact", f"recording:{lucene_phrase(wanted)} AND artist:{lucene_phrase(primary)}"),
-    ]
-    loose = re.sub(r"[\(\[][^\)\]]*[\)\]]", " ", wanted).strip()
-    if loose and norm(loose) != norm(wanted):
-        queries.append(("zonder haakjes", f"recording:{lucene_phrase(loose)} AND artist:{lucene_phrase(primary)}"))
-    queries.append(("ruim", f"recording:({_words(wanted)}) AND artist:({_words(primary)})"))
+    remix = remix_parts(title)
+    if remix:
+        # MusicBrainz schrijft een remix meestal als "Titel (X remix)", soms met
+        # "radio edit" erbij. Zoek dus op het nummer als geheel en de woorden van
+        # de remix los; title_matches kiest daarna streng de juiste remix.
+        base = remix[0]
+        extra = _words(" ".join(_remix_words(remix[1])))
+        queries = [
+            ("exact", f"recording:{lucene_phrase(base)} AND recording:({extra}) AND artist:{lucene_phrase(primary)}"),
+            ("ruim", f"recording:({_words(base)} AND {extra}) AND artist:({_words(primary)})"),
+        ]
+    else:
+        queries = [
+            ("exact", f"recording:{lucene_phrase(wanted)} AND artist:{lucene_phrase(primary)}"),
+        ]
+        loose = re.sub(r"[\(\[][^\)\]]*[\)\]]", " ", wanted).strip()
+        if loose and norm(loose) != norm(wanted):
+            queries.append(("zonder haakjes", f"recording:{lucene_phrase(loose)} AND artist:{lucene_phrase(primary)}"))
+        queries.append(("ruim", f"recording:({_words(wanted)}) AND artist:({_words(primary)})"))
     for method, query in queries:
         recordings, total = search(query)
         found = pick_year(recordings, wanted, artists)
@@ -513,8 +614,12 @@ def decide(track: dict, mb: dict | None, correction: dict | None) -> dict:
     elif mb_year:
         year, source = mb_year, "musicbrainz"
     elif sp_year:
+        # Ook bij een remix: nooit het jaar van het origineel, dat hoort niet bij wat de spelers horen.
         year, source = sp_year, "spotify"
-        reasons.append("MusicBrainz vond niets; jaar van het Spotify-album gebruikt")
+        if is_remix(track.get("title", "")):
+            reasons.append("remix die MusicBrainz niet kent; jaar van het Spotify-album gebruikt")
+        else:
+            reasons.append("MusicBrainz vond niets; jaar van het Spotify-album gebruikt")
     else:
         year, source = None, "onbekend"
         reasons.append("geen jaar gevonden; vul het aan in correcties.json")
@@ -704,7 +809,12 @@ def main(argv=None) -> int:
 
 def _cache_key(track: dict) -> str:
     # "v4": verhoog dit als de zoekmethode verandert, dan wordt alles opnieuw opgezocht.
-    return "v4|" + norm(clean_title(track.get("title", ""))) + "|" + norm((track.get("artists") or [""])[0])
+    # Remixes krijgen er de regelversie voor remixes bij: zo wordt een remix die
+    # nog met de oude regels (jaar van het origineel) bewaard is, opnieuw opgezocht,
+    # zonder de rest van de cache weg te gooien.
+    title = track.get("title", "")
+    prefix = f"v4-remix{REMIX_RULES}|" if is_remix(title) else "v4|"
+    return prefix + norm(clean_title(title)) + "|" + norm((track.get("artists") or [""])[0])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,13 @@
 // Dit bestand gebruikt niets van de browser behalve fetch, zodat de regels
 // ook met gewone unit-tests te controleren zijn.
 
+/**
+ * Versie van de regels voor remixes. Jaartallen van remixes die de browser
+ * met oudere regels onthield, worden opnieuw opgezocht (zie deck.js).
+ * Verhoog dit als de regels voor remixes veranderen.
+ */
+export const REMIX_RULES = 2;
+
 const MB_URL = 'https://musicbrainz.org/ws/2/recording';
 const MB_MIN_INTERVAL = 1100; // MusicBrainz laat hoogstens 1 verzoek per seconde toe
 const MB_TRIES = 6;
@@ -21,8 +28,21 @@ const VERSION_RE = new RegExp(`\\b(?:${VERSION})\\b`, 'i');
 const PAREN_TAIL_RE = /\s*[([]([^)\]]*)[)\]]\s*$/;
 const PARENS_RE = /[([][^)\]]*[)\]]/g;
 
-/** Haalt versie-aanduidingen van een Spotify-titel af. */
-export function cleanTitle(title) {
+// Een remix is een andere opname met een eigen releasedatum: de spelers horen
+// de remix, dus telt het jaar van de remix. Alleen uitdrukkelijke remix-woorden
+// tellen; "Extended Mix", "Club Mix" of "Radio Edit" zijn gewoon het origineel.
+const REMIX_RE = /\b(?:remix(?:ed)?|rmx|re-?work(?:ed)?|bootleg|mash-?up|refix)\b/i;
+// Woorden in een remix-aanduiding die niets over de remix zelf zeggen:
+// "JXL Radio Edit Remix" en "JXL remix" zijn dezelfde remix.
+const REMIX_NOISE = new Set([
+  'radio', 'edit', 'single', 'version', 'versie', 'album', 'explicit', 'clean',
+  'mono', 'stereo', 'remaster', 'remastered', 'by', 'the',
+]);
+const REMIX_SYNONYMS = { remixed: 'remix', rmx: 'remix', reworked: 'rework' };
+const FEAT_RE = /\s*[([]?\s*\b(?:feat\.?|featuring|ft\.)(?:\s.*)?$/i;
+
+/** Haalt versie-aanduidingen weg, ook een remix-aanduiding die "edit" of "mix" bevat. */
+function stripVersions(title) {
   let t = String(title ?? '').trim();
   for (let i = 0; i < 4; i++) {
     const before = t;
@@ -41,9 +61,69 @@ export function cleanTitle(title) {
   return t;
 }
 
+/**
+ * Splitst een remix-titel in het nummer en de remix-aanduiding:
+ * "Roses - Imanbek Remix" en "Roses (feat. X) [Imanbek Remix]" geven allebei
+ * { base: 'Roses', remix: 'Imanbek Remix' }. Geen remix: null.
+ * Versie-aanduidingen achter de remix ("- Radio Edit") vallen eerst weg.
+ */
+export function remixParts(title) {
+  let t = String(title ?? '').trim();
+  for (let i = 0; i < 6; i++) {
+    const before = t;
+    const cut = t.lastIndexOf(' - ');
+    if (cut > 0) {
+      const head = t.slice(0, cut).trim();
+      const tail = t.slice(cut + 3);
+      if (head && REMIX_RE.test(tail)) return { base: stripVersions(head), remix: tidyRemix(tail) };
+      if (head && (VERSION_RE.test(tail) || /^\d{4}$/.test(tail.trim()))) t = head;
+    }
+    const m = PAREN_TAIL_RE.exec(t);
+    const head = m ? t.slice(0, m.index).trim() : '';
+    if (m && head && REMIX_RE.test(m[1])) return { base: stripVersions(head), remix: tidyRemix(m[1]) };
+    if (m && head && VERSION_RE.test(m[1])) t = head;
+    if (t === before) break;
+  }
+  return null;
+}
+
+/** "X Remix (feat. Y)" → "X Remix": gastartiesten horen niet bij de naam van de remix. */
+function tidyRemix(text) {
+  return String(text).replace(FEAT_RE, '').replace(/[()[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+export function isRemix(title) {
+  return remixParts(title) !== null;
+}
+
+/**
+ * Vergelijkbare vorm van een remix: het nummer en de woorden van de remix,
+ * zonder "radio edit" en dergelijke en los van de volgorde ("Remix by X" = "X Remix").
+ */
+export function remixKey(title) {
+  const parts = remixParts(title);
+  if (!parts) return null;
+  return `${norm(parts.base)}|${remixWords(parts.remix).sort().join(' ')}`;
+}
+
+function remixWords(remix) {
+  const text = String(remix).replace(/\bre-(work|mix)/gi, 're$1').replace(/\bmash-up\b/gi, 'mashup');
+  return norm(text)
+    .split(' ')
+    .map((w) => REMIX_SYNONYMS[w] || w)
+    .filter((w) => w && !REMIX_NOISE.has(w));
+}
+
+/** Haalt versie-aanduidingen van een Spotify-titel af; een remix-aanduiding blijft staan. */
+export function cleanTitle(title) {
+  const parts = remixParts(title);
+  if (parts) return `${parts.base} (${parts.remix})`;
+  return stripVersions(title);
+}
+
 export function isLive(title) {
   const raw = String(title ?? '').trim();
-  const clean = cleanTitle(raw);
+  const clean = stripVersions(raw);
   return clean !== raw && /\blive\b/i.test(raw.slice(clean.length));
 }
 
@@ -64,10 +144,16 @@ export function normLoose(text) {
 }
 
 export function titleMatches(candidate, wanted) {
-  let a = norm(cleanTitle(candidate));
+  // Een remix past alleen bij dezelfde remix: nooit bij het origineel of bij
+  // een andere remix van hetzelfde nummer. De losse terugval hieronder (alles
+  // tussen haakjes weg) zou ze net allemaal gelijk maken.
+  const remix = remixKey(wanted);
+  if (remix) return remixKey(candidate) === remix;
+  // Gewone nummers: zoals altijd (stripVersions is de vroegere cleanTitle).
+  let a = norm(stripVersions(candidate));
   let b = norm(wanted);
   if (a && a === b) return true;
-  a = normLoose(cleanTitle(candidate));
+  a = normLoose(stripVersions(candidate));
   b = normLoose(wanted);
   return Boolean(a) && a === b;
 }
@@ -172,12 +258,23 @@ const STUDIO_FILTER = ' AND status:official AND NOT secondarytype:live AND NOT s
 export async function lookup(title, artists, search) {
   const wanted = cleanTitle(title);
   const primary = (artists || [])[0] || '';
-  const queries = [['exact', `recording:${lucenePhrase(wanted)} AND artist:${lucenePhrase(primary)}`]];
-  const loose = wanted.replace(PARENS_RE, ' ').trim();
-  if (loose && norm(loose) !== norm(wanted)) {
-    queries.push(['zonder haakjes', `recording:${lucenePhrase(loose)} AND artist:${lucenePhrase(primary)}`]);
+  const remix = remixParts(title);
+  const queries = [];
+  if (remix) {
+    // MusicBrainz schrijft een remix meestal als "Titel (X remix)", soms met
+    // "radio edit" erbij. Zoek dus op het nummer als geheel en de woorden van
+    // de remix los; titleMatches kiest daarna streng de juiste remix.
+    const extra = words(remixWords(remix.remix).join(' '));
+    queries.push(['exact', `recording:${lucenePhrase(remix.base)} AND recording:(${extra}) AND artist:${lucenePhrase(primary)}`]);
+    queries.push(['ruim', `recording:(${words(remix.base)} AND ${extra}) AND artist:(${words(primary)})`]);
+  } else {
+    queries.push(['exact', `recording:${lucenePhrase(wanted)} AND artist:${lucenePhrase(primary)}`]);
+    const loose = wanted.replace(PARENS_RE, ' ').trim();
+    if (loose && norm(loose) !== norm(wanted)) {
+      queries.push(['zonder haakjes', `recording:${lucenePhrase(loose)} AND artist:${lucenePhrase(primary)}`]);
+    }
+    queries.push(['ruim', `recording:(${words(wanted)}) AND artist:(${words(primary)})`]);
   }
-  queries.push(['ruim', `recording:(${words(wanted)}) AND artist:(${words(primary)})`]);
 
   for (const [method, query] of queries) {
     const first = await search(query);
@@ -223,8 +320,13 @@ export function decide({ title, spotifyYear }, mb) {
   } else if (mbYear) {
     [year, source] = [mbYear, 'musicbrainz'];
   } else if (spotifyYear) {
+    // Ook bij een remix: nooit het jaar van het origineel, dat hoort niet bij wat de spelers horen.
     [year, source] = [spotifyYear, 'spotify'];
-    doubts.push('niet gevonden bij MusicBrainz; jaar van het Spotify-album');
+    doubts.push(
+      isRemix(title)
+        ? 'remix niet gevonden bij MusicBrainz; jaar van het Spotify-album'
+        : 'niet gevonden bij MusicBrainz; jaar van het Spotify-album',
+    );
   } else {
     [year, source] = [null, 'onbekend'];
     doubts.push('geen jaar gevonden');

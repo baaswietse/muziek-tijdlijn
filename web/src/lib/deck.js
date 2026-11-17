@@ -7,9 +7,11 @@ import { useCallback, useRef, useState } from 'preact/hooks';
 import { player } from '../spotify/index.js';
 import { post } from './net.js';
 import { storage } from './session.js';
-import { cleanTitle, decide, lookup, mbSearch, songKey, yearOf } from './years.js';
+import { REMIX_RULES, cleanTitle, decide, isRemix, lookup, mbSearch, songKey, yearOf } from './years.js';
 
-const CACHE = 'mt.years.v1'; // { [trackId]: { y: jaar, s: bron, d: [twijfels] } }
+// { [trackId]: { y: jaar, s: bron, d: [twijfels], r: regelversie voor remixes } }
+// Oudere items hebben geen r; voor gewone nummers maakt dat niet uit.
+const CACHE = 'mt.years.v1';
 const LAST = 'mt.lastPlaylist'; // { id, name }
 const MAX_DECK = 500;
 const MIN_DECK = 10;
@@ -96,12 +98,16 @@ export function useDeck({ code, token }) {
         });
         const known = await loadBuiltin();
         const cache = storage.read(CACHE) || {};
-        const stored = (id) => {
+        const stored = ({ id, title }) => {
           if (cache[id]?.s === 'handmatig') return cache[id]; // eigen verbetering gaat altijd voor
           if (known.has(id)) return { y: known.get(id), s: 'lijst', d: [] };
+          // Remixes kregen vroeger meestal het jaar van het origineel. Wat zonder
+          // de huidige regelversie (r) onthouden is, wordt één keer opnieuw
+          // opgezocht; gewone nummers blijven onthouden zoals ze zijn.
+          if (cache[id] && isRemix(title) && cache[id].r !== REMIX_RULES) return null;
           return cache[id] || null;
         };
-        const todo = tracks.filter((t) => !stored(t.id)).length;
+        const todo = tracks.filter((t) => !stored(t)).length;
         setJob({ name: playlist.name, phase: 'years', done: 0, total: tracks.length, todo });
 
         const rows = [];
@@ -110,7 +116,7 @@ export function useDeck({ code, token }) {
         let looked = 0;
         for (const [i, t] of tracks.entries()) {
           if (signal.aborted) throw signal.reason;
-          let entry = stored(t.id);
+          let entry = stored(t);
           if (!entry) {
             const spotifyYear = yearOf(t.spotifyDate);
             let mb = null;
@@ -126,7 +132,7 @@ export function useDeck({ code, token }) {
               }
             }
             const d = decide({ title: t.title, spotifyYear }, mb);
-            entry = { y: d.year, s: d.source, d: d.doubts };
+            entry = { y: d.year, s: d.source, d: d.doubts, r: REMIX_RULES };
             if (failed) {
               unreachable++;
               entry.d = ['MusicBrainz was niet bereikbaar; jaar van het Spotify-album', ...entry.d];
