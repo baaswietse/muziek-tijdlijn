@@ -71,6 +71,10 @@ export function useInvite({ session, view, enter, notify }) {
       });
     }
     window.addEventListener('hashchange', onHash);
+    // Effecten lopen pas na de paint: een link die tussen het eerste tekenen en
+    // nu binnenkwam, gaf geen hashchange meer door. Kijk de hash dus nog eens na;
+    // dezelfde code als in de beginstate laat onHash ongemoeid.
+    onHash();
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
