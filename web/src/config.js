@@ -2,7 +2,7 @@
 
 // Client ID van de Spotify-app (developer.spotify.com/dashboard).
 // Een Client Secret is niet nodig en hoort hier niet.
-export const SPOTIFY_CLIENT_ID = '';
+export const SPOTIFY_CLIENT_ID = 'f0f0b2df47324153ba60b5988aca4bc4';
 
 // Adres van de spelserver, zonder schuine streep op het einde,
 // bv. 'https://muziek-tijdlijn.voorbeeld.workers.dev'.
