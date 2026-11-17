@@ -16,7 +16,8 @@
     "deploy:cf": "wrangler deploy",
     "test": "node --test \"tests/unit/*.test.js\"",
     "test:py": "python3 -m unittest discover -s tools -p \"test_*.py\"",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:live": "MT_LIVE=1 playwright test"
   },
   "dependencies": {
     "ws": "^8.23.0"

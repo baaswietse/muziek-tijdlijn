@@ -58,8 +58,9 @@ test('volledig spel met drie gsm\'s: binnenkomen, beurten, onthulling, winnaar, 
   let sawCorrect = false;
   const played = [];
   while (turns < 40) {
-    // De allereerste beurt bewust fout, daarna alles juist.
-    const want = turns === 0 ? 'wrong' : 'correct';
+    // Eerst bewust één keer fout (lukt niet als elke plaats juist is, bv. bij
+    // twee nummers uit hetzelfde jaar: dan de volgende beurt), daarna alles juist.
+    const want = sawWrong ? 'correct' : 'wrong';
     const res = await playTurn({ pages, hostPage: host, ids, want, playsSoFar: played.length });
     played.push(res.trackId);
     turns++;

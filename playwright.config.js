@@ -6,6 +6,12 @@ const SERVER_PORT = 8787;
 const WEB_PORT = 4173;
 const TRACKS_PORT = 4174;
 
+// MT_LIVE=1 test de echte site op GitHub Pages met de echte spelserver. Er
+// start dan niets lokaal; Spotify blijft nagebootst. Achter een proxy
+// (HTTPS_PROXY) gaat de browser daarlangs.
+const LIVE = process.env.MT_LIVE === '1';
+const LIVE_URL = process.env.MT_LIVE_URL || 'https://baaswietse.github.io/muziek-tijdlijn/';
+
 export default defineConfig({
   testDir: 'tests/e2e',
   timeout: 90_000,
@@ -15,11 +21,12 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
-    baseURL: `http://127.0.0.1:${WEB_PORT}/muziek-tijdlijn/`,
+    baseURL: LIVE ? LIVE_URL : `http://127.0.0.1:${WEB_PORT}/muziek-tijdlijn/`,
     viewport: { width: 390, height: 844 },
     trace: 'off',
+    ...(LIVE && process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {}),
   },
-  webServer: [
+  webServer: LIVE ? [] : [
     // MT_SERVER=cloudflare test dezelfde spelregels in de Cloudflare-variant
     // (lokaal via wrangler); standaard draait de Node-server.
     process.env.MT_SERVER === 'cloudflare'
