@@ -219,7 +219,8 @@ Goed om te weten:
 In de wachtkamer kiest de host onder *Nummers* een van zijn Spotify-playlists. Spotify toont alleen playlists die hij
 zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van de eerste release op bij MusicBrainz.
 
-- Dat opzoeken duurt de eerste keer ongeveer 3 seconden per nummer (MusicBrainz laat 1 verzoek per seconde toe). Alles
+- Dat opzoeken kost gemiddeld anderhalf verzoek per nummer, en MusicBrainz laat 1 verzoek per seconde toe: reken de
+  eerste keer op ongeveer 2 seconden per nummer, 500 nieuwe nummers duren zo'n kwartier. Alles
   wat opgezocht is, onthoudt de browser van de host en gaat ook naar de gedeelde lijst op de server. Een tweede keer
   gaat het meteen, ook op een ander toestel, in een andere browser of bij een andere host. Op de server staan alleen
   track-ID, jaar, bron en twijfels; alleen een host van een lopend spel kan ze lezen of aanvullen.
@@ -272,6 +273,13 @@ nummer het jaar van de eerste release op bij MusicBrainz, en neemt het vroegste 
 alleen officiële studio-uitgaven: bootlegs, live-albums en demo's zijn er vaak fout of veel te vroeg gedateerd.
 Een remix krijgt het jaar van die remix zelf; vindt MusicBrainz ze niet, dan het jaar van het Spotify-album (en
 nooit dat van het origineel). "Edit", "Mix" en "Remastered" zonder het woord "remix" tellen als het origineel.
+
+Zo zoekt het (in het script en in de browser hetzelfde): eerst op titel en artiest. Passen alle opnames op één pagina
+(hoogstens 100), dan is dat genoeg: 1 verzoek. Bekende nummers hebben honderden opnames; dan volgt één gericht verzoek
+naar de opnames die vóór het gevonden jaar voor het eerst uitkwamen. Is die pagina volledig, dan bestaat er zeker
+geen vroegere officiële uitgave: een officiële uitgave is nooit vroeger dan de eerste release van haar opname. Alleen
+als de eerste pagina geen officiële studio-uitgave bevat, of als ook de oudere opnames niet op één pagina passen, komt
+er een verzoek bij met alleen officiële studio-uitgaven. Gemiddeld kost een nummer zo anderhalf verzoek.
 
 Draaien op Windows (Python 3.9 of nieuwer, geen extra pakketten):
 

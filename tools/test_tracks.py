@@ -1,5 +1,6 @@
 """Tests voor tools/tracks.py. Draaien zonder netwerk:  python -m unittest discover -s tools -p "test_*.py" """
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -130,31 +131,101 @@ class PickYear(unittest.TestCase):
         self.assertEqual(T.pick_year([comp], "Lied", ["Band"])["year"], 1980)
 
 
+def index(recordings, calls, limit=100):
+    """Een nagebootste MusicBrainz die zich gedraagt als de echte: de filters op
+    eerste release en studio-uitgave werken, en er komen hoogstens `limit`
+    opnames per pagina terug, met het totale aantal treffers."""
+
+    def types(r):
+        return [t.lower() for x in r["releases"] for t in x["release-group"]["secondary-types"]]
+
+    def search(query, limit_=100):
+        calls.append(query)
+        found = recordings
+        to = re.search(r"firstreleasedate:\[1900-01-01 TO (\d{4})-12-31\]", query)
+        if to:
+            found = [r for r in found if T.year_of(r["first-release-date"]) and T.year_of(r["first-release-date"]) <= int(to.group(1))]
+        if "status:official" in query:
+            # Zoals bij MusicBrainz telt dit per opname: één live-uitgave sluit ze al uit.
+            found = [
+                r for r in found
+                if any(x["status"] == "Official" for x in r["releases"]) and not {"live", "demo"} & set(types(r))
+            ]
+        return found[:limit], len(found)
+
+    return search
+
+
+def lives(title, artist, n, first, last):
+    """`n` live-opnames van een nummer, tussen `first` en `last`."""
+    out = []
+    for i in range(n):
+        year = str(first + i % (last - first + 1))
+        out.append(rec(title, artist, year, f"live{i}", releases=[rel(year, "Official", ["Live"])]))
+    return out
+
+
 class Lookup(unittest.TestCase):
     def test_descends_to_older_recordings(self):
         calls = []
-
-        def search(query, limit=100):
-            calls.append(query)
-            if "firstreleasedate" not in query:
-                return [rec("Whole Lotta Love", "Led Zeppelin", "1970", "p1")], 600
-            if "TO 1969-12-31" in query:
-                # Het origineel staat ook op een live-compilatie: de studio-filter
-                # sluit het uit, alleen de zoekopdracht zonder filter vindt het.
-                if "status:official" in query:
-                    return [], 0
-                return [rec("Whole Lotta Love", "Led Zeppelin", "1969-10-22", "orig")], 1
-            return [], 0
-
+        # Het origineel staat ook op een live-compilatie: de studio-filter sluit
+        # het uit, alleen de zoekopdracht zonder filter vindt het.
+        orig = rec(
+            "Whole Lotta Love", "Led Zeppelin", "1969-10-22", "orig",
+            releases=[rel("1969-10-22"), rel("1975", "Official", ["Compilation", "Live"])],
+        )
+        search = index(
+            [rec("Whole Lotta Love", "Led Zeppelin", "1970", "p1"), *lives("Whole Lotta Love", "Led Zeppelin", 150, 1971, 2010), orig],
+            calls,
+        )
         found = T.lookup("Whole Lotta Love - 1990 Remaster", ["Led Zeppelin"], search=search)
-        self.assertEqual(found["year"], 1969)
+        self.assertEqual((found["year"], found["mbid"], found["official"]), (1969, "orig", True))
         self.assertEqual(found["method"], "exact")
         self.assertNotIn("_rank", found)
+        # Al een officiële uitgave op de eerste pagina (1970): meteen de oudere
+        # opnames vragen. Die pagina is volledig, dus vroeger dan 1969 kan er
+        # niets meer zijn.
+        self.assertEqual(len(calls), 2)
         self.assertIn('recording:"Whole Lotta Love"', calls[0])
         self.assertNotIn("status:official", calls[0])
-        self.assertIn("status:official", calls[1])
-        self.assertIn("TO 1968-12-31", calls[-1])
-        self.assertEqual(len(calls), 4)
+        self.assertIn("TO 1969-12-31", calls[1])
+        self.assertNotIn("status:official", calls[1])
+
+    def test_official_on_first_page_and_a_complete_page_of_older_recordings(self):
+        calls = []
+        search = index(
+            [
+                rec("Lied", "Band", "2001", "heruitgave"),
+                *lives("Lied", "Band", 120, 1990, 2020),
+                rec("Lied", "Band", "1975", "orig"),
+                rec("Lied", "Band", "1972", "boot", releases=[rel("1972", "Bootleg")]),
+            ],
+            calls,
+        )
+        # Vroeger 3 verzoeken: eerste pagina, studio-filter, ouder dan 1975.
+        found = T.lookup("Lied", ["Band"], search=search)
+        self.assertEqual((found["year"], found["mbid"], found["official"]), (1975, "orig", True))
+        self.assertEqual(len(calls), 2)
+        self.assertIn("TO 2000-12-31", calls[1])
+
+    def test_official_year_after_the_seen_years_is_still_checked(self):
+        # Een bootleg uit 1975 op de eerste pagina; een opname die eerst als
+        # bootleg (1970) en pas in 1980 officieel uitkwam; en een die in 1977
+        # officieel uitkwam. Beide staan ook op een live-album: de studio-filter mist ze.
+        calls = []
+        search = index(
+            [
+                rec("Lied", "Band", "1975", "boot75", releases=[rel("1975", "Bootleg")]),
+                *lives("Lied", "Band", 150, 1990, 2020),
+                rec("Lied", "Band", "1970", "laat", releases=[rel("1970", "Bootleg"), rel("1980", "Official", ["Compilation"]), rel("1985", "Official", ["Live"])]),
+                rec("Lied", "Band", "1977", "orig", releases=[rel("1977"), rel("1990", "Official", ["Live"])]),
+            ],
+            calls,
+        )
+        found = T.lookup("Lied", ["Band"], search=search)
+        # Officieel gaat voor op onofficieel; alle opnames vóór 1980 zijn bekeken: 1977.
+        self.assertEqual((found["year"], found["mbid"], found["official"]), (1977, "orig", True))
+        self.assertTrue(any("TO 1979-12-31" in q for q in calls))
 
     def test_older_bootlegs_do_not_replace_an_official_release(self):
         def search(query, limit=100):
@@ -166,24 +237,22 @@ class Lookup(unittest.TestCase):
         self.assertEqual((found["year"], found["mbid"]), (1980, "studio"))
 
     def test_studio_recording_missing_from_first_page(self):
-        # Zoals "Master of Puppets": 791 opnames, de eerste honderd zijn allemaal
-        # live of heruitgaven. Alleen de studio-filter vindt het origineel.
+        # Zoals "Master of Puppets": honderden opnames, de eerste honderd zijn
+        # allemaal live of heruitgaven, en ook vóór 2017 zijn er te veel om te
+        # overzien. Alleen de studio-filter vindt het origineel.
         calls = []
-
-        def search(query, limit=100):
-            calls.append(query)
-            if "firstreleasedate" in query:
-                return [], 0
-            if "status:official" in query:
-                return [rec("Master of Puppets", "Metallica", "1986", "studio"), rec("Master of Puppets", "Metallica", "2017", "box")], 55
-            return [
+        search = index(
+            [
                 rec("Master of Puppets", "Metallica", "2017-11-10", "box"),
                 rec("Master of Puppets", "Metallica", "2003", "live", releases=[rel("2003", "Official", ["Live"])]),
-            ], 791
-
+                *lives("Master of Puppets", "Metallica", 300, 1987, 2016),
+                rec("Master of Puppets", "Metallica", "1986", "studio"),
+            ],
+            calls,
+        )
         found = T.lookup("Master Of Puppets", ["Metallica"], search=search)
         self.assertEqual((found["year"], found["mbid"], found["official"]), (1986, "studio", True))
-        self.assertIn("NOT secondarytype:live", calls[1])
+        self.assertTrue(any("NOT secondarytype:live" in q and "TO 2016-12-31" in q for q in calls))
 
     def test_first_page_without_any_match_still_tries_the_studio_filter(self):
         def search(query, limit=100):
