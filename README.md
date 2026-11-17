@@ -413,7 +413,8 @@ Gedekt, automatisch:
 - Een eigen playlist zonder wachten, tegen een trage nagebootste MusicBrainz: starten terwijl er nog opgezocht wordt,
   doorzoeken tijdens het spel zonder de stapel van dat spel te raken en meer nummers in het volgende spel, verder na
   een herlaad, een willekeurige greep uit een playlist van meer dan 500 nummers, en stoppen, een andere playlist of
-  de standaardlijst kiezen midden in het opzoeken. Een run laat hoogstens 28 rijen achter in de gedeelde lijst.
+  de standaardlijst kiezen midden in het opzoeken of terwijl een upload nog onderweg is. Een run laat hoogstens 31
+  rijen achter in de gedeelde lijst.
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script), ook met een nagebootste
   MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet.
 - Installeren als app: het manifest, de iconen (bestaan, PNG, juiste afmetingen), de meta's voor iOS, en dat Chromium

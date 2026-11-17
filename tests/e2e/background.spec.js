@@ -8,7 +8,7 @@
 // krijgen per run nieuwe ID's (fakeIds), de andere komen uit de nagekeken
 // lijst van de site, die nooit naar de gedeelde lijst gaat. De test met meer
 // dan 500 nummers vangt de gedeelde lijst zelf op. Een run laat zo hoogstens
-// 28 rijen achter in de gedeelde lijst (8 + 8 + 8 + 2 + 2).
+// 31 rijen achter in de gedeelde lijst (8 + 8 + 8 + 2 + 2 + 3).
 
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
@@ -249,4 +249,51 @@ test('opzoeken stoppen, een andere playlist kiezen of terug naar de standaardlij
   expect(mb.queries.length).toBeLessThanOrEqual(atDefault + 1);
   await expect(page.getByTestId('deck-current')).toHaveText('Standaardlijst van het spel');
   await host.context.close();
+});
+
+test('een upload die nog onderweg is, zet de playlist niet terug na «Terug naar de standaardlijst»', async ({ browser }) => {
+  const id = fakeIds();
+  // Twee nummers die MusicBrainz niet kent: die staan bij de jaartallen om na te kijken.
+  const list = { ...makePlaylist('Traag', 2, id), answers: {} };
+  const other = makePlaylist('Ander', 1, id);
+  const host = await newHost(browser, [list, other], { delay: 0 });
+  const { page, context } = host;
+  // De server krijgt de lijst pas na een tijd, zoals bij een trage verbinding.
+  let slow = 0;
+  const sent = [];
+  await context.route(/\/api\/rooms\/[A-Za-z]{4}\/deck$/, async (route) => {
+    if (route.request().method() === 'POST' && slow) {
+      sent.push(JSON.parse(route.request().postData()).name);
+      await new Promise((resolve) => setTimeout(resolve, slow));
+    }
+    await route.continue().catch(() => {});
+  });
+  const fix = async (track, year) => {
+    const doubts = page.getByTestId('deck-doubts');
+    if (!(await doubts.evaluate((d) => d.open))) await doubts.locator('summary').click();
+    await page.getByTestId(`doubt-${track.id}`).fill(String(year));
+    await page.getByTestId(`doubt-${track.id}`).blur();
+  };
+
+  // --- een verbetering (upload onderweg), meteen terug naar de standaardlijst ---
+  await choose(page, 'Traag');
+  await expect(page.getByTestId('deck-current')).toHaveText('Playlist «Traag» · 12 nummers');
+  slow = 2000;
+  await fix(list.fake[0], 1999);
+  await expect.poll(() => sent.length).toBe(1);
+  await page.getByTestId('deck-default').click();
+  await page.waitForTimeout(3000); // tot ruim na de vertraagde upload
+  await expect(page.getByTestId('deck-current')).toHaveText('Standaardlijst van het spel');
+
+  // --- een verbetering (upload onderweg), meteen een andere playlist ---
+  slow = 0;
+  await choose(page, 'Traag');
+  await expect(page.getByTestId('deck-current')).toHaveText('Playlist «Traag» · 12 nummers');
+  slow = 2000;
+  await fix(list.fake[1], 1998);
+  await expect.poll(() => sent.length).toBe(2);
+  await choose(page, 'Ander');
+  await page.waitForTimeout(5000);
+  await expect(page.getByTestId('deck-current')).toHaveText('Playlist «Ander» · 11 nummers');
+  await context.close();
 });

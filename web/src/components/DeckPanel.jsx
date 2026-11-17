@@ -19,9 +19,10 @@ export function DeckPanel({ view, send, deck, loggedIn }) {
     deck.loadPlaylists();
   }
 
-  function useDefault() {
-    deck.reset();
-    send({ t: 'clearDeck' });
+  // Eerst wachten tot een upload die nog onderweg is, aangekomen is: anders
+  // zet die de playlist na het wissen terug.
+  async function useDefault() {
+    if (await deck.reset()) send({ t: 'clearDeck' });
   }
 
   return (
