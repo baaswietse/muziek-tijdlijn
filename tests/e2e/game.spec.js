@@ -25,10 +25,13 @@ test('volledig spel met drie gsm\'s: binnenkomen, beurten, onthulling, winnaar, 
   // Speler 2 tikt de code in, speler 3 komt binnen via de QR-link.
   const bob = await openPhone(browser);
   await joinGame(bob, code, 'Bob');
+  // Via de link hoeft Cas enkel zijn naam te geven: geen codeveld meer.
   const cas = await openPhone(browser, { hash: `#/j/${code}` });
-  await expect(cas.getByTestId('code-input')).toHaveValue(code);
-  await cas.getByTestId('name-input').fill('Cas');
-  await cas.getByTestId('enter-button').click();
+  await expect(cas.getByTestId('invite-screen')).toContainText(code);
+  await expect(cas.getByTestId('code-input')).toHaveCount(0);
+  await cas.getByTestId('invite-name').fill('Cas');
+  await cas.getByTestId('invite-join').click();
+  await expect(cas.getByTestId('big-code')).toHaveText(code);
 
   const pages = [host, bob, cas];
   for (const p of pages) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { Connection } from './lib/net.js';
-import { loadSession, saveSession } from './lib/session.js';
+import { clearInvite, loadSession, saveSession } from './lib/session.js';
+import { useInvite } from './lib/useInvite.js';
 import { keepAwake } from './lib/wakelock.js';
 import { useMusic } from './lib/music.js';
 import { useDeck } from './lib/deck.js';
@@ -9,6 +10,7 @@ import { APP_NAME } from './config.js';
 import { Home } from './screens/Home.jsx';
 import { Lobby } from './screens/Lobby.jsx';
 import { Game } from './screens/Game.jsx';
+import { InviteBusy, InviteConfirm, InviteJoin } from './screens/Invite.jsx';
 
 export function App({ loginResult }) {
   const [session, setSession] = useState(loadSession);
@@ -32,6 +34,8 @@ export function App({ loginResult }) {
       setView(null);
       return undefined;
     }
+    // Ander spel (bv. via een uitnodigingslink): toon niet nog even het vorige.
+    setView(null);
     const c = new Connection({
       code,
       token,
@@ -61,13 +65,16 @@ export function App({ loginResult }) {
     saveSession(s);
     setSession(s);
     // De uitnodigingscode mag nu uit de adresbalk.
-    history.replaceState(null, '', location.pathname + location.search);
+    clearInvite();
   }, []);
 
   const leave = useCallback(() => {
     saveSession(null);
     setSession(null);
   }, []);
+
+  // Een uitnodigingslink (QR-code) gaat voor op het startscherm en het huidige spel.
+  const { invite, submit, stepOver, cancel } = useInvite({ session, view, enter, notify });
 
   const isHost = Boolean(view && view.you === view.hostId);
   const music = useMusic({ enabled: isHost, view });
@@ -78,7 +85,13 @@ export function App({ loginResult }) {
   }, [Boolean(session)]);
 
   let screen;
-  if (!session) {
+  if (invite?.step === 'form') {
+    screen = <InviteJoin invite={invite} session={session} onSubmit={submit} onCancel={cancel} />;
+  } else if (invite?.step === 'confirm') {
+    screen = <InviteConfirm invite={invite} onStepOver={stepOver} onStay={cancel} />;
+  } else if (invite?.step === 'decide' || invite?.step === 'joining') {
+    screen = <InviteBusy code={invite.code} />;
+  } else if (!session) {
     screen = <Home onEnter={enter} notify={notify} />;
   } else if (!view) {
     screen = (

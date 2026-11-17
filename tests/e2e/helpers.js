@@ -7,9 +7,21 @@ const TRACKS_FILE = process.env.MT_LIVE === '1' ? '../../web/public/tracks.json'
 export const TRACKS = JSON.parse(readFileSync(new URL(TRACKS_FILE, import.meta.url), 'utf8'));
 export const YEAR = new Map(TRACKS.map((t) => [t.id, t.year]));
 
-/** Opent een eigen browsercontext (= een eigen gsm) in testmodus. */
-export async function openPhone(browser, { hash = '' } = {}) {
+/**
+ * Opent een eigen browsercontext (= een eigen gsm) in testmodus. Met `name`
+ * kent die gsm al een naam van een vorig spel, zoals na een eerdere spelavond.
+ */
+export async function openPhone(browser, { hash = '', name = '' } = {}) {
   const context = await browser.newContext();
+  if (name) {
+    await context.addInitScript((n) => {
+      try {
+        if (!localStorage.getItem('mt.name')) localStorage.setItem('mt.name', JSON.stringify(n));
+      } catch {
+        // about:blank heeft geen opslag
+      }
+    }, name);
+  }
   const page = await context.newPage();
   page.on('dialog', (d) => d.accept());
   // Alles wat de server naar deze gsm stuurt, om te kunnen nakijken wat lekt.
@@ -42,6 +54,22 @@ export async function joinGame(page, code, name) {
   await page.getByTestId('enter-button').click();
   await expect(page.getByTestId('big-code')).toHaveText(code);
 }
+
+/**
+ * Opent de uitnodigingslink van `code` op een gsm die de site al open heeft,
+ * zoals na het scannen van de QR-code. Standaard via hashchange in hetzelfde
+ * tabblad; met `fresh` als nieuw geladen pagina.
+ */
+export async function openInvite(page, code, { fresh = false } = {}) {
+  if (fresh) await page.goto('about:blank');
+  await page.goto(`./?mock=1#/j/${code}`);
+}
+
+/** Wat er nog in de adresbalk staat na het #. */
+export const hashOf = (page) => page.evaluate(() => location.hash);
+
+/** Een code die nooit bestaat: de server gebruikt geen I of O in codes. */
+export const NO_SUCH_ROOM = 'OOOO';
 
 export async function setTarget(page, target) {
   for (let i = 0; i < 20; i++) {

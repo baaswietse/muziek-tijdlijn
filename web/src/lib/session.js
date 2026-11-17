@@ -1,6 +1,8 @@
 // Wat de browser onthoudt, zodat je na een vergrendeld scherm, een herlaad of
 // de omweg langs Spotify terug in hetzelfde spel zit.
 
+import { codeFromHash } from './invite.js';
+
 const KEY = 'mt.session';
 
 function read(key) {
@@ -20,7 +22,10 @@ function write(key, value) {
   }
 }
 
-/** { code, token, playerId, name } of null */
+/**
+ * { code, token, playerId, name, host } of null. `host` (true als deze gsm het
+ * spel maakte) ontbreekt in sessies van voor dat veld bestond.
+ */
 export function loadSession() {
   const s = read(KEY);
   return s && s.code && s.token ? s : null;
@@ -50,8 +55,12 @@ export function detectMock() {
 
 /** Code uit een uitnodigingslink (#/j/ABCD). */
 export function inviteCode() {
-  const m = location.hash.match(/^#\/j\/([A-Za-z]{4})$/);
-  return m ? m[1].toUpperCase() : '';
+  return codeFromHash(location.hash);
+}
+
+/** Haalt de uitnodiging uit de adresbalk, zodat ze niet nog eens meetelt. */
+export function clearInvite() {
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 }
 
 export function inviteUrl(code) {

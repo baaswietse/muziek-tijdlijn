@@ -1,14 +1,14 @@
 import { useState } from 'preact/hooks';
 import { createRoom, joinRoom } from '../lib/net.js';
-import { inviteCode, loadName, saveName } from '../lib/session.js';
+import { loadName, saveName } from '../lib/session.js';
 import { SERVER_URL } from '../config.js';
 import { Rules } from '../components/Rules.jsx';
 
 export function Home({ onEnter, notify }) {
-  const invited = inviteCode();
   const [mode, setMode] = useState('join'); // join | host
   const [name, setName] = useState(loadName);
-  const [code, setCode] = useState(invited);
+  // Wie via een uitnodigingslink komt, ziet dit scherm niet (zie useInvite.js).
+  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function submit(ev) {
@@ -20,7 +20,8 @@ export function Home({ onEnter, notify }) {
     try {
       saveName(clean);
       const res = mode === 'host' ? await createRoom(clean) : await joinRoom(code.toUpperCase(), clean);
-      onEnter({ code: res.code, token: res.token, playerId: res.playerId, name: clean });
+      // `host` onthouden: een host die een uitnodiging voor een ander spel opent, krijgt eerst de vraag of hij overstapt.
+      onEnter({ code: res.code, token: res.token, playerId: res.playerId, name: clean, host: mode === 'host' });
     } catch (err) {
       notify(err.message);
     } finally {
