@@ -129,6 +129,17 @@ test('echte Spotify-laag: inloggen met PKCE, toestel kiezen, afspelen en fouten 
   // --- toestel kiezen ---
   const devicesCall = spotify.calls.find((c) => c.path === '/me/player/devices');
   expect(devicesCall).toMatchObject({ method: 'GET', auth: 'Bearer access-1' });
+  await expect(page.getByTestId('device-hint')).toContainText('Spotify-app');
+
+  // De host opent de Spotify-app op zijn gsm en komt terug naar het spel: het
+  // nieuwe toestel verschijnt zonder dat hij op «Zoek opnieuw» moet tikken.
+  spotify.devices = [
+    ...spotify.devices,
+    { id: 'dev-box', name: 'Box in de woonkamer', type: 'Speaker', is_active: false, is_restricted: false },
+  ];
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(page.getByTestId('device-dev-box')).toBeVisible();
+  spotify.devices = spotify.devices.filter((d) => d.id !== 'dev-box');
   await page.getByTestId('device-dev-1').click();
   await expect(page.getByTestId('music-status')).toHaveAttribute('data-ready', 'yes');
   await expect(page.getByTestId('start-game')).toBeEnabled();

@@ -34,7 +34,9 @@ export function useMusic({ enabled, view }) {
     setStatus('idle');
   }, []);
 
-  const refreshDevices = useCallback(async () => {
+  /** Haalt de lijst met toestellen op. `quiet`: fouten niet tonen (automatisch verversen). */
+  const refreshDevices = useCallback(async (opts) => {
+    const quiet = opts?.quiet === true;
     setBusy(true);
     try {
       const list = await player.devices();
@@ -48,7 +50,7 @@ export function useMusic({ enabled, view }) {
       }
       return list;
     } catch (err) {
-      fail(err);
+      if (!quiet) fail(err);
       return null;
     } finally {
       setBusy(false);
@@ -146,6 +148,17 @@ export function useMusic({ enabled, view }) {
   useEffect(() => {
     if (enabled && loggedIn && devices === null) refreshDevices();
   }, [enabled, loggedIn, devices, refreshDevices]);
+
+  // De host opent vaak even de Spotify-app om een toestel zichtbaar te maken en
+  // komt dan terug: ververs de lijst op dat moment vanzelf.
+  useEffect(() => {
+    if (!enabled || !loggedIn) return undefined;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshDevices({ quiet: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [enabled, loggedIn, refreshDevices]);
 
   // Nieuwe beurt = nieuw nummer. De sleutel wordt onthouden, zodat het nummer
   // niet opnieuw begint als de host de pagina herlaadt of even weg was.
