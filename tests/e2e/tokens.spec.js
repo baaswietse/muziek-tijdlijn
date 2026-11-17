@@ -448,3 +448,179 @@ test('zonder tokens bij de anderen: meteen onthullen, ook al heeft de speler aan
   await expectTokens(pages, counts);
   for (const p of pages) await p.context().close();
 });
+
+// ---- Inzetten moet ondubbelzinnig zijn ----
+// Een speler mag nooit denken dat hij een token inzette terwijl dat niet zo is:
+// aantikken alleen zet niets in, een mislukte bevestiging zegt dat, en na de
+// onthulling hoort hij dat hij zijn token nog heeft.
+
+/** Ligt de knop zelf bovenaan op zijn middelpunt (geen balk of melding erover)? */
+const onTop = (loc) =>
+  loc.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  });
+
+/**
+ * Hanne (host) en Bob; Bob is aan de beurt, legt juist en Hanne heeft een
+ * plaats waar het nummer zeker fout ligt. `beforeChallenge` loopt net voor het
+ * leggen (bv. om de verbinding van Hanne om te leiden).
+ */
+async function hanneBetsOnBob(browser, { beforeChallenge } = {}) {
+  const host = await openPhone(browser);
+  const code = await hostGame(host, 'Hanne');
+  await setupMusic(host);
+  const bob = await openPhone(browser);
+  await joinGame(bob, code, 'Bob');
+  const pages = [host, bob];
+  const ids = await Promise.all(pages.map(myId));
+  const [hanne, bobId] = ids;
+  const counts = { [hanne]: START, [bobId]: START };
+  await host.getByTestId('start-game').click();
+  for (const p of pages) await expect(p.getByTestId('turn-banner')).toBeVisible();
+  let n = await skipUntil({ host, ids }, 1, bobId);
+  let turn = await currentTurn({ pages, host, ids, n });
+  // Hetzelfde jaar als Bobs kaart is overal juist: dan eerst een ander nummer.
+  for (let i = 0; i < 10 && badSlot(turn.years, turn.year) === null; i++) {
+    await host.getByTestId('skip-track').click();
+    n++;
+    turn = await currentTurn({ pages, host, ids, n });
+  }
+  const right = rightSlot(turn.years, turn.year);
+  const wrong = badSlot(turn.years, turn.year, right);
+  expect(wrong).not.toBeNull();
+  if (beforeChallenge) await beforeChallenge(host);
+  await place(pages, turn, right, { challenge: true });
+  return { host, bob, pages, ids, hanne, bobId, counts, turn, wrong };
+}
+
+test('token inzetten: aangetikt is nog niet ingezet, de knop staat bij de plaats en na de onthulling hoor je dat je token er nog is', async ({ browser }) => {
+  const { host, bob, pages, counts, turn, wrong } = await hanneBetsOnBob(browser);
+  // Een kleine gsm: ook dan staat de bevestigknop in beeld.
+  await host.setViewportSize({ width: 390, height: 600 });
+  await host.getByTestId(`slot-${wrong}`).click();
+
+  // De aangetikte plaats zegt dat er nog niets ingezet is en ziet er anders
+  // uit dan de kaart die Bob vastlegde.
+  const pick = host.getByTestId('bet-pick');
+  await expect(pick).toContainText('Nog niet ingezet');
+  const look = (loc) => loc.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(await look(pick)).not.toBe(await look(host.getByTestId('placed-card')));
+  // De knop staat bij die plaats, helemaal in beeld en door niets bedekt.
+  const button = pick.getByTestId('confirm-bet');
+  await expect(button).toBeInViewport({ ratio: 1 });
+  expect(await onTop(button)).toBe(true);
+  await expect(button).toHaveText(/^Zet token (vóór|na) \d{4}$/);
+  // Aantikken kost niets.
+  await expectTokens(pages, counts);
+  await expect(host.getByTestId('my-tokens')).toHaveText('2 tokens');
+
+  // Bob onthult voor Hanne bevestigt: haar token is niet ingezet en dat zegt haar scherm.
+  await revealNow(pages, bob, turn.trackId);
+  await expect(host.getByTestId('bet-missed')).toContainText('niet ingezet');
+  await expect(host.getByTestId('bet-missed')).toContainText('Je hebt nog 2 tokens');
+  await expect(host.getByTestId('bet-missed')).toHaveAttribute('data-reason', 'picked');
+  await expect(host.getByTestId('reveal-my-bet')).toHaveCount(0);
+  await expect(bob.getByTestId('bet-missed')).toHaveCount(0);
+  for (const p of pages) await expect(p.getByTestId('bet-mark')).toHaveCount(0);
+  await expectTokens(pages, counts);
+
+  // Bij de volgende beurt is die melding weg.
+  await bob.getByTestId('next-turn').click();
+  await expect(host.getByTestId('turn-banner')).toBeVisible();
+  await expect(host.getByTestId('bet-missed')).toHaveCount(0);
+  for (const p of pages) await p.context().close();
+});
+
+test('token inzetten zonder verbinding: de keuze blijft staan en er is niets ingezet; opnieuw tikken lukt en je ziet meteen dat je token weg is', async ({ browser }) => {
+  const { host, bob, pages, hanne, counts, turn, wrong } = await hanneBetsOnBob(browser);
+  await host.getByTestId(`slot-${wrong}`).click();
+  // De verbinding valt weg op het moment dat Hanne bevestigt. Meteen daarna
+  // (voor de app herverbindt) staat de melding onderaan, maar niet op de knop.
+  const atClick = await host.evaluate(async () => {
+    window.__mt.drop();
+    document.querySelector('[data-testid="confirm-bet"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const btn = document.querySelector('[data-testid="confirm-bet"]');
+    const r = btn.getBoundingClientRect();
+    return {
+      toast: Boolean(document.querySelector('[data-testid="toast"]')),
+      onTop: btn.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)),
+    };
+  });
+  expect(atClick).toEqual({ toast: true, onTop: true });
+  await expect(host.getByTestId('bet-error')).toContainText('Geen verbinding');
+  await expect(host.getByTestId('bet-error')).toContainText('nog niet ingezet');
+  await expect(host.getByTestId('bet-pick')).toContainText('Nog niet ingezet');
+  const button = host.getByTestId('bet-pick').getByTestId('confirm-bet');
+  await expect(button).toBeEnabled();
+  expect(await onTop(button)).toBe(true);
+  // Terug verbonden: de melding "Geen verbinding" verdwijnt, de keuze blijft.
+  await expect(host.getByTestId('net-status')).toHaveAttribute('data-status', 'online', { timeout: 15_000 });
+  await expect(host.getByTestId('toast')).toHaveCount(0);
+  await expect(host.getByTestId('bet-pick')).toContainText('Nog niet ingezet');
+  await expectTokens(pages, counts);
+  for (const p of pages) await expect(p.getByTestId('bet-mark')).toHaveCount(0);
+
+  // Opnieuw tikken: nu is het token ingezet, en de teller en de tekst zeggen het meteen.
+  await button.click();
+  counts[hanne] = START - 1;
+  await expectTokens(pages, counts);
+  await expect(host.getByTestId('bet-pick')).toHaveCount(0);
+  await expect(host.getByTestId('bet-error')).toHaveCount(0);
+  await expect(host.getByTestId('challenge-banner')).toContainText('Je zette een token in');
+  await expect(host.getByTestId('my-tokens')).toHaveText('1 token');
+  await expect(host.getByTestId('bet-mark')).toHaveAttribute('data-player', hanne);
+
+  // Fout gegokt: na de onthulling staat er dat het token weg is.
+  await revealNow(pages, bob, turn.trackId);
+  await expect(host.getByTestId('reveal-my-bet')).toHaveAttribute('data-correct', 'no');
+  await expect(host.getByTestId('reveal-my-bet')).toContainText('Jouw token lag fout');
+  await expect(host.getByTestId('reveal-my-bet')).toContainText('je hebt nog 1 token');
+  await expect(host.getByTestId('bet-missed')).toHaveCount(0);
+  await expect(bob.getByTestId('reveal-my-bet')).toHaveCount(0);
+  await expectTokens(pages, counts);
+  for (const p of pages) await p.context().close();
+});
+
+test('token inzetten: komt de bevestiging niet aan, dan zegt het scherm dat en is het token na de onthulling niet weg', async ({ browser }) => {
+  // Een verbinding die open lijkt maar niets doorlaat (zoals na een
+  // vergrendeld scherm): Hanne's inzet raakt nooit bij de server.
+  let swallow = false;
+  const { host, pages, counts, turn, wrong } = await hanneBetsOnBob(browser, {
+    beforeChallenge: async (page) => {
+      await page.routeWebSocket(/\/ws$/, (ws) => {
+        const server = ws.connectToServer();
+        ws.onMessage((m) => {
+          if (swallow && String(m).includes('"challenge"')) return;
+          server.send(m);
+        });
+        server.onMessage((m) => ws.send(m));
+      });
+      // Pas een nieuw geladen pagina gebruikt de omleiding; de sessie blijft bewaard.
+      await page.reload();
+      await expect(page.getByTestId('turn-banner')).toBeVisible();
+    },
+  });
+  await host.getByTestId(`slot-${wrong}`).click();
+  swallow = true;
+  await host.getByTestId('confirm-bet').click();
+  await expect(host.getByTestId('confirm-bet')).toHaveText('Even geduld…');
+  await expect(host.getByTestId('confirm-bet')).toBeDisabled();
+  await expect(host.getByTestId('bet-pick')).toContainText('Token wordt ingezet');
+  // Geen antwoord: na enkele seconden zegt het scherm dat het niet gelukt is.
+  await expect(host.getByTestId('bet-error')).toContainText('nog niet ingezet', { timeout: 15_000 });
+  await expect(host.getByTestId('confirm-bet')).toBeEnabled();
+  await expect(host.getByTestId('bet-pick')).toContainText('Nog niet ingezet');
+  await expectTokens(pages, counts);
+
+  // De host onthult zelf terwijl zijn keuze nog openstaat: eerst een vraag.
+  const asked = new Promise((resolve) => host.once('dialog', (d) => resolve(d.message())));
+  await host.getByTestId('reveal-now').click();
+  expect(await asked).toContain('nog niet ingezet');
+  for (const p of pages) await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', turn.trackId);
+  await expect(host.getByTestId('bet-missed')).toHaveAttribute('data-reason', 'sent');
+  await expect(host.getByTestId('bet-missed')).toContainText('Je hebt nog 2 tokens');
+  await expectTokens(pages, counts);
+  for (const p of pages) await p.context().close();
+});

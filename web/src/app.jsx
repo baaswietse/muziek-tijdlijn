@@ -19,7 +19,12 @@ export function App({ loginResult }) {
   const [toast, setToast] = useState(loginResult?.error ? { text: loginResult.error, id: 0 } : null);
   const conn = useRef(null);
 
-  const notify = useCallback((text) => setToast({ text, id: Date.now() }), []);
+  const notify = useCallback((text, code = null) => setToast({ text, code, id: Date.now() }), []);
+  // Is de verbinding terug, dan klopt "Geen verbinding" niet meer: weg ermee.
+  const onStatus = useCallback((s) => {
+    setNet(s);
+    if (s === 'online') setToast((t) => (t?.code === 'OFFLINE' ? null : t));
+  }, []);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -40,8 +45,8 @@ export function App({ loginResult }) {
       code,
       token,
       onState: setView,
-      onStatus: setNet,
-      onError: (msg) => notify(msg.message),
+      onStatus,
+      onError: (msg) => notify(msg.message, msg.code),
       onGone: (msg) => {
         saveSession(null);
         setSession(null);
@@ -57,7 +62,7 @@ export function App({ loginResult }) {
       c.stop();
       conn.current = null;
     };
-  }, [code, token, notify]);
+  }, [code, token, notify, onStatus]);
 
   const send = useCallback((msg) => conn.current?.send(msg) ?? false, []);
 

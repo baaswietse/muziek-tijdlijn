@@ -43,6 +43,11 @@ Details:
   plaats. Gelijke jaren mogen ook hier aan beide kanten. Krijgt een inzetter zo zijn laatste kaart, dan wint hij.
   *Ander nummer* of *Sla beurt over* tijdens het inzetten geeft de tokens terug, net als het verwijderen van de speler
   aan beurt. Het raad-token van een beurt kan je pas in een latere beurt inzetten.
+- Inzetten gaat in twee stappen: een plaats aantikken zet nog niets in (daar staat "Nog niet ingezet"), pas de knop
+  *Zet token …* bij die plaats doet het. Daarna zie je meteen hoeveel tokens je nog hebt. Lukt het versturen niet
+  (geen verbinding, of geen antwoord binnen enkele seconden), dan blijft je keuze staan en zegt het scherm dat je token
+  nog niet ingezet is. Wordt er onthuld voor je bevestigde, dan zegt je scherm dat je token niet ingezet is en dat je
+  het nog hebt. De host die zelf een plaats aantikte, krijgt bij *Onthul* eerst die vraag.
 
 ## Hoe het in elkaar zit
 
@@ -337,7 +342,10 @@ Gedekt, automatisch:
 - De spelregels: plaatsen, gelijke jaren, winnen, lege stapel, overslaan, verwijderen, laat instappen, tokens.
 - Tokens met drie browsers: geven, verplaatsen, opeisen en terugnemen, wie de knoppen ziet, tellers over beurten heen
   en na herverbinden, 2 tokens bij de start en weer 2 bij een nieuw spel, en een token inzetten (gewonnen en verloren,
-  alle plaatsen bezet, zonder lek van het antwoord), en meteen onthullen zodra de anderen hun tokens op hebben.
+  alle plaatsen bezet, zonder lek van het antwoord), en meteen onthullen zodra de anderen hun tokens op hebben. Ook
+  dat een aangetikte maar niet bevestigde plaats niets kost en dat het scherm dat zegt, dat de bevestigknop op een
+  kleine gsm (390×600) in beeld en niet bedekt is, en wat je ziet als bevestigen mislukt (geen verbinding, of een
+  verbinding die niets doorlaat).
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
 - Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag

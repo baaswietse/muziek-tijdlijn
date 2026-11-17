@@ -983,3 +983,64 @@ test('room: acties challenge en reveal', async () => {
   await room.applyAction(state, 'p0', { t: 'reveal' }, opts);
   assert.equal(state.reveal.cardTo, 'p2');
 });
+
+test('inzet: een fout ingezet token is altijd weg, ook voor de host en een laat ingestapte speler', () => {
+  const state = betSetup({ cardYear: 1985, tokens: { p0: 2, p2: 2 } });
+  // Late instapper in de lopende beurt: hij krijgt 2 tokens en kan meteen inzetten.
+  rules.addPlayer(state, { id: 'p4', token: 'token-4-xxxxxxxx', name: 'Els' });
+  rules.placeCard(state, 'p1', 2); // juist
+  rules.placeBet(state, 'p0', 0); // host, fout
+  rules.placeBet(state, 'p4', 3); // laat ingestapt, fout
+  assert.equal(tokensOf(state, 'p0'), 1);
+  assert.equal(tokensOf(state, 'p4'), S - 1);
+  // De host onthult zelf.
+  rules.revealTurn(state, 'p0');
+  assert.deepEqual(state.reveal.bets.map((b) => [b.playerId, b.correct]), [
+    ['p0', false],
+    ['p4', false],
+  ]);
+  assert.equal(tokensOf(state, 'p0'), 1);
+  assert.equal(tokensOf(state, 'p4'), S - 1);
+  assert.equal(tokensOf(state, 'p2'), 2, 'wie niet inzette, houdt zijn tokens');
+  for (const p of state.players) {
+    const v = rules.viewFor(state, p.id);
+    assert.equal(v.players.find((x) => x.id === 'p0').guessTokens, 1);
+    assert.equal(v.players.find((x) => x.id === 'p4').guessTokens, S - 1);
+  }
+});
+
+test('inzet: bewaard en opnieuw geladen tussen inzet en onthulling (herstart of winterslaap), het token blijft weg', () => {
+  const state = betSetup({ cardYear: 1985, tokens: { p2: 2 } });
+  rules.placeCard(state, 'p1', 2);
+  rules.placeBet(state, 'p2', 0);
+  // Zoals de Cloudflare-server bewaart en na een herstart weer inleest.
+  const reloaded = structuredClone(JSON.parse(JSON.stringify(state)));
+  assert.equal(tokensOf(reloaded, 'p2'), 1);
+  assert.deepEqual(reloaded.turn.bets, [{ playerId: 'p2', index: 0 }]);
+  rules.revealTurn(reloaded, 'p1');
+  assert.equal(tokensOf(reloaded, 'p2'), 1);
+  assert.deepEqual(rules.viewFor(reloaded, 'p2').reveal.bets, [{ playerId: 'p2', index: 0, correct: false }]);
+});
+
+test('inzet: komt de inzet pas na de onthulling aan, dan kost ze niets', () => {
+  const state = betSetup({ cardYear: 1985, tokens: { p2: 2 } });
+  rules.placeCard(state, 'p1', 2);
+  rules.revealTurn(state, 'p1');
+  throwsCode(() => rules.placeBet(state, 'p2', 0), 'BAD_PHASE');
+  assert.equal(tokensOf(state, 'p2'), 2);
+  assert.deepEqual(rules.viewFor(state, 'p2').reveal.bets, []);
+});
+
+test('inzet: het raad-token na een foute inzet is een nieuw token, de inzet blijft verbruikt', () => {
+  const state = betSetup({ cardYear: 1985, tokens: { p2: 2 } });
+  rules.placeCard(state, 'p1', 2);
+  rules.placeBet(state, 'p2', 0);
+  rules.revealTurn(state, 'p1');
+  assert.equal(tokensOf(state, 'p2'), 1);
+  // p2 raadde artiest en nummer: daar komt een token bij, de inzet blijft fout.
+  rules.giveToken(state, 'p2', 'p2');
+  assert.equal(tokensOf(state, 'p2'), 2);
+  assert.equal(state.reveal.bets[0].correct, false);
+  rules.giveToken(state, 'p2', null);
+  assert.equal(tokensOf(state, 'p2'), 1);
+});

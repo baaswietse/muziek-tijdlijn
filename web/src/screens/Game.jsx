@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { Timeline, YearChips, slotLabel } from '../components/Timeline.jsx';
 import { MusicPanel } from '../components/MusicPanel.jsx';
 import { Rules } from '../components/Rules.jsx';
@@ -19,15 +19,28 @@ export function Game({ view, send, music, onLeave }) {
   const target = view.settings.target;
 
   // Jouw voorlopige keuze: meteen zichtbaar bij jou, en via de server bij de rest.
-  const turnKey = playing || challenge ? `${view.game}:${view.turn.number}:${activeId}` : '';
+  // De fase hoort erbij: na "Ander nummer" in de tussenfase begint je keuze opnieuw.
+  const turnKey = playing || challenge ? `${view.phase}:${view.game}:${view.turn.number}:${activeId}` : view.phase;
   const [pick, setPick] = useState(null);
   const [placing, setPlacing] = useState(false);
   // Waar jij een token wil inzetten: eerst aantikken, dan bevestigen.
   const [betPick, setBetPick] = useState(null);
+  // Hoe het bevestigen loopt: null (nog niet getikt), 'sending' (onderweg),
+  // 'offline' (geen verbinding) of 'slow' (de server antwoordde niet).
+  const [betSend, setBetSend] = useState(null);
+  // Na de onthulling: 'picked' (aangetikt, niet bevestigd) of 'sent' (bevestigd,
+  // maar niet aangekomen) als je token niet ingezet raakte. Dat zegt het scherm
+  // dan, want je hebt het nog.
+  const [missed, setMissed] = useState(null);
+  const unconfirmed = useRef(null);
   useEffect(() => {
+    const left = unconfirmed.current;
+    const counted = view.reveal && (view.reveal.bets ?? []).some((b) => b.playerId === me);
+    setMissed(left && view.reveal && !counted ? left : null);
     setPick(myTurn ? view.turn.pendingIndex : null);
     setPlacing(false);
     setBetPick(null);
+    setBetSend(null);
   }, [turnKey]);
 
   const bets = challenge ? view.turn.bets : [];
@@ -39,6 +52,28 @@ export function Game({ view, send, music, onLeave }) {
   const canBet = challenge && activeId !== me && !myBet && hasTokens && !slotsFull;
   // Nam iemand anders jouw plaats net in, dan vervalt je keuze.
   const betChoice = canBet && betPick !== null && !taken.has(betPick) ? betPick : null;
+  const myTokens = mine?.guessTokens ?? 0;
+  // Loopt na het effect hierboven: onthoudt of er bij de vorige weergave nog een
+  // keuze openstond, zodat dat effect bij de onthulling weet wat er wegviel.
+  useEffect(() => {
+    unconfirmed.current = betChoice === null ? null : betSend ? 'sent' : 'picked';
+  });
+  // Komt er geen antwoord op je inzet, dan zegt het scherm dat na even.
+  useEffect(() => {
+    if (betSend !== 'sending') return undefined;
+    const timer = setTimeout(() => setBetSend('slow'), BET_TIMEOUT);
+    return () => clearTimeout(timer);
+  }, [betSend]);
+  // De bevestigknop staat bij de gekozen plaats; schuif hem zo nodig in beeld,
+  // boven de plek waar meldingen onderaan verschijnen.
+  useEffect(() => {
+    if (betChoice === null) return;
+    const btn = document.querySelector('[data-testid="confirm-bet"]');
+    if (!btn) return;
+    const room = window.innerHeight - 120;
+    const { bottom } = btn.getBoundingClientRect();
+    if (bottom > room) window.scrollBy(0, bottom - room);
+  }, [betChoice]);
   const nameOf = (id) => (id === me ? 'jij' : byId.get(id)?.name ?? 'iemand');
   // Namen bij de gaten: wie zette waar in (en na de onthulling: juist of fout).
   const marks = (challenge ? bets : reveal?.bets ?? []).map((b) => ({
@@ -49,6 +84,22 @@ export function Game({ view, send, music, onLeave }) {
   function choose(i) {
     setPick(i);
     send({ t: 'select', index: i });
+  }
+
+  function chooseBet(i) {
+    setBetPick(i);
+    setBetSend(null);
+  }
+
+  function confirmBet() {
+    if (betChoice === null || betSend === 'sending') return;
+    // Lukt het versturen niet, dan blijft je keuze staan en zegt het scherm waarom.
+    setBetSend(send({ t: 'challenge', index: betChoice }) ? 'sending' : 'offline');
+  }
+
+  function revealNow() {
+    if (betChoice !== null && !confirm('Je token is nog niet ingezet. Toch onthullen?')) return;
+    send({ t: 'reveal' });
   }
 
   function confirmPlace() {
@@ -63,7 +114,7 @@ export function Game({ view, send, music, onLeave }) {
   const canGiveToken = Boolean(reveal) && (me === reveal.playerId || isHost);
 
   return (
-    <main class={`page game${(myTurn && pick !== null) || betChoice !== null ? ' has-bar' : ''}`}>
+    <main class={`page game${myTurn && pick !== null ? ' has-bar' : ''}`}>
       {finished && <Winners view={view} byId={byId} />}
 
       {playing && (
@@ -81,13 +132,14 @@ export function Game({ view, send, music, onLeave }) {
       {challenge && (
         <ChallengeBanner
           view={view}
-          send={send}
+          onReveal={revealNow}
           activeName={nameOf(activeId)}
           canReveal={activeId === me || isHost}
           canBet={canBet}
           myBet={myBet}
-          tokens={mine?.guessTokens ?? 0}
+          tokens={myTokens}
           slotsFull={slotsFull && activeId !== me && !myBet && hasTokens}
+          picking={betChoice !== null}
         />
       )}
 
@@ -98,7 +150,18 @@ export function Game({ view, send, music, onLeave }) {
           own={reveal.playerId === me}
           tokenName={reveal.guessTokenTo ? (reveal.guessTokenTo === me ? 'jou' : byId.get(reveal.guessTokenTo)?.name) : null}
           cardTo={reveal.cardTo ? (reveal.cardTo === me ? 'Jij krijgt' : `${byId.get(reveal.cardTo)?.name ?? 'Iemand'} krijgt`) : null}
+          myBet={reveal.bets.find((b) => b.playerId === me)}
+          myTokens={myTokens}
         />
+      )}
+
+      {reveal && missed && (
+        <p class="notice warn" role="status" data-testid="bet-missed" data-reason={missed}>
+          {missed === 'sent'
+            ? 'Je token raakte niet tot bij de server en is niet ingezet.'
+            : 'Je token is niet ingezet: je had een plaats aangetikt maar niet bevestigd.'}{' '}
+          Je hebt nog <strong>{tokenText(myTokens)}</strong>.
+        </p>
       )}
 
       {reveal && (canGiveToken ? <TokenPicker view={view} send={send} /> : <TokenClaim view={view} send={send} />)}
@@ -134,11 +197,39 @@ export function Game({ view, send, music, onLeave }) {
             testid="active-timeline"
             cards={active.timeline}
             pendingIndex={pendingIndex}
-            onPick={myTurn && !placing ? choose : canBet ? setBetPick : undefined}
+            onPick={myTurn && !placing ? choose : canBet ? chooseBet : undefined}
             reveal={reveal && reveal.playerId === active.id ? reveal : undefined}
             lockedIndex={challenge ? view.turn.placedIndex : null}
             lockedText={`Hier legde ${activeId === me ? 'je' : active.name} het nummer`}
-            pickText={challenge ? 'Hier zet je je token' : undefined}
+            betPick={
+              betChoice === null
+                ? undefined
+                : {
+                    state: betSend ?? 'picked',
+                    title: betSend === 'sending' ? 'Token wordt ingezet…' : 'Nog niet ingezet',
+                    hint: betSend === 'sending' ? 'Even geduld.' : 'Je token is pas ingezet als je op de knop tikt.',
+                    action: (
+                      <>
+                        {(betSend === 'offline' || betSend === 'slow') && (
+                          <p class="notice error" role="alert" data-testid="bet-error">
+                            {betSend === 'offline'
+                              ? 'Geen verbinding: je token is nog niet ingezet. Tik opnieuw zodra je weer verbonden bent.'
+                              : 'Je token is nog niet ingezet: de server gaf geen antwoord. Tik opnieuw.'}
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          class="btn primary big"
+                          onClick={confirmBet}
+                          disabled={betSend === 'sending'}
+                          data-testid="confirm-bet"
+                        >
+                          {betSend === 'sending' ? 'Even geduld…' : `Zet token ${slotLabel(active.timeline, betChoice)}`}
+                        </button>
+                      </>
+                    ),
+                  }
+            }
             blocked={taken}
             marks={marks}
           />
@@ -184,17 +275,14 @@ export function Game({ view, send, music, onLeave }) {
           </button>
         </div>
       )}
-
-      {betChoice !== null && (
-        <div class="confirm-bar">
-          <button class="btn primary big" onClick={() => send({ t: 'challenge', index: betChoice })} data-testid="confirm-bet">
-            Zet token {slotLabel(active.timeline, betChoice)}
-          </button>
-        </div>
-      )}
     </main>
   );
 }
+
+// Zolang wacht je token op een antwoord van de server.
+const BET_TIMEOUT = 5000;
+
+const tokenText = (n) => `${n} ${n === 1 ? 'token' : 'tokens'}`;
 
 function Score({ n, target }) {
   return (
@@ -208,23 +296,24 @@ function Score({ n, target }) {
  * Tussenfase na het leggen. De speler aan beurt en de host kunnen onthullen;
  * wie een token heeft, kan het inzetten op een andere plaats.
  */
-function ChallengeBanner({ view, send, activeName, canReveal, canBet, myBet, tokens, slotsFull }) {
+function ChallengeBanner({ view, onReveal, activeName, canReveal, canBet, myBet, tokens, slotsFull, picking }) {
   const mineTurn = view.turn.playerId === view.you;
   const who = activeName[0].toUpperCase() + activeName.slice(1);
-  const count = `${tokens} ${tokens === 1 ? 'token' : 'tokens'}`;
+  const count = <strong data-testid="my-tokens">{tokenText(tokens)}</strong>;
   let text;
   if (mineTurn) text = 'Wie een token heeft, kan nog een andere plaats kiezen. Tik op Onthul als iedereen klaar is.';
-  else if (myBet) text = `Je zette een token in. Wachten tot ${activeName} of de host onthult…`;
-  else if (canBet) text = `Ligt ${activeName} fout? Tik een andere plaats aan en zet er een token in. Je hebt ${count}.`;
-  else if (slotsFull) text = `Alle andere plaatsen zijn al bezet. Je houdt je ${count}. Wachten op de onthulling…`;
+  else if (myBet) text = <>Je zette een token in en hebt nog {count}. Wachten tot {activeName} of de host onthult…</>;
+  else if (canBet) text = <>Ligt {activeName} fout? Tik een andere plaats aan en zet er een token in. Je hebt {count}.</>;
+  else if (slotsFull) text = <>Alle andere plaatsen zijn al bezet. Je houdt je {count}. Wachten op de onthulling…</>;
   else text = `${who} legde het nummer. Wie een token heeft, kan nog inzetten. Wachten op de onthulling…`;
   return (
     <section class="now challenge" data-testid="challenge-banner" data-active={view.turn.playerId} data-can-bet={canBet ? 'yes' : 'no'}>
       <div class="grow">
-        <p class="now-who">{mineTurn ? 'Je kaart ligt vast' : canBet ? 'Token inzetten?' : 'Even wachten'}</p>
+        <p class="now-who">{mineTurn ? 'Je kaart ligt vast' : myBet ? 'Token ingezet' : canBet ? 'Token inzetten?' : 'Even wachten'}</p>
         <p class="now-what">{text}</p>
+        {/* Heb je zelf een plaats aangetikt, dan is bevestigen bij die plaats de hoofdknop. */}
         {canReveal && (
-          <button class="btn primary big challenge-reveal" onClick={() => send({ t: 'reveal' })} data-testid="reveal-now">
+          <button class={`btn${picking ? '' : ' primary'} big challenge-reveal`} onClick={onReveal} data-testid="reveal-now">
             Onthul
           </button>
         )}
@@ -233,7 +322,7 @@ function ChallengeBanner({ view, send, activeName, canReveal, canBet, myBet, tok
   );
 }
 
-function Reveal({ reveal, name, own, tokenName, cardTo }) {
+function Reveal({ reveal, name, own, tokenName, cardTo, myBet, myTokens }) {
   const { card, correct } = reveal;
   return (
     <section class={`reveal ${correct ? 'good' : 'bad'}`} data-testid="reveal" data-correct={correct ? 'yes' : 'no'} data-track={card.id}>
@@ -252,6 +341,11 @@ function Reveal({ reveal, name, own, tokenName, cardTo }) {
         </p>
       )}
       {reveal.bets.length > 0 && correct && <p class="reveal-token">De ingezette tokens zijn verloren.</p>}
+      {myBet && (
+        <p class="reveal-token" data-testid="reveal-my-bet" data-correct={myBet.correct ? 'yes' : 'no'}>
+          Jouw token lag {myBet.correct ? 'juist' : 'fout'}. Een ingezet token ben je altijd kwijt: je hebt nog {tokenText(myTokens)}.
+        </p>
+      )}
       {tokenName && (
         <p class="reveal-token" data-testid="reveal-token" data-player={reveal.guessTokenTo}>
           Token voor {tokenName}

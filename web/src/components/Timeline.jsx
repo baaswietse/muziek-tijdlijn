@@ -31,6 +31,25 @@ function Mystery({ own, text, testid = 'pending-card' }) {
   );
 }
 
+/**
+ * Een aangetikte plaats voor een token, nog niet ingezet: ziet er bewust anders
+ * uit dan de vastgelegde kaart, met de knop om te bevestigen er meteen onder.
+ */
+function BetPick({ pick }) {
+  return (
+    <li class="tl-pick" data-testid="bet-pick" data-state={pick.state}>
+      <span class="tl-pick-head" data-testid="pending-card">
+        <span class="tl-pick-mark" aria-hidden="true">?</span>
+        <span class="tl-text">
+          <span class="tl-title">{pick.title}</span>
+          <span class="tl-artist">{pick.hint}</span>
+        </span>
+      </span>
+      {pick.action}
+    </li>
+  );
+}
+
 /** Een ingezet token bij een gat: wie, en na de onthulling of het juist was. */
 function BetMark({ mark }) {
   const verdict = mark.correct === undefined ? '' : mark.correct ? ' — juist' : ' — fout';
@@ -53,6 +72,7 @@ function BetMark({ mark }) {
  * @param {Array} [props.marks]      ingezette tokens { playerId, index, name, correct? }
  * @param {Set} [props.blocked]      plaatsen die niet meer gekozen kunnen worden
  * @param {string} [props.freshId]   kaart die er net bij kwam (via een token)
+ * @param {object} [props.betPick]   aangetikte plaats voor een token: { state, title, hint, action }
  */
 export function Timeline({
   cards,
@@ -62,10 +82,10 @@ export function Timeline({
   testid,
   lockedIndex = null,
   lockedText,
-  pickText,
   marks = [],
   blocked,
   freshId = null,
+  betPick,
 }) {
   const rows = [];
   for (let i = 0; i <= cards.length; i++) {
@@ -87,7 +107,7 @@ export function Timeline({
     } else if (onPick) {
       rows.push(
         pendingIndex === i ? (
-          <Mystery key={`m${i}`} own text={pickText} />
+          betPick ? <BetPick key={`p${i}`} pick={betPick} /> : <Mystery key={`m${i}`} own />
         ) : (
           <li class="tl-slot" key={`s${i}`}>
             <button type="button" class="slot-btn" data-testid={`slot-${i}`} onClick={() => onPick(i)}>

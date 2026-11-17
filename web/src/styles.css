@@ -903,6 +903,53 @@ details ul {
   display: flex;
 }
 
+/* Een aangetikte plaats voor een token, nog niet bevestigd: in de kleur van de
+   plaatsknoppen (niet amber zoals de vastgelegde kaart), met de knop erbij. */
+.tl-pick {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.tl-pick::before {
+  content: '';
+  position: absolute;
+  left: -18px;
+  top: 28px;
+  width: 12px;
+  height: 2px;
+  background: var(--accent);
+}
+
+.tl-pick-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tl-pick-mark {
+  font-family: var(--serif);
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 3.1em;
+  color: var(--accent);
+}
+
+.tl-pick .tl-title {
+  color: var(--ink);
+}
+
+.tl-pick .tl-artist {
+  color: var(--ink);
+  opacity: 0.8;
+}
+
 /* Een ingezet token bij een gat op de tijdlijn van de speler aan beurt. */
 .tl-bet {
   align-self: flex-start;
