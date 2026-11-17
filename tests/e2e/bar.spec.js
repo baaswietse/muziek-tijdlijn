@@ -1,5 +1,21 @@
 import { test, expect } from '@playwright/test';
-import { openPhone, hostGame, setupMusic, joinGame, myId, playCount, lastPlayed, YEAR, activeYears, correctSlot } from './helpers.js';
+import {
+  openPhone,
+  hostGame,
+  setupMusic,
+  joinGame,
+  myId,
+  playCount,
+  lastPlayed,
+  YEAR,
+  activeYears,
+  correctSlot,
+  wrongSlot,
+  hostAction,
+  placeCard,
+  placeToken,
+  passWaiting,
+} from './helpers.js';
 
 // De hoofdknop van de beurt ("Leg het …", "Onthul", "Volgende beurt", en voor
 // wie moet kiezen "Ik zet geen token in") staat altijd op dezelfde plek: in een
@@ -54,7 +70,7 @@ async function phonesWithBob(browser, names, viewport) {
   for (let i = 0; i <= pages.length; i++) {
     await expect.poll(() => playCount(host)).toBe(n);
     if ((await host.getByTestId('turn-banner').getAttribute('data-active')) === ids[1]) break;
-    await host.getByTestId('skip-turn').click();
+    await hostAction(host, 'skip-turn');
     n++;
   }
   const bob = pages[1];
@@ -71,7 +87,7 @@ test('hoofdknop: Leg, Onthul en Volgende beurt op exact dezelfde plek, en een du
   await expect(place).toBeDisabled();
   await expect(place).toHaveText('Kies eerst een plaats');
   const before = await boxOf(place);
-  await bob.getByTestId(`slot-${slot}`).click();
+  await placeCard(bob, slot);
   await expect(place).toBeEnabled();
   const atPlace = await boxOf(place);
   expect(atPlace).toEqual(before);
@@ -125,7 +141,7 @@ test('hoofdknop: een nieuwe knop reageert even niet, ook niet bij leggen gevolgd
   // Bob legt met een dubbele tik op "Leg het": de tweede tik mag niets doen,
   // ook niet op de knop die daarna op dezelfde plek verschijnt.
   const { pages, host, bob, slot } = await phonesWithBob(browser, ['Hanne', 'Bob']);
-  await bob.getByTestId(`slot-${slot}`).click();
+  await placeCard(bob, slot);
   const place = bob.getByTestId('confirm-place');
   await expect(place).toBeEnabled();
   await place.dblclick();
@@ -144,7 +160,7 @@ test('hoofdknop: een nieuwe knop reageert even niet, ook niet bij leggen gevolgd
 
 test('hoofdknop: een melding verschijnt boven de balk en bedekt de knop niet', async ({ browser }) => {
   const { pages, bob, slot } = await phonesWithBob(browser, ['Hanne', 'Bob'], { width: 390, height: 600 });
-  await bob.getByTestId(`slot-${slot}`).click();
+  await placeCard(bob, slot);
   await expect(bob.getByTestId('confirm-place')).toBeEnabled();
   // De verbinding valt weg en Bob tikt op "Leg het": er komt een melding.
   const seen = await bob.evaluate(async () => {
@@ -173,16 +189,63 @@ test('hoofdknop: een melding verschijnt boven de balk en bedekt de knop niet', a
   for (const p of pages) await p.context().close();
 });
 
-test('lange pagina (390×500): elke verplichte knop staat in beeld zonder scrollen, voor elke rol en fase', async ({ browser }) => {
-  const { pages, host, bob, slot } = await phonesWithBob(browser, ['Hanne', 'Bob', 'Cas'], { width: 390, height: 500 });
-  const cas = pages[2];
-  // De pagina is veel langer dan het scherm.
-  for (const p of pages) {
-    expect(await p.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeGreaterThan(400);
+/**
+ * Bob speelt `turns` beurten juist (Hanne past telkens, de host slaat haar
+ * eigen beurten over): daarna heeft hij `turns` kaarten meer. Geeft het aantal
+ * gestarte nummers terug.
+ */
+async function bobCollects({ host, bob, ids, pages }, turns, plays) {
+  for (let k = 0; k < turns; k++) {
+    for (let i = 0; i < 3; i++) {
+      await expect.poll(() => playCount(host)).toBe(plays);
+      if ((await host.getByTestId('turn-banner').getAttribute('data-active')) === ids[1]) break;
+      await hostAction(host, 'skip-turn');
+      plays++;
+    }
+    const year = YEAR.get(await lastPlayed(host));
+    await placeCard(bob, correctSlot(await activeYears(bob), year));
+    await bob.getByTestId('confirm-place').click();
+    await passWaiting(pages, bob);
+    await bob.getByTestId('reveal-now').click();
+    await expect(bob.getByTestId('reveal')).toHaveAttribute('data-correct', 'yes');
+    await bob.getByTestId('next-turn').click();
+    plays++;
   }
+  return plays;
+}
+
+test('klein scherm (390×600) met 9 kaarten: elke verplichte knop staat in beeld, voor elke rol en fase', async ({ browser }) => {
+  test.setTimeout(240_000);
+  const size = { width: 390, height: 600 };
+  const { pages, host, bob, ids } = await phonesWithBob(browser, ['Hanne', 'Bob'], size);
+  // Bob verzamelt 9 kaarten (het doel is 10), daarna stapt Cas nog in.
+  let plays = await bobCollects({ host, bob, ids, pages }, 8, await playCount(host));
+  const cas = await openPhone(browser);
+  await cas.setViewportSize(size);
+  await cas.getByTestId('code-input').fill(await host.getByTestId('room-code').textContent());
+  await cas.getByTestId('name-input').fill('Cas');
+  await cas.getByTestId('enter-button').click();
+  await expect(cas.getByTestId('turn-banner')).toBeVisible();
+  pages.push(cas);
+  ids.push(await myId(cas));
+  for (let i = 0; i < 4; i++) {
+    await expect.poll(() => playCount(host)).toBe(plays);
+    if ((await host.getByTestId('turn-banner').getAttribute('data-active')) === ids[1]) break;
+    await hostAction(host, 'skip-turn');
+    plays++;
+  }
+  await expect(bob.getByTestId('turn-banner')).toHaveAttribute('data-mine', 'yes');
+  expect(await activeYears(bob)).toHaveLength(9);
+  // De pagina van Bob is langer dan het scherm.
+  expect(await bob.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeGreaterThan(100);
+
   // Aan de beurt: de knop om te leggen (eerst nog uit), ook onderaan de pagina.
   await expectReachable(bob, 'confirm-place');
-  await bob.getByTestId(`slot-${slot}`).click();
+  // Bewust fout: met een 10e kaart zou Bob winnen en is er geen volgende beurt.
+  const year = YEAR.get(await lastPlayed(host));
+  const slot = wrongSlot(await activeYears(bob), year);
+  expect(slot).not.toBeNull();
+  await placeCard(bob, slot);
   await expectReachable(bob, 'confirm-place');
   await bob.getByTestId('confirm-place').click();
 
@@ -192,7 +255,13 @@ test('lange pagina (390×500): elke verplichte knop staat in beeld zonder scroll
   await expectReachable(host, 'pass-bet');
   await expectReachable(cas, 'pass-bet');
   await expectReachable(bob, 'reveal-now');
-  await toBottom(cas);
+  // Cas kiest een plaats voor zijn token: de bevestigknop staat in beeld.
+  const other = slot === 0 ? 9 : 0;
+  await placeToken(cas, other);
+  const confirmBet = cas.getByTestId('confirm-bet');
+  await expect(confirmBet).toBeInViewport({ ratio: 1 });
+  expect(await onTop(confirmBet), 'confirm-bet is bedekt').toBe(true);
+  await expectReachable(cas, 'pass-bet');
   await cas.getByTestId('pass-bet').click();
   await toBottom(host);
   await host.getByTestId('pass-bet').click();
@@ -212,6 +281,14 @@ test('lange pagina (390×500): elke verplichte knop staat in beeld zonder scroll
       await expect.poll(() => onTop(loc), { message: `${part} is bedekt` }).toBe(true);
     }
   }
+  // Het raad-token: de knoppen voor de speler aan beurt, opeisen voor Cas.
+  for (const b of await bob.getByTestId('token-button').all()) {
+    await b.scrollIntoViewIfNeeded();
+    await expect(b).toBeInViewport({ ratio: 1 });
+    expect(await onTop(b)).toBe(true);
+  }
+  await cas.getByTestId('token-claim-button').scrollIntoViewIfNeeded();
+  await expect(cas.getByTestId('token-claim-button')).toBeInViewport({ ratio: 1 });
   // Doorgaan: de speler aan beurt en de host.
   await expectReachable(bob, 'next-turn');
   await expectReachable(host, 'next-turn');

@@ -47,11 +47,23 @@ Details:
   plaats. Gelijke jaren mogen ook hier aan beide kanten. Krijgt een inzetter zo zijn laatste kaart, dan wint hij.
   *Ander nummer* of *Sla beurt over* tijdens het inzetten geeft de tokens terug, net als het verwijderen van de speler
   aan beurt. Het raad-token van een beurt kan je pas in een latere beurt inzetten.
+- Het spelscherm toont één ding per moment. Bovenaan een balk met links *Stand* (je eigen kaarten en tokens; een tik
+  toont alle spelers, wie aan de beurt is en wie niet verbonden is, het beurtnummer en hoeveel nummers er nog in de
+  stapel zitten) en rechts het menu (spelcode, spelregels, het spel verlaten, en voor de host de muziek, *Ander
+  nummer*, *Sla beurt over*, een speler verwijderen en *Stop dit spel*). Daaronder één regel uitleg en één tijdlijn:
+  die waarop nu gespeeld wordt. Tijdens andermans beurt wissel je tussen zijn tijdlijn en de jouwe; via de stand kan
+  je elke tijdlijn bekijken. Een probleem met de muziek ziet de host als één regel met een knop op het spelscherm
+  zelf, niet alleen in het menu.
 - De knop die je nodig hebt, staat altijd op dezelfde plek: in een zwevende balk onderaan, in beeld zonder scrollen,
   ook bij een lange tijdlijn. Na elkaar: *Leg het …* (aan beurt), *Ik zet geen token in* (wie nog moet kiezen; een
   host die moet kiezen, kiest eerst en krijgt daarna *Onthul*), *Onthul* (aan beurt en host; uitgeschakeld met op wie
-  er gewacht wordt) en *Volgende beurt*. Een nieuwe knop reageert even (0,9 s) niet, zodat een dubbele tik nooit twee
-  stappen doet. Meldingen verschijnen boven de balk. Na de onthulling schuift de uitkomst vanzelf in beeld.
+  er gewacht wordt), *Volgende beurt* en op het einde (host) *Nog een spel*. Een nieuwe knop reageert even (0,9 s)
+  niet, zodat een dubbele tik nooit twee stappen doet. Meldingen verschijnen boven de balk.
+- De onthulling (ook van een gekochte kaart, en op het einde met de winnaars) schuift als paneel van onderaan over de
+  tijdlijn, net boven de balk: oordeel, jaar, titel, artiest, wat er met de tokens gebeurde en wie het raad-token
+  krijgt. De tijdlijn eronder verspringt niet; de nieuwe kaart staat er gemarkeerd in. Veeg het paneel naar onder of
+  tik op *Verberg* om de tijdlijnen te bekijken; de strook die overblijft opent het weer. Bij de volgende beurt
+  verdwijnt het vanzelf.
 - Inzetten gaat in twee stappen: een plaats aantikken zet nog niets in (daar staat "Nog niet ingezet"), pas de knop
   *Zet token …* bij die plaats doet het. Daarna zie je meteen hoeveel tokens je nog hebt. Lukt het versturen niet
   (geen verbinding, of geen antwoord binnen enkele seconden), dan blijft je keuze staan en zegt het scherm dat je token
@@ -429,8 +441,8 @@ Gedekt, automatisch:
   wie wegvalt niets blokkeert maar na zijn terugkeer weer moet kiezen, en de noodknop van de host. En een kaart kopen:
   een derde token verdienen, kopen in twee stappen, wat iedereen dan ziet, en niet voor de laatste kaart.
 - De zwevende balk: *Leg het*, *Onthul* en *Volgende beurt* op exact dezelfde plek, een dubbele tik doet geen twee
-  stappen, een melding bedekt de knop niet, en op een lage gsm (390×500) staat elke verplichte knop voor elke rol en
-  fase in beeld zonder scrollen, net als de uitkomst na de onthulling.
+  stappen, een melding bedekt de knop niet, en op een kleine gsm (390×600) met 9 kaarten staat elke verplichte knop
+  voor elke rol en fase in beeld, net als de uitkomst na de onthulling.
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
 - Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag

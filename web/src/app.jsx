@@ -5,11 +5,11 @@ import { useInvite } from './lib/useInvite.js';
 import { keepAwake } from './lib/wakelock.js';
 import { useMusic } from './lib/music.js';
 import { useDeck } from './lib/deck.js';
-import { isMock } from './spotify/index.js';
 import { APP_NAME } from './config.js';
 import { Home } from './screens/Home.jsx';
 import { Lobby } from './screens/Lobby.jsx';
 import { Game } from './screens/Game.jsx';
+import { MockChip, NetBanner, NetDot } from './components/Status.jsx';
 import { InviteBusy, InviteConfirm, InviteJoin } from './screens/Invite.jsx';
 
 export function App({ loginResult }) {
@@ -110,35 +110,28 @@ export function App({ loginResult }) {
   } else if (view.phase === 'lobby') {
     screen = <Lobby view={view} send={send} music={music} deck={deck} onLeave={leave} notify={notify} />;
   } else {
-    screen = <Game view={view} send={send} music={music} deck={deck} onLeave={leave} />;
+    // Het spelscherm heeft een eigen bovenbalk (stand en menu), met daarin ook
+    // de verbindingsstatus en de testmodus.
+    screen = <Game view={view} send={send} music={music} deck={deck} net={net} onLeave={leave} />;
   }
+  const inGame = screen?.type === Game;
 
   return (
     <div class="app">
-      <header class="topbar">
-        <span class="brand">
-          <span class="brand-mark" aria-hidden="true" />
-          {APP_NAME}
-        </span>
-        <span class="topbar-right">
-          {isMock && (
-            <a class="chip warn" href="?mock=0" title="Testmodus: Spotify is nagebootst, er komt geen geluid. Tik om de testmodus uit te zetten.">
-              testmodus
-            </a>
-          )}
-          {view && <span class="chip code" data-testid="room-code">{view.code}</span>}
-          {session && (
-            <span class={`net ${net}`} data-testid="net-status" data-status={net} title={NET_LABEL[net]}>
-              <span class="visually-hidden">{NET_LABEL[net]}</span>
-            </span>
-          )}
-        </span>
-      </header>
-      {session && view && net !== 'online' && (
-        <div class="banner" role="status">
-          Verbinding kwijt. Ik probeer opnieuw…
-        </div>
+      {!inGame && (
+        <header class="topbar">
+          <span class="brand">
+            <span class="brand-mark" aria-hidden="true" />
+            {APP_NAME}
+          </span>
+          <span class="topbar-right">
+            <MockChip />
+            {view && <span class="chip code" data-testid="room-code">{view.code}</span>}
+            {session && <NetDot net={net} />}
+          </span>
+        </header>
       )}
+      {!inGame && session && view && net !== 'online' && <NetBanner />}
       {screen}
       {toast && (
         <div class="toast" role="alert" key={toast.id} data-testid="toast" onClick={() => setToast(null)}>
@@ -148,5 +141,3 @@ export function App({ loginResult }) {
     </div>
   );
 }
-
-const NET_LABEL = { online: 'Verbonden', connecting: 'Verbinden…', offline: 'Geen verbinding' };

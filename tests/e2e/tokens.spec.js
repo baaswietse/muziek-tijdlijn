@@ -1,5 +1,19 @@
 import { test, expect } from '@playwright/test';
-import { openPhone, hostGame, setupMusic, joinGame, setTarget, myId, passWaiting, YEAR, TRACKS } from './helpers.js';
+import {
+  openPhone,
+  hostGame,
+  setupMusic,
+  joinGame,
+  setTarget,
+  myId,
+  passWaiting,
+  YEAR,
+  TRACKS,
+  hostAction,
+  placeCard,
+  placeToken,
+  tokenTargets,
+} from './helpers.js';
 
 // Tokens: iedereen begint een spel met 2 tokens; wie artiest en nummer als
 // eerste juist raadt (hardop aan tafel), krijgt na de onthulling een token
@@ -75,7 +89,7 @@ async function skipUntil({ host, ids }, n, targetId) {
     await yearOfPlay(host, n);
     const activeId = await host.getByTestId('turn-banner').getAttribute('data-active');
     if (activeId === targetId) return n;
-    await host.getByTestId('skip-turn').click();
+    await hostAction(host, 'skip-turn');
     n++;
     await expect(host.getByTestId('turn-banner')).not.toHaveAttribute('data-active', activeId);
   }
@@ -87,7 +101,7 @@ async function skipUntil({ host, ids }, n, targetId) {
  * eerst de tussenfase (`challenge`), anders meteen de onthulling.
  */
 async function place(pages, turn, slot, { challenge }) {
-  await turn.active.getByTestId(`slot-${slot}`).click();
+  await placeCard(turn.active, slot);
   await turn.active.getByTestId('confirm-place').click();
   if (challenge) {
     for (const p of pages) {
@@ -166,7 +180,7 @@ test('tokens: 2 bij de start, geven, verplaatsen, terugnemen, blijven staan en w
   // Zorg dat een gast aan de beurt is: de host slaat zijn eigen beurt over.
   await yearOfPlay(host, n);
   if ((await host.getByTestId('turn-banner').getAttribute('data-mine')) === 'yes') {
-    await host.getByTestId('skip-turn').click();
+    await hostAction(host, 'skip-turn');
     await expect(host.getByTestId('turn-banner')).toHaveAttribute('data-mine', 'no');
     n++;
   }
@@ -296,7 +310,7 @@ test('token inzetten: gewonnen bij een foute speler, verloren bij een juiste, al
   // jaar), dan vraagt de host eerst een ander nummer.
   let t1 = await currentTurn({ pages, host, ids, n });
   for (let i = 0; i < 10 && badSlot(t1.years, t1.year) === null; i++) {
-    await host.getByTestId('skip-track').click();
+    await hostAction(host, 'skip-track');
     n++;
     t1 = await currentTurn({ pages, host, ids, n });
   }
@@ -319,12 +333,12 @@ test('token inzetten: gewonnen bij een foute speler, verloren bij een juiste, al
     await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-can-bet', 'yes');
     await expect(p.getByTestId('challenge-banner')).toContainText('Je hebt 2 tokens');
   }
-  // De vastgelegde plaats kan je niet kiezen.
-  await expect(betterPage.getByTestId(`slot-${wrong}`)).toHaveCount(0);
+  // De vastgelegde plaats kan je niet kiezen; de andere wel.
+  expect(await tokenTargets(betterPage)).toEqual([0, 1].filter((i) => i !== wrong));
 
   // Tweestaps: aantikken kost nog niets, pas bevestigen zet het token in.
   const right = rightSlot(t1.years, t1.year);
-  await betterPage.getByTestId(`slot-${right}`).click();
+  await placeToken(betterPage, right);
   await expect(betterPage.getByTestId('pending-card')).toBeVisible();
   await expectTokens(pages, counts);
   await betterPage.getByTestId('confirm-bet').click();
@@ -339,7 +353,7 @@ test('token inzetten: gewonnen bij een foute speler, verloren bij een juiste, al
   // Nu zijn beide plaatsen bezet: de derde speler kan niet meer inzetten en houdt zijn tokens.
   await expect(idlePage.getByTestId('challenge-banner')).toHaveAttribute('data-can-bet', 'no');
   await expect(idlePage.getByTestId('challenge-banner')).toContainText('Alle andere plaatsen zijn al bezet');
-  await expect(idlePage.getByTestId('active-timeline').locator('.slot-btn')).toHaveCount(0);
+  expect(await tokenTargets(idlePage)).toEqual([]);
 
   // Ook in de tussenfase lekt het antwoord niet naar gasten, en de muziek
   // start niet opnieuw.
@@ -356,6 +370,8 @@ test('token inzetten: gewonnen bij een foute speler, verloren bij een juiste, al
     expect(await cardCount(p, t1.activeId)).toBe(activeCards);
   }
   await expect(betterPage.getByTestId('reveal-card-to')).toContainText('Jij krijgt de kaart');
+  // De kaart staat op je eigen tijdlijn: één tik op "Mijn tijdlijn".
+  await betterPage.getByTestId('view-mine').click();
   const myYears = await betterPage
     .locator('[data-testid="my-timeline"] li.tl-card[data-year]')
     .evaluateAll((els) => els.map((el) => Number(el.dataset.year)));
@@ -374,7 +390,7 @@ test('token inzetten: gewonnen bij een foute speler, verloren bij een juiste, al
   const betterBefore = await cardCount(host, better);
   await place(pages, t2, good, { challenge: true });
   const bet = badSlot(t2.years, t2.year, good) ?? (good === 0 ? 1 : 0);
-  await betterPage.getByTestId(`slot-${bet}`).click();
+  await placeToken(betterPage, bet);
   await betterPage.getByTestId('confirm-bet').click();
   counts[better] = 0;
   await expectTokens(pages, counts);
@@ -395,7 +411,7 @@ test('token inzetten: gewonnen bij een foute speler, verloren bij een juiste, al
   const t3 = await currentTurn({ pages, host, ids, n });
   await place(pages, t3, rightSlot(t3.years, t3.year), { challenge: true });
   await expect(betterPage.getByTestId('challenge-banner')).toHaveAttribute('data-can-bet', 'no');
-  await expect(betterPage.getByTestId('active-timeline').locator('.slot-btn')).toHaveCount(0);
+  expect(await tokenTargets(betterPage)).toEqual([]);
   await expect(betterPage.getByTestId('confirm-bet')).toHaveCount(0);
   await expect(idlePage.getByTestId('challenge-banner')).toHaveAttribute('data-can-bet', 'yes');
   await revealNow(pages, t3.active, t3.trackId);
@@ -426,7 +442,7 @@ test('zonder tokens bij de anderen: meteen onthullen, ook al heeft de speler aan
     await place(pages, turn, slot, { challenge: true });
     const left = START - i;
     await expect(bob.getByTestId('challenge-banner')).toContainText(`Je hebt ${left} ${left === 1 ? 'token' : 'tokens'}`);
-    await bob.getByTestId(`slot-${slot === 0 ? 1 : 0}`).click();
+    await placeToken(bob, slot === 0 ? 1 : 0);
     await bob.getByTestId('confirm-bet').click();
     counts[bobId] -= 1;
     await expectTokens(pages, counts);
@@ -486,7 +502,7 @@ async function hanneBetsOnBob(browser, { beforeChallenge } = {}) {
   let turn = await currentTurn({ pages, host, ids, n });
   // Hetzelfde jaar als Bobs kaart is overal juist: dan eerst een ander nummer.
   for (let i = 0; i < 10 && badSlot(turn.years, turn.year) === null; i++) {
-    await host.getByTestId('skip-track').click();
+    await hostAction(host, 'skip-track');
     n++;
     turn = await currentTurn({ pages, host, ids, n });
   }
@@ -502,7 +518,7 @@ test('token inzetten: aangetikt is nog niet ingezet, de knop staat bij de plaats
   const { host, bob, pages, counts, turn, wrong } = await hanneBetsOnBob(browser);
   // Een kleine gsm: ook dan staat de bevestigknop in beeld.
   await host.setViewportSize({ width: 390, height: 600 });
-  await host.getByTestId(`slot-${wrong}`).click();
+  await placeToken(host, wrong);
 
   // De aangetikte plaats zegt dat er nog niets ingezet is en ziet er anders
   // uit dan de kaart die Bob vastlegde.
@@ -550,7 +566,7 @@ test('token inzetten: aangetikt is nog niet ingezet, de knop staat bij de plaats
 
 test('token inzetten zonder verbinding: de keuze blijft staan en er is niets ingezet; opnieuw tikken lukt en je ziet meteen dat je token weg is', async ({ browser }) => {
   const { host, bob, pages, hanne, counts, turn, wrong } = await hanneBetsOnBob(browser);
-  await host.getByTestId(`slot-${wrong}`).click();
+  await placeToken(host, wrong);
   // De verbinding valt weg op het moment dat Hanne bevestigt. Meteen daarna
   // (voor de app herverbindt) staat de melding onderaan, maar niet op de knop.
   const atClick = await host.evaluate(async () => {
@@ -618,7 +634,7 @@ test('token inzetten: komt de bevestiging niet aan, dan zegt het scherm dat en i
       await expect(page.getByTestId('turn-banner')).toBeVisible();
     },
   });
-  await host.getByTestId(`slot-${wrong}`).click();
+  await placeToken(host, wrong);
   swallow = true;
   await host.getByTestId('confirm-bet').click();
   await expect(host.getByTestId('confirm-bet')).toHaveText('Even geduld…');
@@ -667,7 +683,7 @@ async function bobPlaced(browser) {
   // Hetzelfde jaar als Bobs kaart is overal juist: dan eerst een ander nummer,
   // zodat een inzet op de andere plaats zeker fout ligt.
   for (let i = 0; i < 10 && badSlot(turn.years, turn.year) === null; i++) {
-    await host.getByTestId('skip-track').click();
+    await hostAction(host, 'skip-track');
     n++;
     turn = await currentTurn({ pages, host, ids, n });
   }
@@ -697,7 +713,7 @@ test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen all
   for (const p of [host, cas]) {
     await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-must-choose', 'yes');
     await expect(p.getByTestId('pass-bet')).toBeVisible();
-    await expect(p.getByTestId('active-timeline').locator('.slot-btn')).not.toHaveCount(0);
+    expect(await tokenTargets(p)).not.toEqual([]);
   }
   await expect(bob.getByTestId('pass-bet')).toHaveCount(0);
   // Een gewone speler aan beurt heeft geen noodknop; de host wel, als tweede keus.
@@ -709,14 +725,14 @@ test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen all
   await expect(cas.getByTestId('challenge-banner')).toContainText('Geen token ingezet');
   await expect(cas.getByTestId('challenge-banner')).toContainText('houdt je 2 tokens');
   await expect(cas.getByTestId('pass-bet')).toHaveCount(0);
-  await expect(cas.getByTestId('active-timeline').locator('.slot-btn')).toHaveCount(0);
+  expect(await tokenTargets(cas)).toEqual([]);
   await expect(cas.getByTestId('waiting-for')).toHaveText('Nog wachten op Hanne.');
   await expect(bob.getByTestId('waiting-for')).toHaveText('Nog wachten op Hanne.');
   await expect(bob.getByTestId('reveal-now')).toBeDisabled();
   await expectTokens(pages, { [casId]: START });
 
   // Hanne zet een token in (op een plaats waar het zeker fout ligt): dat telt ook als kiezen.
-  await host.getByTestId(`slot-${wrong}`).click();
+  await placeToken(host, wrong);
   await host.getByTestId('confirm-bet').click();
   await expectTokens(pages, { [hanne]: START - 1 });
   for (const p of pages) {
@@ -750,7 +766,7 @@ test('kiezen: wie wegvalt, houdt het onthullen niet tegen en moet na terugkeer w
   // Cas zijn verbinding valt weg.
   await cas.context().setOffline(true);
   await cas.evaluate(() => window.__mt.drop());
-  await expect(host.locator(`[data-testid="board-row"][data-player="${casId}"]`)).toContainText('offline');
+  await expect(host.locator(`[data-testid="board-row"][data-player="${casId}"]`)).toContainText('niet verbonden');
   await expect(bob.getByTestId('challenge-banner')).toHaveAttribute('data-waiting', hanne);
   await expect(bob.getByTestId('waiting-for')).toHaveText('Nog wachten op Hanne.');
   await host.getByTestId('pass-bet').click();

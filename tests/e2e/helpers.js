@@ -93,6 +93,62 @@ export async function lastPlayed(hostPage) {
 export const playCount = (hostPage) =>
   hostPage.evaluate(() => window.__mockSpotify.log.filter((e) => e.type === 'play').length);
 
+/**
+ * Opent het menu (spelcode, hostbediening, spelregels, verlaten) als het nog
+ * dicht is. Het blijft open tot een knop het sluit of `closePanel`.
+ */
+export async function openMenu(page) {
+  if ((await page.getByTestId('menu').getAttribute('data-open')) !== 'yes') await page.getByTestId('menu-open').click();
+  await expect(page.getByTestId('menu')).toBeVisible();
+}
+
+/** Opent de stand (alle spelers, kaarten en tokens). */
+export async function openStand(page) {
+  if ((await page.getByTestId('stand').getAttribute('data-open')) !== 'yes') await page.getByTestId('stand-open').click();
+  await expect(page.getByTestId('stand')).toBeVisible();
+}
+
+/** Sluit het menu of de stand, als er een open is. */
+export async function closePanel(page) {
+  for (const id of ['menu', 'stand']) {
+    if ((await page.getByTestId(id).getAttribute('data-open')) === 'yes') await page.getByTestId(`${id}-close`).click();
+    await expect(page.getByTestId(id)).toBeHidden();
+  }
+}
+
+/** Een knop uit het hostmenu: "Ander nummer", "Sla beurt over", "Opnieuw afspelen". */
+export async function hostAction(page, testid) {
+  await openMenu(page);
+  await page.getByTestId(testid).click();
+}
+
+/**
+ * Wie aan de beurt is, legt de kaart (voorlopig) op plaats `index` van zijn
+ * tijdlijn. Elke spec legt via deze ene weg.
+ */
+export async function placeCard(page, index) {
+  await page.getByTestId(`slot-${index}`).click();
+  await expect(page.getByTestId('active-timeline').getByTestId('pending-card')).toBeVisible();
+}
+
+/**
+ * In de tussenfase: zet je token (voorlopig, nog niet bevestigd) op plaats
+ * `index` van de tijdlijn van de speler aan beurt.
+ */
+export async function placeToken(page, index) {
+  await page.getByTestId(`slot-${index}`).click();
+  await expect(page.getByTestId('bet-pick')).toBeVisible();
+}
+
+/**
+ * Plaatsen op de tijdlijn van de speler aan beurt waar je token nog heen kan
+ * (leeg als je niet kan inzetten).
+ */
+export async function tokenTargets(page) {
+  const ids = await page.getByTestId('active-timeline').locator('.slot-btn').evaluateAll((els) => els.map((el) => el.dataset.testid));
+  return ids.map((id) => Number(id.replace('slot-', '')));
+}
+
 export async function activeYears(page) {
   return page
     .getByTestId('active-timeline')
@@ -142,7 +198,7 @@ export async function playTurn({ pages, hostPage, ids, want = 'correct', playsSo
     expectCorrect = true;
   }
 
-  await activePage.getByTestId(`slot-${slot}`).click();
+  await placeCard(activePage, slot);
   // Iedereen ziet live waar de speler twijfelt.
   for (const p of pages) await expect(p.getByTestId('active-timeline').getByTestId('pending-card')).toBeVisible();
 

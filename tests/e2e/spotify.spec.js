@@ -6,7 +6,7 @@
 import { test, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { TRACKS } from './helpers.js';
+import { TRACKS, openMenu } from './helpers.js';
 import { fakeIds, fakeMusicBrainz, fakeSpotify, hostAndLogin, playlistItem as item, watchYears } from './fake-spotify.js';
 
 const CLIENT_ID = readFileSync(new URL('../../web/src/config.js', import.meta.url), 'utf8').match(
@@ -114,7 +114,8 @@ test('echte Spotify-laag: inloggen met PKCE, toestel kiezen, afspelen en fouten 
   await expect(page.locator('body')).not.toContainText(track.title);
   await expect(page.locator('body')).not.toContainText(trackId);
 
-  // --- pauze en verder ---
+  // --- pauze en verder (in het menu van de host) ---
+  await openMenu(page);
   await page.getByRole('button', { name: 'Pauze' }).click();
   await expect.poll(() => spotify.calls.some((c) => c.path === '/me/player/pause' && c.query.device_id === 'dev-1')).toBe(true);
   await page.getByRole('button', { name: 'Verder spelen' }).click();
@@ -204,6 +205,7 @@ test('dit toestel: afspelen in de browser zelf met de Spotify-speler', async ({ 
   await expect(page.getByTestId('host-music-status')).toContainText('Speelt op');
 
   // Een ander toestel kiezen sluit de speler in de browser af.
+  await openMenu(page);
   await page.getByRole('button', { name: 'Muziekinstellingen' }).click();
   await page.getByTestId('device-dev-1').click();
   expect(await page.evaluate(() => window.__sdkPlayers.at(-1).disconnected)).toBe(true);
@@ -360,6 +362,7 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   for (const y of startCards) expect(ownYears.has(y)).toBe(true);
 
   // --- de keuze is onthouden: een tweede keer wordt niets meer opgezocht ---
+  await openMenu(page);
   await page.getByRole('button', { name: 'Stop dit spel' }).click();
   await expect(page.getByTestId('deck-current')).toContainText('Feestje');
   const before = mb.queries.length;
