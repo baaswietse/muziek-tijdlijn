@@ -102,6 +102,18 @@ export async function applyAction(state, playerId, msg, { loadTracks, random = s
   state.updatedAt = now;
 }
 
+/**
+ * Controleert dat `token` van de host van dit spel is. Gebruikt voor de
+ * gedeelde lijst met jaartallen: die verklapt antwoorden, dus gasten mogen ze
+ * niet lezen, en alleen een host mag erin schrijven.
+ */
+export function authenticateHost(state, token) {
+  const playerId = authenticate(state, token);
+  if (!playerId) throw new GameError('BAD_TOKEN', 'Je zit niet (meer) in dit spel.');
+  if (playerId !== state.hostId) throw new GameError('HOST_ONLY', 'Alleen de host kan dit doen.');
+  return playerId;
+}
+
 /** Grootste toegelaten verzoek voor een eigen lijst (ruim voor 500 nummers). */
 export const MAX_DECK_BODY = 200_000;
 

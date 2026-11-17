@@ -40,8 +40,8 @@ export function DeckPanel({ view, send, deck, loggedIn }) {
           <progress value={job.done} max={Math.max(1, job.total)} />
           {job.phase === 'years' && job.todo > 0 && (
             <p class="muted small">
-              {job.todo} nummers zijn nieuw en worden opgezocht bij MusicBrainz: ongeveer {deck.minutes} min. Dat is eenmalig;
-              daarna zijn ze onthouden. Laat dit scherm open. De spelers kunnen intussen binnenkomen.
+              {job.todo} nummers zijn nieuw en worden opgezocht bij MusicBrainz: ongeveer {deck.minutes} min. Dat is eenmalig, ook voor
+              andere hosts: daarna zijn ze onthouden. Laat dit scherm open. De spelers kunnen intussen binnenkomen.
             </p>
           )}
           <button class="btn" onClick={deck.cancel}>
@@ -126,7 +126,7 @@ function Doubts({ doubts, onYear }) {
       <summary>
         {doubts.length === 1 ? '1 jaartal' : `${doubts.length} jaartallen`} om na te kijken (verklapt antwoorden)
       </summary>
-      <p class="muted small">Klopt een jaar niet? Pas het aan; het wordt onthouden voor de volgende keer.</p>
+      <p class="muted small">Klopt een jaar niet? Pas het aan; het wordt onthouden voor de volgende keer, ook voor andere hosts.</p>
       <ul class="doubts">
         {doubts.map((r) => (
           <li key={r.id}>

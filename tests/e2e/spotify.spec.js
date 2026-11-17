@@ -7,6 +7,7 @@ import { test, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { TRACKS } from './helpers.js';
+import { fakeIds, fakeMusicBrainz, fakeSpotify, hostAndLogin, playlistItem as item, watchYears } from './fake-spotify.js';
 
 const CLIENT_ID = readFileSync(new URL('../../web/src/config.js', import.meta.url), 'utf8').match(
   /SPOTIFY_CLIENT_ID = '([0-9a-f]{32})'/,
@@ -24,134 +25,6 @@ const SCOPES = [
   'user-read-playback-state',
   'user-read-private',
 ];
-
-const CORS = { 'access-control-allow-origin': '*' };
-
-// Nagebootste Web Playback SDK: maakt van de pagina een "toestel" sdk-dev-N.
-const FAKE_SDK = `
-  window.__sdkPlayers = [];
-  window.Spotify = {
-    Player: class {
-      constructor(options) {
-        this.options = options;
-        this.listeners = {};
-        this.activated = false;
-        this.disconnected = false;
-        window.__sdkPlayers.push(this);
-      }
-      addListener(name, fn) { this.listeners[name] = fn; return true; }
-      activateElement() { this.activated = true; return Promise.resolve(); }
-      connect() {
-        const n = window.__sdkPlayers.length;
-        this.options.getOAuthToken((token) => {
-          this.token = token;
-          setTimeout(() => this.listeners.ready && this.listeners.ready({ device_id: 'sdk-dev-' + n }), 10);
-        });
-        return Promise.resolve(true);
-      }
-      disconnect() { this.disconnected = true; }
-    },
-  };
-  if (window.onSpotifyWebPlaybackSDKReady) window.onSpotifyWebPlaybackSDKReady();
-`;
-
-/** Zet een nagebootste Spotify voor deze browser op en houdt alle verzoeken bij. */
-async function fakeSpotify(context) {
-  const spotify = {
-    authorize: null, // URL van het inlogverzoek
-    tokens: [], // verzoeken naar /api/token
-    calls: [], // verzoeken naar de Web API
-    devices: [{ id: 'dev-1', name: 'Gsm van de host', type: 'Smartphone', is_active: true, is_restricted: false }],
-    playlists: [],
-    playlistItems: {},
-    nextPlay: null, // { status, body } voor het eerstvolgende play-commando
-    issued: 0,
-  };
-
-  // Inloggen: Spotify stuurt de browser terug naar de redirect URI met een code.
-  await context.route('https://accounts.spotify.com/authorize**', async (route) => {
-    const url = new URL(route.request().url());
-    spotify.authorize = url;
-    const back = new URL(url.searchParams.get('redirect_uri'));
-    back.searchParams.set('code', 'de-code');
-    back.searchParams.set('state', url.searchParams.get('state'));
-    await route.fulfill({ status: 302, headers: { location: back.toString() } });
-  });
-
-  await context.route('https://accounts.spotify.com/api/token', async (route) => {
-    const form = Object.fromEntries(new URLSearchParams(route.request().postData() || ''));
-    spotify.tokens.push({ form, contentType: route.request().headers()['content-type'] });
-    spotify.issued += 1;
-    await route.fulfill({
-      headers: CORS,
-      json: {
-        access_token: `access-${spotify.issued}`,
-        token_type: 'Bearer',
-        expires_in: 3600,
-        // Bij het vernieuwen stuurt Spotify niet altijd een refresh-token of de scopes mee.
-        ...(form.grant_type === 'authorization_code'
-          ? { refresh_token: 'refresh-1', scope: spotify.authorize.searchParams.get('scope') }
-          : {}),
-      },
-    });
-  });
-
-  await context.route('https://sdk.scdn.co/spotify-player.js', (route) =>
-    route.fulfill({ contentType: 'text/javascript', body: FAKE_SDK }),
-  );
-
-  await context.route('https://api.spotify.com/v1/**', async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    const call = {
-      method: req.method(),
-      path: url.pathname.replace('/v1', ''),
-      query: Object.fromEntries(url.searchParams),
-      body: req.postData() ? JSON.parse(req.postData()) : null,
-      auth: req.headers()['authorization'],
-    };
-    spotify.calls.push(call);
-    if (call.path === '/me/player/devices') {
-      return route.fulfill({ headers: CORS, json: { devices: spotify.devices } });
-    }
-    if (call.path === '/me') return route.fulfill({ headers: CORS, json: { id: 'user-1', display_name: 'Hanne' } });
-    if (call.path === '/me/playlists') return route.fulfill({ headers: CORS, json: { items: spotify.playlists, next: null } });
-    const items = call.path.match(/^\/playlists\/([^/]+)\/items$/);
-    if (items) {
-      const list = spotify.playlistItems[items[1]];
-      if (!list) return route.fulfill({ status: 403, headers: CORS, json: { error: { status: 403, message: 'Forbidden' } } });
-      const offset = Number(call.query.offset || 0);
-      const limit = Number(call.query.limit || 20);
-      const page = list.slice(offset, offset + limit);
-      return route.fulfill({
-        headers: CORS,
-        json: { items: page, total: list.length, next: offset + limit < list.length ? 'meer' : null },
-      });
-    }
-    const isPlay = call.path === '/me/player/play' && call.body?.uris;
-    if (isPlay && spotify.nextPlay) {
-      const { status, body } = spotify.nextPlay;
-      spotify.nextPlay = null;
-      return route.fulfill({ status, headers: CORS, json: body });
-    }
-    return route.fulfill({ status: 204, headers: CORS, body: '' });
-  });
-
-  spotify.plays = () => spotify.calls.filter((c) => c.path === '/me/player/play' && c.body?.uris);
-  return spotify;
-}
-
-/** De host maakt een spel en logt in bij (de nagebootste) Spotify. */
-async function hostAndLogin(page) {
-  await page.goto('./');
-  await page.getByRole('tab', { name: 'Nieuw spel' }).click();
-  await page.getByTestId('name-input').fill('Hanne');
-  await page.getByTestId('enter-button').click();
-  const code = (await page.getByTestId('big-code').textContent()).trim();
-  await page.getByTestId('music-login').click();
-  await expect(page.getByTestId('device-dev-1')).toBeVisible();
-  return code;
-}
 
 test('echte Spotify-laag: inloggen met PKCE, toestel kiezen, afspelen en fouten opvangen', async ({ browser, baseURL }) => {
   expect(CLIENT_ID, 'Client ID ontbreekt in web/src/config.js').toBeTruthy();
@@ -345,12 +218,14 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   });
 
   // --- de playlist bij Spotify ---
-  const [known1, known2] = SITE_TRACKS; // staan al nagekeken op de site: niet opnieuw opzoeken
-  const item = (id, name, artist, date, extra = {}) => ({
-    item: { type: 'track', id, name, artists: [{ name: artist }], album: { release_date: date } },
-    ...extra,
-  });
-  const fillers = [1, 2, 3, 4, 5].map((n) => item(`vulnummer000000000000${n}`, `Vul ${n}`, 'Vulband', `${1990 + n}-01-01`));
+  // Staan al nagekeken op de site: niet opnieuw opzoeken, en ook niet naar de
+  // gedeelde lijst op de server.
+  const [known1, known2, ...more] = SITE_TRACKS;
+  const fillers = more.slice(0, 5).map((t) => item(t.id, t.title, t.artist.split(', ')[0], '2019-01-01'));
+  // Verzonnen nummers krijgen per run nieuwe ID's: de server onthoudt hun
+  // jaartallen in de gedeelde lijst, en dan zou een tweede run (ook tegen de
+  // echte server) niets meer opzoeken.
+  const id = fakeIds();
   spotify.playlists = [
     { id: 'PL1', name: 'Feestje', owner: { id: 'user-1' }, collaborative: false, items: { total: 14 } },
     { id: 'PL2', name: 'Van iemand anders', owner: { id: 'iemand' }, collaborative: false, items: { total: 50 } },
@@ -359,47 +234,28 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   spotify.playlistItems.PL1 = [
     item(known1.id, `${known1.title} - Remastered`, known1.artist.split(', ')[0], '2019-01-01'),
     item(known2.id, known2.title, known2.artist.split(', ')[0], '2019-01-01'),
-    item('nieuwlied0000000000000A', 'Nieuw Lied A', 'Band A', '2010-05-05'), // MusicBrainz veel vroeger dan Spotify
-    item('nieuwlied0000000000000B', 'Nieuw Lied B', 'Band B', '2001-03-03'), // beide gelijk
-    item('nieuwlied0000000000000C', 'Nieuw Lied C', 'Band C', '1999'), // niet bij MusicBrainz
-    item('nieuwlied0000000000000D', 'Nieuw Lied D - Remastered 2015', 'Band D', '2015-09-09'),
-    item('nieuwlied0000000000000E', 'Nieuw Lied E', 'Band E', null), // nergens een jaar
-    item('nieuwlied000000000000B2', 'Nieuw Lied B - Single Version', 'Band B', '2001-03-03'), // dubbel
-    item('lokaalbestand0000000001', 'Eigen opname', 'Ik', '2020', { is_local: true }),
+    item(id('A'), 'Nieuw Lied A', 'Band A', '2010-05-05'), // MusicBrainz veel vroeger dan Spotify
+    item(id('B'), 'Nieuw Lied B', 'Band B', '2001-03-03'), // beide gelijk
+    item(id('C'), 'Nieuw Lied C', 'Band C', '1999'), // niet bij MusicBrainz
+    item(id('D'), 'Nieuw Lied D - Remastered 2015', 'Band D', '2015-09-09'),
+    item(id('E'), 'Nieuw Lied E', 'Band E', null), // nergens een jaar
+    item(id('B2'), 'Nieuw Lied B - Single Version', 'Band B', '2001-03-03'), // dubbel
+    item(id('L'), 'Eigen opname', 'Ik', '2020', { is_local: true }),
     { item: null },
     ...fillers,
   ];
 
   // --- MusicBrainz ---
-  const mb = { queries: [] };
-  const answers = {
+  const mb = await fakeMusicBrainz(context, {
     'Nieuw Lied A': { artist: 'Band A', date: '1987-06-01' },
     'Nieuw Lied B': { artist: 'Band B', date: '2001' },
     'Nieuw Lied D': { artist: 'Band D', date: '1975-11-21' },
-    ...Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`Vul ${n}`, { artist: 'Vulband', date: String(1990 + n) }])),
-  };
-  await context.route('https://musicbrainz.org/ws/2/recording**', async (route) => {
-    const query = new URL(route.request().url()).searchParams.get('query');
-    mb.queries.push(query);
-    const title = query.match(/recording:"([^"]*)"/)?.[1];
-    const hit = answers[title];
-    const recordings = hit
-      ? [
-          {
-            id: `mb-${title}`,
-            title,
-            'first-release-date': hit.date,
-            'artist-credit': [{ name: hit.artist, artist: { name: hit.artist } }],
-            releases: [{ date: hit.date, status: 'Official', 'release-group': { 'primary-type': 'Album', 'secondary-types': [] } }],
-          },
-        ]
-      : [];
-    await route.fulfill({ headers: CORS, json: { count: recordings.length, recordings } });
   });
 
   const page = await context.newPage();
   page.on('dialog', (d) => d.accept());
   const uploads = [];
+  const shared = watchYears(page);
   page.on('request', (req) => {
     if (req.method() === 'POST' && req.url().endsWith('/deck')) uploads.push(JSON.parse(req.postData()));
   });
@@ -438,19 +294,15 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   expect(year).toEqual({
     [known1.id]: known1.year, // uit de nagekeken lijst van de site
     [known2.id]: known2.year,
-    nieuwlied0000000000000A: 1987, // MusicBrainz (eerste release) wint van het Spotify-album
-    nieuwlied0000000000000B: 2001,
-    nieuwlied0000000000000C: 1999, // niet gevonden: jaar van het Spotify-album
-    nieuwlied0000000000000D: 1975,
-    vulnummer0000000000001: 1991,
-    vulnummer0000000000002: 1992,
-    vulnummer0000000000003: 1993,
-    vulnummer0000000000004: 1994,
-    vulnummer0000000000005: 1995,
+    [id('A')]: 1987, // MusicBrainz (eerste release) wint van het Spotify-album
+    [id('B')]: 2001,
+    [id('C')]: 1999, // niet gevonden: jaar van het Spotify-album
+    [id('D')]: 1975,
+    ...Object.fromEntries(more.slice(0, 5).map((t) => [t.id, t.year])),
   });
   // Titels zonder versie-aanduiding; alleen wat het spel nodig heeft gaat mee.
-  const d = sent.tracks.find((t) => t.id === 'nieuwlied0000000000000D');
-  expect(d).toEqual({ id: 'nieuwlied0000000000000D', artist: 'Band D', title: 'Nieuw Lied D', year: 1975 });
+  const d = sent.tracks.find((t) => t.id === id('D'));
+  expect(d).toEqual({ id: id('D'), artist: 'Band D', title: 'Nieuw Lied D', year: 1975 });
   expect(sent.tracks.find((t) => t.id === known1.id).title).toBe(known1.title);
 
   // Wat al nagekeken op de site staat, wordt niet opnieuw opgezocht; de rest één keer.
@@ -458,8 +310,24 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   expect(mb.queries.filter((q) => q.includes('"Nieuw Lied B"'))).toHaveLength(1);
   expect(mb.queries.some((q) => q.includes('Eigen opname'))).toBe(false);
 
+  // De gedeelde lijst op de server: alleen de verzonnen nummers worden
+  // gevraagd en gedeeld, nooit wat al op de site staat.
+  const fake = new Set(['A', 'B', 'C', 'D', 'E', 'B2', 'L'].map(id));
+  expect(shared.lookups.length).toBeGreaterThan(0);
+  expect(shared.lookups.every((l) => l.status === 200 && l.body.ids.every((x) => fake.has(x)))).toBe(true);
+  await expect.poll(() => shared.writes.length).toBe(1);
+  expect(shared.writes[0].status).toBe(200);
+  const written = Object.fromEntries(shared.writes[0].body.entries.map((e) => [e.id, [e.y, e.s]]));
+  expect(written).toEqual({
+    [id('A')]: [1987, 'musicbrainz'],
+    [id('B')]: [2001, 'musicbrainz'],
+    [id('C')]: [1999, 'spotify'],
+    [id('D')]: [1975, 'musicbrainz'],
+    [id('E')]: [null, 'onbekend'], // ook «niets gevonden» spaart de volgende host een opzoeking
+  });
+
   // De gewone speler krijgt de nummers van de lijst niet te zien.
-  expect(guestFrames.some((f) => f.includes('Nieuw Lied') || f.includes('nieuwlied'))).toBe(false);
+  expect(guestFrames.some((f) => f.includes('Nieuw Lied') || f.includes(id('A').slice(0, 18)))).toBe(false);
 
   // --- twijfelgevallen nakijken en verbeteren ---
   await expect(page.getByTestId('deck-panel')).toContainText('1 nummer doet niet mee');
@@ -469,11 +337,15 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   await expect(doubts).toContainText('Spotify zegt 2010, MusicBrainz 1987');
   await expect(doubts).toContainText('niet gevonden bij MusicBrainz');
   await expect(doubts).toContainText('geen jaar gevonden'); // de host kan het jaar zelf invullen
-  await page.getByTestId('doubt-nieuwlied0000000000000C').fill('1998');
-  await page.getByTestId('doubt-nieuwlied0000000000000C').blur();
+  await page.getByTestId(`doubt-${id('C')}`).fill('1998');
+  await page.getByTestId(`doubt-${id('C')}`).blur();
   await expect.poll(() => uploads.length).toBe(2);
-  expect(uploads[1].tracks.find((t) => t.id === 'nieuwlied0000000000000C').year).toBe(1998);
+  expect(uploads[1].tracks.find((t) => t.id === id('C')).year).toBe(1998);
   await expect(doubts).toContainText('3 jaartallen om na te kijken');
+  // De verbetering gaat ook naar de gedeelde lijst, apart gemarkeerd.
+  await expect.poll(() => shared.writes.length).toBe(2);
+  expect(shared.writes[1].body.entries).toEqual([{ id: id('C'), y: 1998, s: 'handmatig', d: [] }]);
+  expect(shared.writes[1].status).toBe(200);
 
   // --- spelen met de eigen lijst ---
   await page.getByTestId('start-game').click();
@@ -494,8 +366,11 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   await page.getByTestId('deck-open').click();
   await page.getByTestId('playlist-PL1').click();
   await expect.poll(() => uploads.length).toBe(3);
-  expect(uploads[2].tracks.find((t) => t.id === 'nieuwlied0000000000000C').year).toBe(1998); // eigen verbetering blijft
+  expect(uploads[2].tracks.find((t) => t.id === id('C')).year).toBe(1998); // eigen verbetering blijft
   expect(mb.queries.length, 'ook «niet gevonden» is onthouden').toBe(before);
+  // Alles stond al op de server: niets nieuws te delen.
+  await expect.poll(() => shared.lookups.length).toBe(2);
+  expect(shared.writes).toHaveLength(2);
 
   // --- terug naar de standaardlijst ---
   await page.getByTestId('deck-default').click();

@@ -7,10 +7,19 @@
   "main": "server/cloudflare/worker.js",
   "compatibility_date": "2026-06-01",
   "durable_objects": {
-    "bindings": [{ "name": "ROOMS", "class_name": "GameRoom" }]
+    "bindings": [
+      { "name": "ROOMS", "class_name": "GameRoom" },
+      // De gedeelde lijst met jaartallen (één exemplaar voor alle spellen).
+      { "name": "YEARS", "class_name": "YearStore" }
+    ]
   },
   // Het gratis plan van Cloudflare vraagt Durable Objects met SQLite-opslag.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }],
+  // Een nieuwe klasse krijgt een eigen, nieuwe stap achteraan; bestaande
+  // stappen blijven staan zoals ze zijn (Cloudflare houdt bij welke al gedaan zijn).
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["YearStore"] }
+  ],
   "vars": {
     // Waar de server de lijst met nummers ophaalt.
     "TRACKS_URL": "https://baaswietse.github.io/muziek-tijdlijn/tracks.json",

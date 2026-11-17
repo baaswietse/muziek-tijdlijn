@@ -1,14 +1,19 @@
 // Spelserver op Cloudflare Workers. Elk spel is één Durable Object: een klein
 // stukje server met eigen opslag dat alle WebSockets van dat spel bijhoudt.
 // De spelregels zelf staan in ../src en zijn dezelfde als bij de Node-server.
+// Daarnaast is er één Durable Object YearStore met de gedeelde lijst met
+// jaartallen (zie ../src/yearlist.js), voor alle spellen samen.
 
 import { DurableObject } from 'cloudflare:workers';
 import * as room from '../src/room.js';
 import { GameError } from '../src/rules.js';
 import { normaliseTracks } from '../src/tracks.js';
+import * as yearlist from '../src/yearlist.js';
 
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_BODY = 2048;
+// Er is maar één gedeelde lijst: altijd hetzelfde exemplaar van YearStore.
+const YEARS_NAME = 'gedeeld';
 
 function allowedOrigins(env) {
   return String(env.ALLOWED_ORIGINS || '*')
@@ -108,6 +113,22 @@ export default {
         const res = await stubFor(m[1]).fetch('https://room/deck', { method: 'POST', body: JSON.stringify(body) });
         return withCors(res, request, env);
       }
+      m = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/years(\/lookup)?$/);
+      if (request.method === 'POST' && m) {
+        // De gedeelde lijst met jaartallen: lezen (/years/lookup) of aanvullen
+        // (/years). Alleen voor de host van een bestaand spel.
+        const body = await readBody(request, yearlist.MAX_YEARS_BODY);
+        const check = await stubFor(m[1]).fetch('https://room/host', {
+          method: 'POST',
+          body: JSON.stringify({ token: body.token }),
+        });
+        if (!check.ok) return withCors(check, request, env);
+        const store = env.YEARS.get(env.YEARS.idFromName(YEARS_NAME));
+        const result = m[2]
+          ? await store.lookup(yearlist.parseLookup(body).ids)
+          : await store.write(yearlist.parseEntries(body));
+        return json(result, 200, corsHeaders(request, env));
+      }
       m = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/ws$/);
       if (m) {
         if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'UPGRADE', message: 'WebSocket verwacht.' }, 426);
@@ -162,6 +183,12 @@ export class GameRoom extends DurableObject {
         await this.save({ custom: true });
         this.broadcast();
         return json({ ok: true, count: this.state.custom.tracks.length });
+      }
+      if (url.pathname === '/host') {
+        // Alleen een controle voor de gedeelde lijst met jaartallen; verandert niets.
+        if (!this.state) throw new GameError('NO_ROOM', 'Dit spel bestaat niet (meer). Controleer de code.');
+        room.authenticateHost(this.state, (await request.json()).token);
+        return json({ ok: true });
       }
       if (url.pathname.endsWith('/ws')) {
         const pair = new WebSocketPair();
@@ -288,5 +315,82 @@ export class GameRoom extends DurableObject {
       console.error('tracks.json laden mislukt:', err.message);
       throw new GameError('TRACKS', 'De server kon de lijst met nummers (tracks.json) niet laden.');
     }
+  }
+}
+
+/**
+ * De gedeelde lijst met jaartallen, in één tabel. Er bestaat maar één
+ * exemplaar (YEARS_NAME). Het wordt alleen via de Worker aangesproken, nadat
+ * die gecontroleerd heeft dat het verzoek van de host van een spel komt en de
+ * inhoud nagekeken is (yearlist.parseLookup / parseEntries).
+ */
+export class YearStore extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec(
+      `CREATE TABLE IF NOT EXISTS years (
+         id TEXT PRIMARY KEY,
+         y INTEGER,
+         s TEXT NOT NULL,
+         d TEXT NOT NULL,
+         r INTEGER,
+         t INTEGER NOT NULL
+       )`,
+    );
+    this.count = null; // aantal rijen, pas geteld bij het eerste schrijfverzoek
+  }
+
+  /** Map id -> item voor de gevraagde nummers die al gekend zijn. */
+  read(ids) {
+    const found = new Map();
+    if (ids.length === 0) return found;
+    // Eén parameter in plaats van honderden: SQLite pakt de lijst zelf uit.
+    const rows = this.sql.exec(
+      'SELECT id, y, s, d, r FROM years WHERE id IN (SELECT value FROM json_each(?))',
+      JSON.stringify(ids),
+    );
+    for (const row of rows) {
+      let d = [];
+      try {
+        d = JSON.parse(row.d);
+      } catch {
+        // kapotte rij: zonder twijfels
+      }
+      const entry = { id: row.id, y: row.y, s: row.s, d: Array.isArray(d) ? d : [] };
+      if (row.r !== null) entry.r = row.r;
+      found.set(row.id, entry);
+    }
+    return found;
+  }
+
+  /** { years: { id: { y, s, d, r? } } } */
+  lookup(ids) {
+    const years = {};
+    for (const [id, entry] of this.read(ids)) years[id] = yearlist.publicEntry(entry);
+    return { years };
+  }
+
+  /** Voegt nagekeken items samen met wat er al staat; schrijft alleen wat verandert. */
+  write({ entries, skipped }) {
+    if (this.count === null) this.count = this.sql.exec('SELECT COUNT(*) AS n FROM years').one().n;
+    const existing = this.read(entries.map((e) => e.id));
+    const changed = yearlist.mergeEntries(existing, entries, yearlist.MAX_ROWS - this.count);
+    const now = Date.now();
+    this.ctx.storage.transactionSync(() => {
+      for (const e of changed) {
+        this.sql.exec(
+          'INSERT OR REPLACE INTO years (id, y, s, d, r, t) VALUES (?, ?, ?, ?, ?, ?)',
+          e.id,
+          e.y,
+          e.s,
+          JSON.stringify(e.d),
+          e.r ?? null,
+          now,
+        );
+      }
+    });
+    this.count += changed.filter((e) => !existing.has(e.id)).length;
+    return { ok: true, saved: changed.length, skipped: skipped + entries.length - changed.length };
   }
 }
