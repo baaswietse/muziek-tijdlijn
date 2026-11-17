@@ -62,6 +62,45 @@ export function deckOf(rows, max = MAX_DECK) {
 }
 
 /**
+ * De lijst voor de server zolang het opzoeken nog loopt: een evenwichtige
+ * greep uit de playlist. Wat bij de start al gekend was (de standaardlijst van
+ * het spel, de gedeelde lijst, eerder opgezocht) is geen willekeurige greep:
+ * de standaardlijst is bv. rock en metal. Alles meenemen zou een vroeg spel
+ * daar sterk naartoe trekken. Daarom gaan van de gekende nummers er maar
+ * zoveel mee als het deel van de rest dat al opgezocht is, plus wat nodig is
+ * om aan `need` te komen (genoeg voor een volledig spel). Welke gekende
+ * nummers meegaan, bepaalt `rank` (een vaste willekeurige volgorde, zodat de
+ * greep niet bij elke upload verandert).
+ *
+ * rows: [{ id, year, known }]; done/todo: opgezocht/op te zoeken bij de start.
+ */
+export function fairDeck(rows, { done, todo, finished, need, rank = new Map() }, max = MAX_DECK) {
+  if (finished || !(todo > 0)) return deckOf(rows, max);
+  const withYear = rows.filter((r) => r.year);
+  const looked = withYear.filter((r) => !r.known);
+  const known = withYear.filter((r) => r.known).sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+  const share = Math.ceil((known.length * Math.min(done, todo)) / todo);
+  const take = Math.min(known.length, Math.max(share, (need || MIN_DECK) - looked.length));
+  return deckOf([...looked, ...known.slice(0, take)], max);
+}
+
+/**
+ * Hoeveel nummers er nog opgezocht moeten worden voor de greep van fairDeck
+ * ook evenwichtig is (en niet alleen aangevuld met gekende nummers om aan
+ * `need` te komen). 0: nu al evenwichtig.
+ */
+export function lookupsUntilFair({ known, todo, done, need }) {
+  if (!(todo > 0) || !(known > 0)) return 0;
+  const lookups = Math.min(todo, Math.ceil(need / (1 + known / todo)));
+  return Math.max(0, lookups - done);
+}
+
+/** Genoeg nummers voor een volledig spel: ruim twee kaarten per speler per kaart van het doel. */
+export function deckNeed(players, target) {
+  return Math.max(MIN_DECK, Math.max(1, players || 1) * (target || 10) * 2);
+}
+
+/**
  * Seconden per opgezocht nummer: gemeten in deze opzoeking zodra er een paar
  * gedaan zijn (een trage of drukke MusicBrainz telt zo mee), anders `fallback`.
  */

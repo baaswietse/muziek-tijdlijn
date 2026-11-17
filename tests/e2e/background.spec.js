@@ -8,11 +8,12 @@
 // krijgen per run nieuwe ID's (fakeIds), de andere komen uit de nagekeken
 // lijst van de site, die nooit naar de gedeelde lijst gaat. De test met meer
 // dan 500 nummers vangt de gedeelde lijst zelf op. Een run laat zo hoogstens
-// 31 rijen achter in de gedeelde lijst (8 + 8 + 8 + 2 + 2 + 3).
+// 51 rijen achter in de gedeelde lijst (8 + 8 + 8 + 2 + 2 + 3 + 8 + 12).
 
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fakeIds, fakeMusicBrainz, fakeSpotify, hostAndLogin, playlistItem as item, watchYears } from './fake-spotify.js';
+import { setTarget } from './helpers.js';
 
 const SITE_TRACKS = JSON.parse(readFileSync(new URL('../../web/public/tracks.json', import.meta.url), 'utf8'));
 const SITE = SITE_TRACKS.slice(0, 10); // 10 gekende nummers: genoeg om meteen te kunnen starten
@@ -296,4 +297,55 @@ test('een upload die nog onderweg is, zet de playlist niet terug na «Terug naar
   await page.waitForTimeout(5000);
   await expect(page.getByTestId('deck-current')).toHaveText('Playlist «Ander» · 11 nummers');
   await context.close();
+});
+
+test('opzoeken klaar tijdens het spel, daarna herladen: het volgende spel krijgt toch de volledige lijst', async ({ browser }) => {
+  const list = makePlaylist('Na', 8);
+  const host = await newHost(browser, [list]);
+  const { page, decks } = host;
+  await choose(page, 'Na');
+  await expect(page.getByTestId('deck-can-start')).toBeVisible();
+  await page.getByTestId('start-game').click();
+  await expect(page.getByTestId('turn-banner')).toBeVisible();
+  await expect.poll(() => decks.length).toBe(1);
+  expect(decks[0].body.tracks.length).toBeLessThan(18);
+  // Het opzoeken raakt klaar tijdens het spel; de lijst kan dan nog niet naar de server.
+  await expect(page.getByTestId('deck-background')).toHaveCount(0, { timeout: 20_000 });
+  // De gsm van de host herlaadt (bv. de browser haalde het tabblad op de achtergrond weg).
+  await page.reload();
+  await expect(page.getByTestId('turn-banner')).toBeVisible();
+  // Vroeger was de volledige lijst dan vergeten, en speelde het volgende spel
+  // weer met de kleine lijst van het eerste: dezelfde nummers opnieuw.
+  await page.getByRole('button', { name: 'Stop dit spel' }).click();
+  await expect(page.getByTestId('deck-current')).toHaveText('Playlist «Na» · 18 nummers', { timeout: 20_000 });
+  expect(decks.at(-1).status).toBe(200);
+  expect(decks.at(-1).body.tracks).toHaveLength(18);
+  expect(await page.evaluate(() => localStorage.getItem('mt.deckJob'))).toBeNull();
+  await host.context.close();
+});
+
+test('vroeg starten: de gekende nummers trekken de greep niet scheef', async ({ browser }) => {
+  // 10 nummers die de site al kent (rock en metal uit de standaardlijst) en
+  // 12 die opgezocht moeten worden. Een spel tot 3 kaarten met één speler
+  // heeft genoeg aan 10 nummers.
+  const list = makePlaylist('Mix', 12);
+  const host = await newHost(browser, [list], { delay: 700 });
+  const { page, mb, decks } = host;
+  await setTarget(page, 3);
+  await choose(page, 'Mix');
+  // Meteen te starten, maar met vooral gekende nummers: dat zegt het scherm.
+  await expect(page.getByTestId('deck-unbalanced')).toBeVisible();
+  await expect.poll(() => asked(mb, list).length, { timeout: 20_000 }).toBeGreaterThanOrEqual(6);
+  await page.getByTestId('start-game').click();
+  await expect(page.getByTestId('turn-banner')).toBeVisible();
+  const sent = decks.at(-1).body.tracks;
+  const site = new Set(SITE.map((t) => t.id));
+  const known = sent.filter((t) => site.has(t.id)).length;
+  const looked = sent.length - known;
+  expect(sent.length).toBeGreaterThanOrEqual(10);
+  // Van de gekende gaan er evenveel procent mee als er van de rest opgezocht
+  // is, of net genoeg om aan 10 te komen; vroeger gingen ze alle 10 mee.
+  expect(known).toBeLessThanOrEqual(Math.max(Math.ceil((10 * looked) / 12), 10 - looked));
+  expect(known).toBeLessThan(10);
+  await host.context.close();
 });

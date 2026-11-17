@@ -273,7 +273,16 @@ zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van 
 - De rest wordt op de achtergrond opgezocht, in willekeurige volgorde: wie vroeg start, speelt met een greep uit de
   hele playlist en niet alleen met het begin ervan. Het opzoeken loopt door in de wachtkamer en tijdens het spel, op
   de gsm van de host, en gaat na een herlaad verder waar het was. Wat er tijdens een spel bijkomt, doet mee vanaf het
-  volgende spel (*Nog een spel* of vanuit de wachtkamer): de stapel van een lopend spel verandert nooit.
+  volgende spel (*Nog een spel* of vanuit de wachtkamer): de stapel van een lopend spel verandert nooit. Dat geldt ook
+  als de gsm van de host intussen herlaadde: de volledige lijst gaat na het spel toch mee.
+- **Een evenwichtige greep.** Wat al gekend is, is geen willekeurige greep uit je playlist: de standaardlijst van het
+  spel is bv. rock en metal, dus de nummers van je playlist die daarin staan, zijn meteen klaar. Zolang er nog
+  opgezocht wordt, gaan van die gekende nummers er daarom maar zoveel mee als er van de rest al opgezocht is (zoveel
+  procent), aangevuld tot genoeg voor een volledig spel (2 kaarten per speler per kaart van het doel). Start je heel
+  vroeg, dan zitten er toch vooral gekende nummers in: het scherm zegt dat, en hoe lang het nog duurt voor de greep
+  evenwichtig is. Voorbeeld, een mix van 500 nummers met 60 gekende rocknummers en 4 spelers: meteen starten geeft
+  zo'n 86% rock in het eerste spel, na 2 minuten 12% (vroeger nog 43%), en dat is ook het aandeel in de playlist. Het
+  scherm toont ook met hoeveel van de nummers van de playlist een spel speelt.
 - *Stop met opzoeken* houdt wat al klaar is; de playlist later opnieuw kiezen zoekt alleen de rest op. Een andere
   playlist of *Terug naar de standaardlijst* stopt het opzoeken ook.
 - Het opzoeken kost gemiddeld anderhalf verzoek per nummer, en MusicBrainz laat 1 verzoek per seconde toe: reken de
@@ -446,7 +455,8 @@ Gedekt, automatisch:
 - Een eigen playlist zonder wachten, tegen een trage nagebootste MusicBrainz: starten terwijl er nog opgezocht wordt,
   doorzoeken tijdens het spel zonder de stapel van dat spel te raken en meer nummers in het volgende spel, verder na
   een herlaad, een willekeurige greep uit een playlist van meer dan 500 nummers, en stoppen, een andere playlist of
-  de standaardlijst kiezen midden in het opzoeken of terwijl een upload nog onderweg is. Een run laat hoogstens 31
+  de standaardlijst kiezen midden in het opzoeken of terwijl een upload nog onderweg is, een herlaad nadat het
+  opzoeken tijdens het spel klaar raakte, en een evenwichtige greep bij een vroege start. Een run laat hoogstens 51
   rijen achter in de gedeelde lijst.
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script), ook met een nagebootste
   MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet.

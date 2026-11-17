@@ -83,7 +83,7 @@ export function App({ loginResult }) {
 
   const isHost = Boolean(view && view.you === view.hostId);
   const music = useMusic({ enabled: isHost, view });
-  const deck = useDeck({ code, token, phase: view?.phase ?? null });
+  const deck = useDeck({ code, token, phase: view?.phase ?? null, players: view?.players.length ?? 1, target: view?.settings.target ?? 10 });
 
   useEffect(() => {
     keepAwake(Boolean(session));

@@ -26,11 +26,14 @@ import { REMIX_RULES, cleanTitle, decide, isRemix, lookup, mbSearch, yearOf } fr
 import {
   MIN_DECK,
   canSendDeck,
-  deckOf,
+  deckNeed,
+  fairDeck,
   lookupOrder,
+  lookupsUntilFair,
   minutesLeft,
   pickTracks,
   secondsPerLookup,
+  shuffled,
   uploadWait,
   withoutDoubles,
 } from './deckplan.js';
@@ -40,7 +43,13 @@ import {
 const CACHE = 'mt.years.v1';
 const LAST = 'mt.lastPlaylist'; // { id, name }
 // Een opzoeking die nog bezig is, om na een herlaad verder te gaan:
-// { code, id, name, tracks: [{ id, title, artists, spotifyDate }], sampled, total }
+// { code, id, name, tracks: [{ id, title, artists, spotifyDate }], sampled, total,
+//   known: [track-ID's die bij de start al gekend waren, in willekeurige volgorde],
+//   done: true als er niets meer op te zoeken valt maar de lijst nog niet op de server staat }
+// Ze blijft bewaard tot de volledige lijst op de server staat: eindigt het
+// opzoeken tijdens een spel en herlaadt de host daarna, dan gaat de lijst na
+// het spel toch nog mee (anders speelde het volgende spel weer met de kleine
+// lijst van het eerste, en dus met dezelfde nummers).
 const JOB = 'mt.deckJob';
 const SECONDS_PER_LOOKUP = 2; // schatting tot er in deze opzoeking een paar gemeten zijn
 const SHARED_IDS = 500; // zoveel nummers mag één leesverzoek vragen (server/src/yearlist.js)
@@ -108,16 +117,17 @@ function stopped(kind) {
   return err;
 }
 
-const rowOf = (t, entry) => ({
+const rowOf = (t, entry, known = false) => ({
   id: t.id,
   title: cleanTitle(t.title),
   artist: t.artists.join(', '),
   year: entry.y,
   source: entry.s,
   doubts: entry.d || [],
+  known,
 });
 
-export function useDeck({ code, token, phase }) {
+export function useDeck({ code, token, phase, players = 1, target = 10 }) {
   const [playlists, setPlaylists] = useState(null); // null = nog niet opgevraagd
   const [loading, setLoading] = useState(false);
   // { name, phase: 'tracks' | 'years', total, todo, done, ready, sampled, playlistTotal, seconds }
@@ -129,6 +139,10 @@ export function useDeck({ code, token, phase }) {
   const current = useRef(null);
   const phaseRef = useRef(phase);
   const sending = useRef(Promise.resolve());
+  // Genoeg nummers voor een volledig spel met deze spelers: zoveel gaan er
+  // zeker mee, ook als het opzoeken nog niet ver is.
+  const needRef = useRef(deckNeed(players, target));
+  needRef.current = deckNeed(players, target);
 
   const available = typeof player.playlists === 'function';
 
@@ -166,6 +180,15 @@ export function useDeck({ code, token, phase }) {
    * is (zie het effect op `phase` hieronder). `quiet`: te weinig nummers is
    * dan geen fout, maar gewoon nog niet.
    */
+  /** De bewaarde opzoeking van deze lijst is afgehandeld. */
+  const forgetJob = useCallback(
+    (data) => {
+      const saved = storage.read(JOB);
+      if (saved?.code === code && saved.id === data.id) storage.write(JOB, null);
+    },
+    [code],
+  );
+
   const sendDeck = useCallback(
     (data, { quiet = false } = {}) => {
       const step = sending.current.catch(() => {}).then(async () => {
@@ -174,8 +197,10 @@ export function useDeck({ code, token, phase }) {
           data.dirty = true;
           return false;
         }
-        const deck = deckOf(data.rows);
+        const deck = fairDeck(data.rows, { ...data, need: needRef.current });
+        // Te weinig nummers: dan valt er na een herlaad ook niets af te maken.
         if (deck.length < MIN_DECK) {
+          if (data.finished) forgetJob(data);
           if (quiet) return false;
           throw new Error(`Deze playlist heeft maar ${deck.length} bruikbare nummers; er zijn er minstens ${MIN_DECK} nodig.`);
         }
@@ -188,12 +213,14 @@ export function useDeck({ code, token, phase }) {
         }
         data.lastUpload = Date.now();
         storage.write(LAST, { id: data.id, name: data.name });
+        // De volledige lijst staat op de server: niets meer om na een herlaad af te maken.
+        if (data.finished) forgetJob(data);
         return true;
       });
       sending.current = step;
       return step;
     },
-    [code, token],
+    [code, token, forgetJob],
   );
 
   /** Plant een tussentijdse upload tijdens het opzoeken (niet bij elk nummer). */
@@ -266,13 +293,22 @@ export function useDeck({ code, token, phase }) {
         // Eerst wat gekend is, dan de onbekende nummers in willekeurige volgorde.
         // Bij verdergaan na een herlaad ligt die volgorde al vast.
         if (!resume) tracks = lookupOrder(tracks, (t) => Boolean(stored(t)));
+        // Wat bij de start al gekend was, met een vaste willekeurige volgorde:
+        // daaruit komt de evenwichtige greep zolang er nog opgezocht wordt.
+        const knownIds = Array.isArray(spec.known) ? spec.known : shuffled(tracks.filter((t) => stored(t)).map((t) => t.id));
+        const atStart = new Set(knownIds);
+        const rank = new Map(knownIds.map((id, i) => [id, i]));
+        // Na het opzoeken (of na Stop) herladen: niets meer opzoeken, alleen de lijst nog doorsturen.
+        const nothingLeft = resume && spec.done === true;
 
         const rows = [];
         const todo = [];
+        let todoAtStart = 0; // op te zoeken bij de start van de opzoeking (voor de evenwichtige greep)
         for (const t of tracks) {
           const entry = stored(t);
+          if (!atStart.has(t.id)) todoAtStart++;
           if (!entry) {
-            todo.push(t);
+            if (!nothingLeft) todo.push(t);
             continue;
           }
           if (entry.from === 'cache') {
@@ -284,17 +320,37 @@ export function useDeck({ code, token, phase }) {
             // server staat, kan nieuwer zijn (van een andere host): die blijft.
             share.push(shareable(t.id, entry));
           }
-          rows.push(rowOf(t, entry));
+          rows.push(rowOf(t, entry, atStart.has(t.id)));
         }
-        if (todo.length) {
-          storage.write(JOB, { code, id: spec.id, name: spec.name, tracks, sampled, total });
-        }
-        data = { id: spec.id, name: spec.name, rows, size: tracks.length, sampled, total, note: '', dirty: true, lastUpload: 0, startedAt: Date.now(), timer: null, finished: false };
+        const job = { code, id: spec.id, name: spec.name, tracks, sampled, total, known: knownIds };
+        if (todo.length) storage.write(JOB, job);
+        else if (nothingLeft) storage.write(JOB, { ...job, done: true });
+        data = {
+          id: spec.id,
+          name: spec.name,
+          rows,
+          size: tracks.length,
+          sampled,
+          total,
+          note: '',
+          dirty: true,
+          lastUpload: 0,
+          startedAt: Date.now(),
+          timer: null,
+          finished: false,
+          done: todoAtStart - todo.length,
+          todo: todoAtStart,
+          rank,
+        };
         current.current = data;
         const ready = () => rows.filter((r) => r.year).length;
+        // Zoveel nummers speelt een spel dat nu start (de evenwichtige greep).
+        const planned = () => fairDeck(rows, { ...data, need: needRef.current }).length;
+        // Nog zoveel op te zoeken voor die greep evenwichtig is (zie lookupsUntilFair).
+        const untilFair = () => lookupsUntilFair({ known: atStart.size, todo: data.todo, done: data.done, need: needRef.current });
         const startedAt = Date.now();
         if (mine()) {
-          setJob({ name: spec.name, phase: 'years', total: tracks.length, todo: todo.length, done: 0, ready: ready(), sampled, playlistTotal: total, seconds: SECONDS_PER_LOOKUP });
+          setJob({ name: spec.name, phase: 'years', total: tracks.length, todo: todo.length, done: 0, ready: ready(), planned: planned(), untilFair: untilFair(), sampled, playlistTotal: total, seconds: SECONDS_PER_LOOKUP });
         }
         refresh(data);
         if (todo.length) schedule(data);
@@ -332,18 +388,20 @@ export function useDeck({ code, token, phase }) {
             }
           }
           rows.push(rowOf(t, entry));
+          data.done += 1;
           if (shared && share.length >= SHARE_EVERY) sharedSave(code, token, share.splice(0));
           data.dirty = true;
           schedule(data);
           const seconds = secondsPerLookup({ done: i + 1, elapsedMs: Date.now() - startedAt, fallback: SECONDS_PER_LOOKUP });
-          update((j) => ({ ...j, done: i + 1, ready: ready(), seconds }));
+          update((j) => ({ ...j, done: i + 1, ready: ready(), planned: planned(), untilFair: untilFair(), seconds }));
           refresh(data);
         }
 
-        // Alles opgezocht.
+        // Alles opgezocht. De opzoeking blijft bewaard (als «klaar») tot de
+        // lijst op de server staat; zie JOB.
         clearTimeout(data.timer);
         data.timer = null;
-        storage.write(JOB, null);
+        if (todo.length) storage.write(JOB, { ...job, done: true });
         data.finished = true;
         data.note = unreachable
           ? `MusicBrainz was niet bereikbaar voor ${unreachable} nummers; die kregen het jaar van het Spotify-album. Kies de playlist later opnieuw om ze alsnog op te zoeken.`
@@ -363,8 +421,10 @@ export function useDeck({ code, token, phase }) {
           if (shared && share.length) sharedSave(code, token, share.splice(0));
         }
         if (kind === 'stop' && data) {
-          // De host stopt het opzoeken: wat al klaar is, blijft (als het genoeg is).
-          storage.write(JOB, null);
+          // De host stopt het opzoeken: wat al klaar is, blijft (als het genoeg
+          // is). Ook dit wacht tot het op de server staat (zie JOB).
+          const saved = storage.read(JOB);
+          storage.write(JOB, saved ? { ...saved, done: true } : null);
           data.finished = true;
           const left = data.size - data.rows.length;
           data.note = `Opzoeken gestopt: ${left} nummers zijn niet opgezocht. Kies de playlist opnieuw om ze alsnog op te zoeken.`;

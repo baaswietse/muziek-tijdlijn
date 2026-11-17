@@ -761,7 +761,9 @@ function HostControls({ view, send, music, deck }) {
       {deck?.job?.phase === 'years' && (
         <p class="muted small" data-testid="deck-background">
           Jaartallen opzoeken voor «{deck.job.name}»: {deck.job.ready} klaar, nog {deck.left} te gaan
-          {deck.left > 0 && <> (ongeveer {deck.minutes} min)</>}. Wat erbij komt, doet mee vanaf het volgende spel.
+          {deck.left > 0 && <> (ongeveer {deck.minutes} min)</>}.
+          {view.playlist && <> Dit spel speelt met {view.playlist.count} van de {deck.job.total} nummers.</>} Wat erbij komt, doet mee
+          vanaf het volgende spel.
         </p>
       )}
     </section>
