@@ -19,8 +19,9 @@ Spotify van de host.
    Dan mag de volgende in de beurtvolgorde, enzovoort. Wie het eerst juist heeft, krijgt een token extra: na de onthulling
    tikt de speler aan beurt of de host op diens naam, of eist die speler het zelf op.
 8. Een token inzetten: heeft iemand anders dan de speler aan beurt een token, dan ligt na het leggen de gekozen plaats
-   eerst vast en kan wie een token heeft een ándere, nog vrije plaats op diens tijdlijn kiezen (1 token, één keer per
-   beurt). Daarna tikt de speler aan beurt of de host op *Onthul*. Lag de speler aan beurt juist, dan houdt hij de kaart.
+   eerst vast en kiest elke andere speler met een token: een ándere, nog vrije plaats op diens tijdlijn (1 token, één
+   keer per beurt) of *Ik zet geen token in*. Pas als iedereen koos, tikt de speler aan beurt of de host op *Onthul*.
+   Lag de speler aan beurt juist, dan houdt hij de kaart.
    Lag hij fout, dan krijgt de eerste inzetter die juist lag de kaart op zijn eigen tijdlijn. Ingezette tokens zijn
    altijd op.
 
@@ -47,7 +48,17 @@ Details:
   *Zet token …* bij die plaats doet het. Daarna zie je meteen hoeveel tokens je nog hebt. Lukt het versturen niet
   (geen verbinding, of geen antwoord binnen enkele seconden), dan blijft je keuze staan en zegt het scherm dat je token
   nog niet ingezet is. Wordt er onthuld voor je bevestigde, dan zegt je scherm dat je token niet ingezet is en dat je
-  het nog hebt. De host die zelf een plaats aantikte, krijgt bij *Onthul* eerst die vraag.
+  het nog hebt (dat kan alleen nog na de noodknop van de host, of als je verbinding wegviel).
+- Kiezen voor de onthulling: *Onthul* blijft uitgeschakeld zolang er nog iemand moet kiezen, en elk scherm zegt op wie
+  er gewacht wordt. Moeten kiezen doet elke andere speler die nu kán inzetten: hij heeft een token, zette deze beurt
+  nog niet in, paste nog niet, en er is nog een vrije plaats. Wie geen token heeft, of wie geen vrije plaats meer vindt
+  (bv. omdat een ander net de laatste nam), hoeft niets te doen. *Ik zet geen token in* is definitief voor die beurt.
+  Wie laat instapt, heeft 2 tokens en kiest dus ook mee; wie verwijderd wordt, telt niet meer. *Ander nummer* en *Sla
+  beurt over* wissen alle keuzes. Onthullen gebeurt nooit vanzelf: ook als iedereen koos, blijft het een tik.
+- Niemand kan het spel blokkeren: wie niet verbonden is, telt niet mee (komt hij terug voor de onthulling, dan moet hij
+  weer kiezen). Reageert iemand niet terwijl hij wel verbonden is, dan kan de host (ook als hij niet aan beurt is) met
+  *Reageert er iemand niet? Toch onthullen…* toch onthullen, na een bevestiging die zegt op wie er nog gewacht wordt.
+  Wie zo niet koos, zet niets in en houdt zijn tokens. Een speler aan beurt die geen host is, kan dat niet.
 
 ## Hoe het in elkaar zit
 
@@ -75,8 +86,9 @@ gsm host  ──┘        │
   spelers. Alleen de gsm van de host krijgt het track-ID eerder, omdat die Spotify moet aansturen. Voor de host is het
   dus te vinden voor wie echt wil zoeken; dat kan niet anders zolang zijn gsm de muziek start.
 - **Acties.** Een gsm stuurt `{ t: 'hello', token }` om zich aan te melden en daarna een van deze acties: `start`,
-  `settings`, `clearDeck`, `select`, `place`, `challenge` (met `index`: een token inzetten), `reveal` (einde van het
-  inzetten), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
+  `settings`, `clearDeck`, `select`, `place`, `challenge` (met `index`: een token inzetten), `pass` (deze beurt geen
+  token inzetten), `reveal` (einde van het inzetten, pas als iedereen koos; de host kan met `force: true` toch
+  onthullen), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
   `skipTrack`, `skipTurn`, `remove` en `lobby`. De server antwoordt met `{ t: 'state' }` of
   `{ t: 'error', code, message }`. Zie `server/src/room.js`.
 - **Spotify blijft bij de host.** De host logt in met Authorization Code + PKCE, volledig in de browser. Er is geen
@@ -365,7 +377,8 @@ Gedekt, automatisch:
   alle plaatsen bezet, zonder lek van het antwoord), en meteen onthullen zodra de anderen hun tokens op hebben. Ook
   dat een aangetikte maar niet bevestigde plaats niets kost en dat het scherm dat zegt, dat de bevestigknop op een
   kleine gsm (390×600) in beeld en niet bedekt is, en wat je ziet als bevestigen mislukt (geen verbinding, of een
-  verbinding die niets doorlaat).
+  verbinding die niets doorlaat). En dat *Onthul* uit blijft tot iedereen met een token koos (passen of inzetten), dat
+  wie wegvalt niets blokkeert maar na zijn terugkeer weer moet kiezen, en de noodknop van de host.
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
 - Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag

@@ -55,14 +55,23 @@ function wrongIndex(state) {
 /** Tokens waarmee iedereen een spel begint. */
 const S = rules.LIMITS.startTokens;
 
+/** In de tussenfase: iedereen op wie het onthullen nog wacht, zet geen token in. */
+function passAll(state) {
+  for (const id of rules.waitingFor(state)) rules.passBet(state, id);
+}
+
 /**
  * De speler aan beurt legt de kaart. Komt er een tussenfase (een ander heeft
- * nog tokens), dan zet niemand in en onthult de speler aan beurt zelf.
+ * nog tokens), dan zet niemand in (iedereen past) en onthult de speler aan
+ * beurt zelf.
  */
 function placeAndReveal(state, index) {
   const active = state.turn.playerId;
   rules.placeCard(state, active, index);
-  if (state.phase === 'challenge') rules.revealTurn(state, active);
+  if (state.phase === 'challenge') {
+    passAll(state);
+    rules.revealTurn(state, active);
+  }
 }
 
 test('isCorrectPlacement: randen, midden en gelijke jaren', () => {
@@ -138,6 +147,9 @@ test('juist plaatsen: kaart blijft, onthulling, daarna volgende speler', () => {
   // De anderen hebben hun starttokens: eerst de tussenfase, dan de onthulling.
   assert.equal(state.phase, 'challenge');
   assert.equal(state.reveal, null);
+  // Onthullen kan pas als de anderen kozen: hier passen ze allebei.
+  throwsCode(() => rules.revealTurn(state, active), 'WAITING');
+  passAll(state);
   rules.revealTurn(state, active);
   assert.equal(state.phase, 'reveal');
   assert.deepEqual(state.reveal, { playerId: active, card, index: idx, correct: true });
@@ -413,6 +425,8 @@ test('room: join, authenticate en applyAction', async () => {
   await room.applyAction(state, active, { t: 'place', index: 0 }, { loadTracks });
   // De ander heeft zijn starttokens: eerst de tussenfase.
   assert.equal(state.phase, 'challenge');
+  const other = active === host.playerId ? guest.playerId : host.playerId;
+  await room.applyAction(state, other, { t: 'pass' }, { loadTracks });
   await room.applyAction(state, active, { t: 'reveal' }, { loadTracks });
   assert.equal(state.phase, 'reveal');
   await room.applyAction(state, host.playerId, { t: 'next' }, { loadTracks });
@@ -679,6 +693,8 @@ test('room: actie token geeft, verplaatst en neemt terug', async () => {
   await room.applyAction(state, host.playerId, { t: 'start' }, { loadTracks });
   const active = state.turn.playerId;
   await room.applyAction(state, active, { t: 'place', index: 0 }, { loadTracks });
+  const other = active === host.playerId ? guest.playerId : host.playerId;
+  await room.applyAction(state, other, { t: 'pass' }, { loadTracks });
   await room.applyAction(state, active, { t: 'reveal' }, { loadTracks });
   await room.applyAction(state, active, { t: 'token', playerId: guest.playerId }, { loadTracks });
   assert.equal(tokensOf(state, guest.playerId), S + 1);
@@ -772,8 +788,11 @@ test('inzet: tussenfase, wie mag waar inzetten en de view lekt niets', () => {
     else assert.ok(!json.includes('geheim01'), 'track-ID lekt niet naar gewone spelers');
   }
 
-  // Onthullen: alleen de speler aan beurt of de host.
+  // Onthullen: alleen de speler aan beurt of de host. De laatkomer heeft nog
+  // niet gekozen, maar er is nog één vrije plaats: eerst hij.
   throwsCode(() => rules.revealTurn(state, 'p2'), 'NOT_ALLOWED');
+  throwsCode(() => rules.revealTurn(state, 'p1'), 'WAITING');
+  rules.passBet(state, 'p4');
   rules.revealTurn(state, 'p1');
   assert.equal(state.phase, 'reveal');
   throwsCode(() => rules.revealTurn(state, 'p1'), 'BAD_PHASE');
@@ -949,6 +968,7 @@ test('inzet: zijn de tokens van de anderen op, dan volgt de onthulling weer mete
   assert.equal(state.turn.playerId, b);
   rules.placeCard(state, b, 0);
   assert.equal(state.phase, 'challenge');
+  rules.passBet(state, a);
   rules.revealTurn(state, b);
   rules.nextTurn(state, b);
   // Bij a heeft niemand anders nog een token: meteen onthullen.
@@ -991,6 +1011,7 @@ test('inzet: een fout ingezet token is altijd weg, ook voor de host en een laat 
   rules.placeCard(state, 'p1', 2); // juist
   rules.placeBet(state, 'p0', 0); // host, fout
   rules.placeBet(state, 'p4', 3); // laat ingestapt, fout
+  rules.passBet(state, 'p2');
   assert.equal(tokensOf(state, 'p0'), 1);
   assert.equal(tokensOf(state, 'p4'), S - 1);
   // De host onthult zelf.
@@ -1025,7 +1046,8 @@ test('inzet: bewaard en opnieuw geladen tussen inzet en onthulling (herstart of 
 test('inzet: komt de inzet pas na de onthulling aan, dan kost ze niets', () => {
   const state = betSetup({ cardYear: 1985, tokens: { p2: 2 } });
   rules.placeCard(state, 'p1', 2);
-  rules.revealTurn(state, 'p1');
+  // p2 viel weg: zonder hem kan er onthuld worden.
+  rules.revealTurn(state, 'p1', { online: new Set(['p0', 'p1', 'p3']) });
   throwsCode(() => rules.placeBet(state, 'p2', 0), 'BAD_PHASE');
   assert.equal(tokensOf(state, 'p2'), 2);
   assert.deepEqual(rules.viewFor(state, 'p2').reveal.bets, []);
@@ -1043,4 +1065,212 @@ test('inzet: het raad-token na een foute inzet is een nieuw token, de inzet blij
   assert.equal(state.reveal.bets[0].correct, false);
   rules.giveToken(state, 'p2', null);
   assert.equal(tokensOf(state, 'p2'), 1);
+});
+
+// ---------- kiezen voor de onthulling: inzetten of passen ----------
+
+test('kiezen: onthullen wacht tot iedereen met een token koos, inzetten of passen', () => {
+  const state = betSetup({ tokens: { p0: 1, p2: 2, p3: 1 } });
+  throwsCode(() => rules.passBet(state, 'p2'), 'BAD_PHASE'); // nog niet gelegd
+  rules.placeCard(state, 'p1', 2);
+  assert.deepEqual(rules.waitingFor(state), ['p0', 'p2', 'p3']);
+  // Niemand kan al onthullen, ook de host niet zonder noodknop.
+  assert.throws(() => rules.revealTurn(state, 'p1'), (e) => e.code === 'WAITING' && /Ann, Cas, Dirk/.test(e.message));
+  throwsCode(() => rules.revealTurn(state, 'p0'), 'WAITING');
+  throwsCode(() => rules.passBet(state, 'p1'), 'NOT_ALLOWED');
+  throwsCode(() => rules.passBet(state, 'onbekend'), 'NOT_IN_ROOM');
+
+  // Passen is definitief: daarna inzetten kan niet meer, nog eens passen verandert niets.
+  rules.passBet(state, 'p2');
+  rules.passBet(state, 'p2');
+  assert.deepEqual(state.turn.passes, ['p2']);
+  throwsCode(() => rules.placeBet(state, 'p2', 0), 'PASSED');
+  assert.equal(tokensOf(state, 'p2'), 2, 'passen kost niets');
+  // Inzetten telt ook als kiezen; wie inzette, kan niet meer passen.
+  rules.placeBet(state, 'p3', 0);
+  throwsCode(() => rules.passBet(state, 'p3'), 'ALREADY_BET');
+  assert.deepEqual(rules.waitingFor(state), ['p0']);
+
+  // Elke speler ziet op wie er gewacht wordt en wie paste, maar niet het antwoord.
+  const online = new Set(['p0', 'p1', 'p2', 'p3']);
+  for (const p of state.players) {
+    const v = rules.viewFor(state, p.id, online);
+    assert.deepEqual(v.turn.waiting, ['p0']);
+    assert.deepEqual(v.turn.passes, ['p2']);
+    assert.deepEqual(v.turn.bets, [{ playerId: 'p3', index: 0 }]);
+    const json = JSON.stringify(v);
+    assert.ok(!json.includes('Geheime') && !json.includes('1985'), 'het antwoord lekt niet');
+    if (p.id !== 'p0') assert.ok(!json.includes('geheim01'), 'track-ID lekt niet naar gewone spelers');
+  }
+  throwsCode(() => rules.revealTurn(state, 'p1'), 'WAITING');
+  rules.passBet(state, 'p0');
+  assert.deepEqual(rules.waitingFor(state), []);
+  assert.deepEqual(rules.viewFor(state, 'p2', online).turn.waiting, []);
+  // Ook nu blijft het een bewuste tik: niets onthult vanzelf.
+  assert.equal(state.phase, 'challenge');
+  rules.revealTurn(state, 'p1');
+  assert.equal(state.phase, 'reveal');
+  assert.deepEqual(state.reveal.bets, [{ playerId: 'p3', index: 0, correct: false }]);
+  assert.equal(tokensOf(state, 'p2'), 2);
+  assert.equal(tokensOf(state, 'p0'), 1);
+  // Na de onthulling is er niets meer te kiezen.
+  throwsCode(() => rules.passBet(state, 'p2'), 'BAD_PHASE');
+  assert.equal(rules.viewFor(state, 'p2', online).turn, null);
+});
+
+test('kiezen: wie geen token of geen vrije plaats heeft, hoeft niets te doen', () => {
+  // Eén kaart op de tijdlijn: twee plaatsen, één ervan ligt vast.
+  const state = betSetup({ years: [1970], cardYear: 1960, tokens: { p0: 0, p2: 1, p3: 2 } });
+  rules.placeCard(state, 'p1', 1);
+  assert.deepEqual(rules.waitingFor(state), ['p2', 'p3'], 'p0 heeft geen token');
+  // p2 neemt de laatste vrije plaats: dan hoeft p3 niet meer te kiezen.
+  rules.placeBet(state, 'p2', 0);
+  assert.deepEqual(rules.waitingFor(state), []);
+  assert.deepEqual(rules.viewFor(state, 'p3', new Set(['p3'])).turn.waiting, []);
+  rules.revealTurn(state, 'p1');
+  assert.equal(state.reveal.cardTo, 'p2');
+  assert.equal(tokensOf(state, 'p3'), 2);
+  // Heeft niemand anders een token, dan volgt de onthulling meteen zoals vroeger.
+  const none = betSetup({ tokens: { p1: 2 } });
+  rules.placeCard(none, 'p1', 2);
+  assert.equal(none.phase, 'reveal');
+});
+
+test('kiezen: wie niet verbonden is, houdt niets tegen en moet na terugkeer weer kiezen', () => {
+  const state = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 2);
+  const all = new Set(['p0', 'p1', 'p2', 'p3']);
+  const withoutP3 = new Set(['p0', 'p1', 'p2']);
+  assert.deepEqual(rules.waitingFor(state, withoutP3), ['p2']);
+  assert.deepEqual(rules.viewFor(state, 'p1', withoutP3).turn.waiting, ['p2']);
+  rules.passBet(state, 'p2');
+  // p3 is weg: onthullen mag nu al.
+  assert.deepEqual(rules.waitingFor(state, withoutP3), []);
+  assert.deepEqual(rules.viewFor(state, 'p1', withoutP3).turn.waiting, []);
+  // Maar hij komt terug voor iemand onthult: dan moet hij weer kiezen.
+  assert.deepEqual(rules.waitingFor(state, all), ['p3']);
+  assert.deepEqual(rules.viewFor(state, 'p1', all).turn.waiting, ['p3']);
+  throwsCode(() => rules.revealTurn(state, 'p1', { online: all }), 'WAITING');
+  // Wie al paste en even wegvalt, blijft gepast.
+  assert.deepEqual(rules.waitingFor(state, new Set(['p0', 'p1', 'p3'])), ['p3']);
+  rules.placeBet(state, 'p3', 0);
+  assert.deepEqual(rules.waitingFor(state, all), []);
+  rules.revealTurn(state, 'p1', { online: all });
+  assert.equal(state.phase, 'reveal');
+  assert.equal(tokensOf(state, 'p3'), 0);
+
+  // Valt iemand weg en wordt er onthuld, dan houdt hij zijn token.
+  const other = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(other, 'p1', 2);
+  rules.passBet(other, 'p2');
+  rules.revealTurn(other, 'p1', { online: withoutP3 });
+  assert.equal(other.phase, 'reveal');
+  assert.equal(tokensOf(other, 'p3'), 1);
+});
+
+test('kiezen: noodknop van de host, en de speler aan beurt heeft hem niet', () => {
+  const state = betSetup({ tokens: { p2: 1, p3: 2 } });
+  rules.placeCard(state, 'p1', 2);
+  rules.placeBet(state, 'p2', 0);
+  // De speler aan beurt (geen host) kan niet om iemand heen, ook niet met force.
+  throwsCode(() => rules.revealTurn(state, 'p1', { force: true }), 'HOST_ONLY');
+  throwsCode(() => rules.revealTurn(state, 'p2', { force: true }), 'NOT_ALLOWED');
+  throwsCode(() => rules.revealTurn(state, 'p0'), 'WAITING');
+  assert.equal(state.phase, 'challenge');
+  // De host (niet aan beurt) onthult toch: wie niet koos, houdt zijn tokens.
+  rules.revealTurn(state, 'p0', { force: true });
+  assert.equal(state.phase, 'reveal');
+  assert.equal(tokensOf(state, 'p3'), 2);
+  assert.deepEqual(state.reveal.bets, [{ playerId: 'p2', index: 0, correct: false }]);
+
+  // Ook als de host zelf aan beurt is.
+  const duo = newRoom(['Ann', 'Bob']);
+  rules.startGame(duo, 'p0', makeTracks(40), seeded(71));
+  while (duo.turn.playerId !== 'p0') rules.skipTurn(duo, 'p0');
+  rules.placeCard(duo, 'p0', 0);
+  throwsCode(() => rules.revealTurn(duo, 'p0'), 'WAITING');
+  rules.revealTurn(duo, 'p0', { force: true });
+  assert.equal(duo.phase, 'reveal');
+  // Wacht er niemand, dan doet force niets anders dan gewoon onthullen.
+  const calm = betSetup({ tokens: { p2: 1 } });
+  rules.placeCard(calm, 'p1', 2);
+  rules.passBet(calm, 'p2');
+  rules.revealTurn(calm, 'p1', { force: true });
+  assert.equal(calm.phase, 'reveal');
+});
+
+test('kiezen: laat instappen, verwijderen, ander nummer en beurt overslaan', () => {
+  const state = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 2);
+  rules.passBet(state, 'p2');
+  // Wie tijdens de tussenfase instapt, heeft 2 tokens en moet ook kiezen.
+  rules.addPlayer(state, { id: 'p4', token: 'token-4-xxxxxxxx', name: 'Els' });
+  assert.deepEqual(rules.waitingFor(state), ['p3', 'p4']);
+  // Wie verwijderd wordt, telt niet meer mee, ook niet als hij al paste.
+  rules.removePlayer(state, 'p0', 'p3');
+  assert.deepEqual(rules.waitingFor(state), ['p4']);
+  rules.removePlayer(state, 'p0', 'p2');
+  assert.deepEqual(state.turn.passes, []);
+  rules.placeBet(state, 'p4', 0);
+  assert.deepEqual(rules.waitingFor(state), []);
+
+  // Ander nummer: keuzes en inzetten vervallen, de tokens gaan terug.
+  const again = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(again, 'p1', 2);
+  rules.passBet(again, 'p2');
+  rules.placeBet(again, 'p3', 0);
+  rules.skipTrack(again, 'p0');
+  assert.equal(again.phase, 'playing');
+  assert.equal(tokensOf(again, 'p3'), 1);
+  assert.deepEqual(rules.waitingFor(again), []);
+  rules.placeCard(again, 'p1', 0);
+  assert.deepEqual(again.turn.passes, []);
+  assert.deepEqual(rules.waitingFor(again), ['p2', 'p3'], 'na een ander nummer kiest iedereen opnieuw');
+
+  // Beurt overslaan: bij de volgende speler begint het kiezen ook opnieuw.
+  rules.passBet(again, 'p2');
+  rules.skipTurn(again, 'p0');
+  assert.equal(again.turn.playerId, 'p2');
+  rules.placeCard(again, 'p2', 0);
+  assert.deepEqual(rules.waitingFor(again), ['p3']);
+});
+
+test('kiezen: een kamer die van voor deze regel in de tussenfase zat, loopt niet vast', () => {
+  const state = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 2);
+  // Zoals bewaard door een oudere server: zonder `passes`.
+  delete state.turn.passes;
+  const old = JSON.parse(JSON.stringify(state));
+  assert.deepEqual(rules.waitingFor(old), ['p2', 'p3']);
+  assert.deepEqual(rules.viewFor(old, 'p2').turn.passes, []);
+  rules.passBet(old, 'p2');
+  rules.placeBet(old, 'p3', 0);
+  rules.revealTurn(old, 'p1');
+  assert.equal(old.phase, 'reveal');
+  // En de host kan er altijd door.
+  const stuck = JSON.parse(JSON.stringify(state));
+  rules.revealTurn(stuck, 'p0', { force: true });
+  assert.equal(stuck.phase, 'reveal');
+});
+
+test('room: acties pass en reveal met wie verbonden is en de noodknop', async () => {
+  const state = betSetup({ tokens: { p2: 1, p3: 1 } });
+  const all = new Set(['p0', 'p1', 'p2', 'p3']);
+  const opts = { loadTracks: async () => makeTracks(30), online: all };
+  await room.applyAction(state, 'p1', { t: 'place', index: 2 }, opts);
+  await assert.rejects(room.applyAction(state, 'p1', { t: 'reveal' }, opts), (e) => e.code === 'WAITING');
+  await room.applyAction(state, 'p2', { t: 'pass' }, opts);
+  assert.deepEqual(state.turn.passes, ['p2']);
+  // p3 is verbonden maar reageert niet: alleen de host kan door, en alleen met force: true.
+  await assert.rejects(room.applyAction(state, 'p1', { t: 'reveal', force: true }, opts), (e) => e.code === 'HOST_ONLY');
+  await assert.rejects(room.applyAction(state, 'p0', { t: 'reveal', force: 'ja' }, opts), (e) => e.code === 'WAITING');
+  // Valt p3 weg, dan kan de speler aan beurt gewoon onthullen.
+  await room.applyAction(state, 'p1', { t: 'reveal' }, { ...opts, online: new Set(['p0', 'p1', 'p2']) });
+  assert.equal(state.phase, 'reveal');
+
+  const forced = betSetup({ tokens: { p2: 1 } });
+  await room.applyAction(forced, 'p1', { t: 'place', index: 2 }, opts);
+  await room.applyAction(forced, 'p0', { t: 'reveal', force: true }, opts);
+  assert.equal(forced.phase, 'reveal');
+  assert.equal(tokensOf(forced, 'p2'), 1);
 });

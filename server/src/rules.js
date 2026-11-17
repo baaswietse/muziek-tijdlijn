@@ -68,7 +68,8 @@ export function createRoom({ code, now }) {
     deck: [], // nog te spelen kaarten; de bovenste is de laatste
     custom: null, // eigen lijst van de host: { name, tracks }, anders de standaardlijst
     used: [], // track-ID's die in deze kamer al gespeeld zijn
-    // Tijdens `challenge` ook placedIndex (vastgelegde plaats) en bets: [{ playerId, index }].
+    // Tijdens `challenge` ook placedIndex (vastgelegde plaats), bets: [{ playerId, index }]
+    // en passes: [playerId] (wie bevestigde deze beurt geen token in te zetten).
     turn: null, // { playerId, card, pendingIndex, number }
     turnCount: 0, // aantal beurten in het lopende spel
     // Na ingezette tokens ook bets: [{ playerId, index, correct }] en cardTo.
@@ -274,6 +275,7 @@ export function placeCard(state, actorId, index) {
     state.turn.pendingIndex = index;
     state.turn.placedIndex = index;
     state.turn.bets = [];
+    state.turn.passes = [];
     state.phase = 'challenge';
     return;
   }
@@ -329,6 +331,38 @@ function resolveTurn(state, index, bets) {
   }
 }
 
+/** Aantal plaatsen op de tijdlijn van de speler aan beurt waar nog niemand ligt. */
+function freeSlots(state) {
+  const active = findPlayer(state, state.turn.playerId);
+  // Alle plaatsen, min die van de speler aan beurt, min de ingezette.
+  return (active?.timeline.length ?? 0) + 1 - 1 - state.turn.bets.length;
+}
+
+/**
+ * Tijdens `challenge`: op wie wacht het onthullen nog? Op elke andere speler
+ * die nu kán inzetten: minstens 1 token, nog niet ingezet of gepast, en er is
+ * nog een vrije plaats. `online` (Set met speler-ID's) laat wie niet verbonden
+ * is buiten beschouwing, zodat niemand het spel blokkeert door weg te vallen;
+ * komt hij terug voor de onthulling, dan moet hij weer kiezen. Zonder `online`
+ * telt iedereen mee.
+ */
+export function waitingFor(state, online = null) {
+  if (state.phase !== 'challenge' || !state.turn) return [];
+  const { turn } = state;
+  if (freeSlots(state) < 1) return [];
+  const passes = turn.passes ?? []; // kamers van voor het passen kennen het veld niet
+  return state.players
+    .filter(
+      (p) =>
+        p.id !== turn.playerId &&
+        (p.guessTokens ?? 0) > 0 &&
+        !turn.bets.some((b) => b.playerId === p.id) &&
+        !passes.includes(p.id) &&
+        (!online || online.has(p.id)),
+    )
+    .map((p) => p.id);
+}
+
 /**
  * Tijdens `challenge`: een andere speler zet een token in op een andere, nog
  * vrije plaats op de tijdlijn van de speler aan beurt. Kost meteen 1 token en
@@ -340,6 +374,7 @@ export function placeBet(state, actorId, index) {
   const { turn } = state;
   if (actorId === turn.playerId) fail('NOT_ALLOWED', 'Op je eigen beurt kan je geen token inzetten.');
   if (turn.bets.some((b) => b.playerId === actorId)) fail('ALREADY_BET', 'Je zette deze beurt al een token in.');
+  if ((turn.passes ?? []).includes(actorId)) fail('PASSED', 'Je koos al om deze beurt geen token in te zetten.');
   if ((actor.guessTokens ?? 0) < 1) fail('NO_TOKEN', 'Je hebt geen token om in te zetten.');
   const active = findPlayer(state, turn.playerId);
   if (!Number.isInteger(index) || index < 0 || index > active.timeline.length) {
@@ -352,12 +387,39 @@ export function placeBet(state, actorId, index) {
   turn.bets.push({ playerId: actorId, index });
 }
 
-/** Einde van de fase `challenge`: de speler aan beurt of de host onthult. */
-export function revealTurn(state, actorId) {
+/**
+ * Tijdens `challenge`: een andere speler bevestigt dat hij deze beurt geen
+ * token inzet. Dat is definitief voor deze beurt; nog eens verandert niets.
+ */
+export function passBet(state, actorId) {
+  requirePlayer(state, actorId);
+  if (state.phase !== 'challenge' || !state.turn) fail('BAD_PHASE', 'Er valt nu niets te kiezen.');
+  const { turn } = state;
+  if (actorId === turn.playerId) fail('NOT_ALLOWED', 'Op je eigen beurt zet je geen token in.');
+  if (turn.bets.some((b) => b.playerId === actorId)) fail('ALREADY_BET', 'Je zette deze beurt al een token in.');
+  turn.passes = turn.passes ?? [];
+  if (!turn.passes.includes(actorId)) turn.passes.push(actorId);
+}
+
+/**
+ * Einde van de fase `challenge`: de speler aan beurt of de host onthult, maar
+ * pas als iedereen die kan inzetten gekozen heeft (zie waitingFor). Wacht het
+ * spel nog op iemand die verbonden is maar niet reageert, dan kan alleen de
+ * host toch onthullen, met `force`.
+ */
+export function revealTurn(state, actorId, { online = null, force = false } = {}) {
   requirePlayer(state, actorId);
   if (state.phase !== 'challenge' || !state.turn) fail('BAD_PHASE', 'Er valt nu niets te onthullen.');
   if (actorId !== state.turn.playerId && actorId !== state.hostId) {
     fail('NOT_ALLOWED', 'Alleen de speler aan beurt of de host kan onthullen.');
+  }
+  const waiting = waitingFor(state, online);
+  if (waiting.length && !force) {
+    const names = waiting.map((id) => findPlayer(state, id).name).join(', ');
+    fail('WAITING', `Nog niet iedereen koos of hij een token inzet. We wachten op ${names}.`);
+  }
+  if (waiting.length && actorId !== state.hostId) {
+    fail('HOST_ONLY', 'Alleen de host kan onthullen terwijl er nog op iemand gewacht wordt.');
   }
   resolveTurn(state, state.turn.placedIndex, state.turn.bets);
 }
@@ -413,7 +475,10 @@ export function removePlayer(state, actorId, targetId) {
   // Is de speler aan beurt weg, dan telt de beurt niet: inzetters krijgen hun
   // token terug. Een inzetter die weg moet, verliest gewoon zijn inzet.
   if (wasActive) refundBets(state);
-  else if (state.phase === 'challenge' && state.turn) state.turn.bets = state.turn.bets.filter((b) => b.playerId !== targetId);
+  else if (state.phase === 'challenge' && state.turn) {
+    state.turn.bets = state.turn.bets.filter((b) => b.playerId !== targetId);
+    if (state.turn.passes) state.turn.passes = state.turn.passes.filter((id) => id !== targetId);
+  }
   state.players = state.players.filter((p) => p.id !== targetId);
   state.winnerIds = state.winnerIds.filter((id) => id !== targetId);
   // Had die speler het token van deze onthulling, dan vervalt het mee.
@@ -476,7 +541,8 @@ export function backToLobby(state, actorId) {
 }
 
 /**
- * Wat één speler mag zien. Het antwoord (track-ID, artiest, titel, jaar) van
+ * Wat één speler mag zien. `online` = wie nu verbonden is (ook voor wie in de
+ * tussenfase nog moet kiezen). Het antwoord (track-ID, artiest, titel, jaar) van
  * het lopende nummer zit hier niet in; enkel de host krijgt het track-ID,
  * omdat zijn gsm Spotify moet aansturen.
  */
@@ -505,9 +571,15 @@ export function viewFor(state, playerId, online = new Set()) {
           playerId: state.turn.playerId,
           number: state.turn.number,
           pendingIndex: state.turn.pendingIndex,
-          // Tijdens `challenge`: de vastgelegde plaats en wie waar inzette.
+          // Tijdens `challenge`: de vastgelegde plaats, wie waar inzette, wie
+          // bevestigde geen token in te zetten en op wie het onthullen nog wacht.
           ...(state.phase === 'challenge'
-            ? { placedIndex: state.turn.placedIndex, bets: state.turn.bets.map((b) => ({ ...b })) }
+            ? {
+                placedIndex: state.turn.placedIndex,
+                bets: state.turn.bets.map((b) => ({ ...b })),
+                passes: (state.turn.passes ?? []).slice(),
+                waiting: waitingFor(state, online),
+              }
             : {}),
           ...(isHost ? { trackId: state.turn.card.id } : {}),
         }

@@ -47,9 +47,11 @@ export function authenticate(state, token) {
 
 /**
  * Voert één actie van een speler uit. `loadTracks` wordt alleen aangeroepen
- * bij het starten van een spel. Gooit een GameError bij een ongeldige actie.
+ * bij het starten van een spel. `online` (Set met speler-ID's) zegt wie nu
+ * verbonden is: wie weg is, houdt het onthullen niet tegen. Gooit een
+ * GameError bij een ongeldige actie.
  */
-export async function applyAction(state, playerId, msg, { loadTracks, random = secureRandom, now = Date.now() }) {
+export async function applyAction(state, playerId, msg, { loadTracks, online = null, random = secureRandom, now = Date.now() }) {
   switch (msg?.t) {
     case 'start': {
       // Eerst controleren, dan pas de nummers ophalen.
@@ -81,8 +83,12 @@ export async function applyAction(state, playerId, msg, { loadTracks, random = s
     case 'challenge':
       rules.placeBet(state, playerId, Number(msg.index));
       break;
+    case 'pass':
+      rules.passBet(state, playerId);
+      break;
     case 'reveal':
-      rules.revealTurn(state, playerId);
+      // `force`: de host onthult toch, terwijl er nog op iemand gewacht wordt.
+      rules.revealTurn(state, playerId, { online, force: msg.force === true });
       break;
     case 'skipTrack':
       rules.skipTrack(state, playerId);

@@ -51,11 +51,14 @@ export function Game({ view, send, music, deck, onLeave }) {
 
   const bets = challenge ? view.turn.bets : [];
   const myBet = bets.find((b) => b.playerId === me);
+  // Op wie het onthullen nog wacht (inzetten of passen), en of jij al paste.
+  const waiting = challenge ? view.turn.waiting ?? [] : [];
+  const myPassed = challenge && (view.turn.passes ?? []).includes(me);
   const taken = new Set(challenge ? [view.turn.placedIndex, ...bets.map((b) => b.index)] : []);
   // Zijn alle andere plaatsen al bezet, dan valt er niets meer in te zetten.
   const slotsFull = challenge && taken.size >= (active?.timeline.length ?? 0) + 1;
   const hasTokens = (mine?.guessTokens ?? 0) > 0;
-  const canBet = challenge && activeId !== me && !myBet && hasTokens && !slotsFull;
+  const canBet = challenge && activeId !== me && !myBet && !myPassed && hasTokens && !slotsFull;
   // Nam iemand anders jouw plaats net in, dan vervalt je keuze.
   const betChoice = canBet && betPick !== null && !taken.has(betPick) ? betPick : null;
   const myTokens = mine?.guessTokens ?? 0;
@@ -104,7 +107,6 @@ export function Game({ view, send, music, deck, onLeave }) {
   }
 
   function revealNow() {
-    if (betChoice !== null && !confirm('Je token is nog niet ingezet. Toch onthullen?')) return;
     send({ t: 'reveal' });
   }
 
@@ -137,14 +139,19 @@ export function Game({ view, send, music, deck, onLeave }) {
 
       {challenge && (
         <ChallengeBanner
+          key={turnKey}
           view={view}
+          send={send}
           onReveal={revealNow}
           activeName={nameOf(activeId)}
+          waitNames={waiting.map((id) => (id === me ? 'jou' : byId.get(id)?.name ?? 'iemand'))}
           canReveal={activeId === me || isHost}
+          isHost={isHost}
           canBet={canBet}
           myBet={myBet}
+          myPassed={myPassed}
           tokens={myTokens}
-          slotsFull={slotsFull && activeId !== me && !myBet && hasTokens}
+          slotsFull={slotsFull && activeId !== me && !myBet && !myPassed && hasTokens}
           picking={betChoice !== null}
         />
       )}
@@ -298,30 +305,90 @@ function Score({ n, target }) {
   );
 }
 
+/** "Bob", "Bob en Cas", "Ann, Bob en Cas" */
+function joinNames(names) {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} en ${names.at(-1)}`;
+}
+
 /**
- * Tussenfase na het leggen. De speler aan beurt en de host kunnen onthullen;
- * wie een token heeft, kan het inzetten op een andere plaats.
+ * Tussenfase na het leggen. Wie een token heeft, kiest: een andere plaats
+ * aantikken en bevestigen, of geen token inzetten. Pas als iedereen koos, kan
+ * de speler aan beurt of de host onthullen; de host heeft een noodknop voor
+ * wie verbonden is maar niet reageert.
  */
-function ChallengeBanner({ view, onReveal, activeName, canReveal, canBet, myBet, tokens, slotsFull, picking }) {
+function ChallengeBanner({ view, send, onReveal, activeName, waitNames, canReveal, isHost, canBet, myBet, myPassed, tokens, slotsFull, picking }) {
+  const [forcing, setForcing] = useState(false);
   const mineTurn = view.turn.playerId === view.you;
+  const waiting = view.turn.waiting ?? [];
+  const blocked = waiting.length > 0;
   const who = activeName[0].toUpperCase() + activeName.slice(1);
   const count = <strong data-testid="my-tokens">{tokenText(tokens)}</strong>;
+  const later = `Wachten tot ${activeName} of de host onthult…`;
   let text;
-  if (mineTurn) text = 'Wie een token heeft, kan nog een andere plaats kiezen. Tik op Onthul als iedereen klaar is.';
-  else if (myBet) text = <>Je zette een token in en hebt nog {count}. Wachten tot {activeName} of de host onthult…</>;
-  else if (canBet) text = <>Ligt {activeName} fout? Tik een andere plaats aan en zet er een token in. Je hebt {count}.</>;
+  if (mineTurn) {
+    text = blocked
+      ? 'Wie een token heeft, kiest nu: een andere plaats of geen token. Onthullen kan zodra iedereen koos.'
+      : 'Iedereen koos. Tik op Onthul.';
+  } else if (myBet) text = <>Je zette een token in en hebt nog {count}. {later}</>;
+  else if (myPassed) text = <>Je zet deze beurt geen token in en houdt je {count}. {later}</>;
+  else if (canBet) text = <>Ligt {activeName} fout? Tik hieronder een andere plaats aan en bevestig, of zet deze beurt geen token in. Je hebt {count}.</>;
   else if (slotsFull) text = <>Alle andere plaatsen zijn al bezet. Je houdt je {count}. Wachten op de onthulling…</>;
   else text = `${who} legde het nummer. Wie een token heeft, kan nog inzetten. Wachten op de onthulling…`;
   return (
-    <section class="now challenge" data-testid="challenge-banner" data-active={view.turn.playerId} data-can-bet={canBet ? 'yes' : 'no'}>
+    <section
+      class="now challenge"
+      data-testid="challenge-banner"
+      data-active={view.turn.playerId}
+      data-can-bet={canBet ? 'yes' : 'no'}
+      data-must-choose={waiting.includes(view.you) ? 'yes' : 'no'}
+      data-waiting={waiting.join(',')}
+    >
       <div class="grow">
-        <p class="now-who">{mineTurn ? 'Je kaart ligt vast' : myBet ? 'Token ingezet' : canBet ? 'Token inzetten?' : 'Even wachten'}</p>
+        <p class="now-who">
+          {mineTurn ? 'Je kaart ligt vast' : myBet ? 'Token ingezet' : myPassed ? 'Geen token ingezet' : canBet ? 'Token inzetten?' : 'Even wachten'}
+        </p>
         <p class="now-what">{text}</p>
+        {canBet && (
+          <button type="button" class="btn big challenge-pass" onClick={() => send({ t: 'pass' })} data-testid="pass-bet">
+            Ik zet geen token in
+          </button>
+        )}
+        {blocked && (
+          <p class="challenge-wait" data-testid="waiting-for" role="status">
+            Nog wachten op {joinNames(waitNames)}.
+          </p>
+        )}
         {/* Heb je zelf een plaats aangetikt, dan is bevestigen bij die plaats de hoofdknop. */}
         {canReveal && (
-          <button class={`btn${picking ? '' : ' primary'} big challenge-reveal`} onClick={onReveal} data-testid="reveal-now">
+          <button
+            class={`btn${picking ? '' : ' primary'} big challenge-reveal`}
+            onClick={onReveal}
+            disabled={blocked}
+            data-testid="reveal-now"
+          >
             Onthul
           </button>
+        )}
+        {isHost && blocked && !forcing && (
+          <button type="button" class="btn link challenge-force" onClick={() => setForcing(true)} data-testid="force-reveal">
+            Reageert er iemand niet? Toch onthullen…
+          </button>
+        )}
+        {isHost && blocked && forcing && (
+          <div class="notice warn challenge-force-box" data-testid="force-reveal-box" role="alertdialog" aria-label="Toch onthullen?">
+            <p>
+              Nog niet gekozen: <strong>{joinNames(waitNames)}</strong>. Wie niet koos, zet niets in en houdt zijn tokens.
+              {picking && ' Je eigen token is nog niet ingezet.'} Toch onthullen?
+            </p>
+            <div class="row gap">
+              <button type="button" class="btn grow" onClick={() => send({ t: 'reveal', force: true })} data-testid="force-reveal-confirm">
+                Ja, onthul nu
+              </button>
+              <button type="button" class="btn grow" onClick={() => setForcing(false)} data-testid="force-reveal-cancel">
+                Nee, wacht nog
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </section>

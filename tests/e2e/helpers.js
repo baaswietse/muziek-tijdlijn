@@ -174,7 +174,9 @@ export async function playTurn({ pages, hostPage, ids, want = 'correct', playsSo
     // Ook in de tussenfase lekt niets en start de muziek niet opnieuw.
     expectNoLeak('in de tussenfase');
     expect(await playCount(hostPage)).toBe(playsSoFar + 1);
-    // Niemand zet in: de speler aan beurt onthult zelf.
+    // Onthullen kan pas als iedereen met een token koos. Niemand zet in: de
+    // anderen passen, daarna onthult de speler aan beurt zelf.
+    await passWaiting(pages, activePage);
     await activePage.getByTestId('reveal-now').click();
   }
   for (const p of pages) {
@@ -187,6 +189,31 @@ export async function playTurn({ pages, hostPage, ids, want = 'correct', playsSo
   }
   expect(await playCount(hostPage), 'het nummer start niet opnieuw bij de onthulling').toBe(playsSoFar + 1);
   return { activeId, activePage, trackId, year, correct: expectCorrect, cardsBefore: years.length, challenge };
+}
+
+/**
+ * Tussenfase: elke gsm in `pages` op wie het onthullen nog wacht, tikt op "Ik
+ * zet geen token in". Tot dan is "Onthul" bij `revealer` uitgeschakeld en
+ * noemt het scherm op wie er gewacht wordt; daarna kan hij onthullen.
+ */
+export async function passWaiting(pages, revealer) {
+  const banner = revealer.getByTestId('challenge-banner');
+  await expect(banner).toBeVisible();
+  for (const p of pages) await expect(p.getByTestId('challenge-banner')).toBeVisible();
+  const waiting = await banner.getAttribute('data-waiting');
+  if (waiting) {
+    await expect(revealer.getByTestId('reveal-now')).toBeDisabled();
+    await expect(revealer.getByTestId('waiting-for')).toContainText('Nog wachten op');
+  }
+  for (const p of pages) {
+    if ((await p.getByTestId('challenge-banner').getAttribute('data-must-choose')) !== 'yes') continue;
+    await p.getByTestId('pass-bet').click();
+    await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-must-choose', 'no');
+    await expect(p.getByTestId('challenge-banner')).toContainText('Je zet deze beurt geen token in');
+  }
+  await expect(banner).toHaveAttribute('data-waiting', '');
+  await expect(revealer.getByTestId('waiting-for')).toHaveCount(0);
+  await expect(revealer.getByTestId('reveal-now')).toBeEnabled();
 }
 
 /** Heeft volgens het bord op `page` een andere speler dan `activeId` nog een token? */

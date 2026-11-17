@@ -229,7 +229,10 @@ export class GameRoom extends DurableObject {
     if (!playerId) return;
     try {
       const hadCustom = Boolean(this.state.custom);
-      await room.applyAction(this.state, playerId, msg, { loadTracks: () => this.loadTracks() });
+      await room.applyAction(this.state, playerId, msg, {
+        loadTracks: () => this.loadTracks(),
+        online: this.onlineIds(),
+      });
       const customChanged = hadCustom !== Boolean(this.state.custom);
       // Een verwijderde speler krijgt nog één melding en wordt dan afgesloten.
       for (const other of this.ctx.getWebSockets()) {
@@ -265,13 +268,23 @@ export class GameRoom extends DurableObject {
     if (this.state && ws.deserializeAttachment()?.playerId) this.broadcast(ws);
   }
 
-  /** Stuurt iedereen zijn eigen kijk op het spel; `gone` sluit net af. */
-  broadcast(gone) {
-    const sockets = this.ctx
+  /** Aangemelde verbindingen met hun speler; `gone` sluit net af. */
+  sockets(gone) {
+    return this.ctx
       .getWebSockets()
       .filter((s) => s !== gone)
       .map((s) => ({ s, playerId: s.deserializeAttachment()?.playerId }))
       .filter((x) => x.playerId);
+  }
+
+  /** Wie nu verbonden is, zoals het bord het toont. */
+  onlineIds(gone) {
+    return new Set(this.sockets(gone).map((x) => x.playerId));
+  }
+
+  /** Stuurt iedereen zijn eigen kijk op het spel; `gone` sluit net af. */
+  broadcast(gone) {
+    const sockets = this.sockets(gone);
     const online = new Set(sockets.map((x) => x.playerId));
     for (const { s, playerId } of sockets) {
       try {

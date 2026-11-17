@@ -768,6 +768,31 @@ details ul {
   margin-top: 12px;
 }
 
+/* Even duidelijk als een plaats aantikken: geen token inzetten deze beurt. */
+.challenge-pass {
+  margin-top: 12px;
+}
+
+.challenge-wait {
+  margin-top: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* Noodknop van de host: bewust ondergeschikt aan Onthul. */
+.challenge-force {
+  margin-top: 6px;
+  font-size: 0.9rem;
+}
+
+.challenge-force-box {
+  margin-top: 10px;
+}
+
+.challenge-force-box p {
+  margin: 0 0 10px;
+}
+
 .eq {
   display: flex;
   align-items: flex-end;
