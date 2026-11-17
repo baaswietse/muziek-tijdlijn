@@ -59,16 +59,18 @@ export function createRoom({ code, now }) {
   return {
     v: 1,
     code,
-    phase: 'lobby', // lobby | playing | reveal | finished
+    phase: 'lobby', // lobby | playing | challenge | reveal | finished
     settings: { target: LIMITS.defaultTarget },
     hostId: null,
     players: [], // volgorde = beurtvolgorde
     deck: [], // nog te spelen kaarten; de bovenste is de laatste
     custom: null, // eigen lijst van de host: { name, tracks }, anders de standaardlijst
     used: [], // track-ID's die in deze kamer al gespeeld zijn
+    // Tijdens `challenge` ook placedIndex (vastgelegde plaats) en bets: [{ playerId, index }].
     turn: null, // { playerId, card, pendingIndex, number }
     turnCount: 0, // aantal beurten in het lopende spel
-    reveal: null, // { playerId, card, index, correct }
+    // Na ingezette tokens ook bets: [{ playerId, index, correct }] en cardTo.
+    reveal: null, // { playerId, card, index, correct, guessTokenTo? }
     winnerIds: [],
     game: 0,
     createdAt: now,
@@ -101,10 +103,12 @@ export function addPlayer(state, { id, token, name }) {
   if (state.players.some((p) => p.name.toLowerCase() === lower)) {
     fail('NAME_TAKEN', 'Die naam is al bezet in dit spel. Kies een andere.');
   }
-  const player = { id, token, name: clean, timeline: [] };
+  // `token` is het geheime sleuteltje van de speler; `guessTokens` telt de
+  // tokens die hij verdiende met het raden van artiest en nummer.
+  const player = { id, token, name: clean, timeline: [], guessTokens: 0 };
   // Wie tijdens een spel instapt, krijgt meteen een startkaart en sluit
   // achteraan aan in de beurtvolgorde.
-  if (state.phase === 'playing' || state.phase === 'reveal') {
+  if (state.phase === 'playing' || state.phase === 'challenge' || state.phase === 'reveal') {
     const card = state.deck.pop();
     if (!card) fail('DECK_EMPTY', 'De stapel is op; instappen kan pas bij het volgende spel.');
     state.used.push(card.id);
@@ -182,6 +186,7 @@ export function startGame(state, actorId, tracks, random) {
     const card = state.deck.pop();
     state.used.push(card.id);
     p.timeline = [card];
+    p.guessTokens = 0;
   }
   // Willekeurige startspeler; daarna gewoon de volgorde van de lijst.
   const first = Math.floor(random() * n);
@@ -252,20 +257,116 @@ export function selectSlot(state, actorId, index) {
   state.turn.pendingIndex = index;
 }
 
-/** De actieve speler legt de kaart definitief. */
+/**
+ * De actieve speler legt de kaart definitief. Heeft een andere speler een
+ * token, dan volgt eerst de fase `challenge` waarin anderen kunnen inzetten;
+ * anders meteen de onthulling, zodat het basisspel even vlot blijft.
+ */
 export function placeCard(state, actorId, index) {
   requireActive(state, actorId);
   const player = checkIndex(state, index);
+  const canChallenge = state.players.some((p) => p.id !== player.id && (p.guessTokens ?? 0) > 0);
+  if (canChallenge) {
+    state.turn.pendingIndex = index;
+    state.turn.placedIndex = index;
+    state.turn.bets = [];
+    state.phase = 'challenge';
+    return;
+  }
+  resolveTurn(state, index, []);
+}
+
+/** Waar `year` juist ligt in een gesorteerde tijdlijn (na gelijke jaren). */
+function slotFor(timeline, year) {
+  let i = 0;
+  while (i < timeline.length && timeline[i].year <= year) i++;
+  return i;
+}
+
+/**
+ * Onthult de beurt. Ligt de actieve speler juist, dan houdt hij de kaart en
+ * zijn alle inzetten verloren. Ligt hij fout, dan gaat de kaart naar de eerste
+ * inzetter (in volgorde van inzetten) die wel juist lag, op de juiste plaats in
+ * zijn eigen tijdlijn. Ingezette tokens zijn altijd verbruikt.
+ */
+function resolveTurn(state, index, bets) {
+  const player = findPlayer(state, state.turn.playerId);
   const { card } = state.turn;
+  // Alles beoordelen op de tijdlijn zoals ze lag, vóór er iets bijkomt.
   const correct = isCorrectPlacement(player.timeline, card.year, index);
-  if (correct) player.timeline.splice(index, 0, card);
+  const results = bets.map((b) => ({
+    playerId: b.playerId,
+    index: b.index,
+    correct: isCorrectPlacement(player.timeline, card.year, b.index),
+  }));
+  let receiver = null;
+  if (correct) {
+    receiver = player;
+    player.timeline.splice(index, 0, card);
+  } else {
+    const hit = results.find((r) => r.correct && findPlayer(state, r.playerId));
+    if (hit) {
+      receiver = findPlayer(state, hit.playerId);
+      receiver.timeline.splice(slotFor(receiver.timeline, card.year), 0, card);
+    }
+  }
+  // `guessTokenTo` komt er pas bij als iemand het token van deze beurt krijgt;
+  // `bets` en `cardTo` alleen als er tokens ingezet werden.
   state.reveal = { playerId: player.id, card, index, correct };
+  if (results.length) {
+    state.reveal.bets = results;
+    state.reveal.cardTo = receiver ? receiver.id : null;
+  }
   state.turn = null;
   state.phase = 'reveal';
-  if (correct && player.timeline.length >= state.settings.target) {
-    finish(state, [player.id]);
+  // Dezelfde winstregel als bij een gewone beurt, voor wie de kaart kreeg.
+  if (receiver && receiver.timeline.length >= state.settings.target) {
+    finish(state, [receiver.id]);
   }
 }
+
+/**
+ * Tijdens `challenge`: een andere speler zet een token in op een andere, nog
+ * vrije plaats op de tijdlijn van de speler aan beurt. Kost meteen 1 token en
+ * is definitief; wie eerst inzet, heeft de plaats.
+ */
+export function placeBet(state, actorId, index) {
+  const actor = requirePlayer(state, actorId);
+  if (state.phase !== 'challenge' || !state.turn) fail('BAD_PHASE', 'Je kan nu geen token inzetten.');
+  const { turn } = state;
+  if (actorId === turn.playerId) fail('NOT_ALLOWED', 'Op je eigen beurt kan je geen token inzetten.');
+  if (turn.bets.some((b) => b.playerId === actorId)) fail('ALREADY_BET', 'Je zette deze beurt al een token in.');
+  if ((actor.guessTokens ?? 0) < 1) fail('NO_TOKEN', 'Je hebt geen token om in te zetten.');
+  const active = findPlayer(state, turn.playerId);
+  if (!Number.isInteger(index) || index < 0 || index > active.timeline.length) {
+    fail('BAD_INDEX', 'Die plaats bestaat niet op die tijdlijn.');
+  }
+  if (index === turn.placedIndex || turn.bets.some((b) => b.index === index)) {
+    fail('SLOT_TAKEN', 'Die plaats is al bezet. Kies een andere.');
+  }
+  actor.guessTokens -= 1;
+  turn.bets.push({ playerId: actorId, index });
+}
+
+/** Einde van de fase `challenge`: de speler aan beurt of de host onthult. */
+export function revealTurn(state, actorId) {
+  requirePlayer(state, actorId);
+  if (state.phase !== 'challenge' || !state.turn) fail('BAD_PHASE', 'Er valt nu niets te onthullen.');
+  if (actorId !== state.turn.playerId && actorId !== state.hostId) {
+    fail('NOT_ALLOWED', 'Alleen de speler aan beurt of de host kan onthullen.');
+  }
+  resolveTurn(state, state.turn.placedIndex, state.turn.bets);
+}
+
+/** De beurt telt niet (overgeslagen, speler weg): ingezette tokens gaan terug. */
+function refundBets(state) {
+  for (const b of state.turn?.bets ?? []) {
+    const p = findPlayer(state, b.playerId);
+    if (p) p.guessTokens = (p.guessTokens ?? 0) + 1;
+  }
+}
+
+const turnRunning = (state) => (state.phase === 'playing' || state.phase === 'challenge') && state.turn;
 
 /** Na de onthulling: door naar de volgende speler (actieve speler of host). */
 export function nextTurn(state, actorId) {
@@ -284,14 +385,16 @@ export function nextTurn(state, actorId) {
 /** Host: ander nummer voor dezelfde speler (bv. nummer speelt niet af). */
 export function skipTrack(state, actorId) {
   requireHost(state, actorId);
-  if (state.phase !== 'playing' || !state.turn) fail('BAD_PHASE', 'Er speelt nu geen nummer.');
+  if (!turnRunning(state)) fail('BAD_PHASE', 'Er speelt nu geen nummer.');
+  refundBets(state);
   beginTurn(state, state.turn.playerId, { sameTurn: true });
 }
 
 /** Host: sla de beurt van de actieve speler over (bv. even weg). */
 export function skipTurn(state, actorId) {
   requireHost(state, actorId);
-  if (state.phase !== 'playing' || !state.turn) fail('BAD_PHASE', 'Er is nu geen beurt bezig.');
+  if (!turnRunning(state)) fail('BAD_PHASE', 'Er is nu geen beurt bezig.');
+  refundBets(state);
   beginTurn(state, nextPlayerId(state, state.turn.playerId));
 }
 
@@ -301,11 +404,57 @@ export function removePlayer(state, actorId, targetId) {
   if (targetId === state.hostId) fail('NOT_ALLOWED', 'De host kan zichzelf niet verwijderen.');
   const target = findPlayer(state, targetId);
   if (!target) fail('NOT_FOUND', 'Die speler zit niet in dit spel.');
-  const wasActive = state.phase === 'playing' && state.turn?.playerId === targetId;
+  const wasActive = turnRunning(state) && state.turn.playerId === targetId;
   const nextId = wasActive ? nextPlayerId(state, targetId) : null;
+  // Is de speler aan beurt weg, dan telt de beurt niet: inzetters krijgen hun
+  // token terug. Een inzetter die weg moet, verliest gewoon zijn inzet.
+  if (wasActive) refundBets(state);
+  else if (state.phase === 'challenge' && state.turn) state.turn.bets = state.turn.bets.filter((b) => b.playerId !== targetId);
   state.players = state.players.filter((p) => p.id !== targetId);
   state.winnerIds = state.winnerIds.filter((id) => id !== targetId);
+  // Had die speler het token van deze onthulling, dan vervalt het mee.
+  if (state.reveal?.guessTokenTo === targetId) state.reveal.guessTokenTo = null;
   if (wasActive) beginTurn(state, nextId, { sameTurn: true });
+}
+
+/**
+ * Tijdens de onthulling: geef het token van deze beurt aan wie artiest en
+ * nummer als eerste juist raadde (dat gebeurt hardop aan tafel). Per beurt is
+ * er hoogstens één token: een andere speler kiezen verplaatst het, `null`
+ * neemt het terug. De host en de speler aan beurt mogen alles (dezelfden als
+ * bij "volgende beurt": vaak tikt de speler aan beurt zelf meteen door); wie
+ * zelf raadde, kan het voor zichzelf opeisen.
+ * Ook na de beslissende kaart (fase `finished`, de onthulling blijft dan
+ * zichtbaar) kan het token nog gegeven worden.
+ */
+export function giveToken(state, actorId, targetId) {
+  requirePlayer(state, actorId);
+  const open = state.reveal && (state.phase === 'reveal' || state.phase === 'finished');
+  if (!open) fail('BAD_PHASE', 'Een token geven kan alleen tijdens de onthulling.');
+  const target = targetId ? findPlayer(state, targetId) : null;
+  if (targetId && !target) fail('NOT_FOUND', 'Die speler zit niet in dit spel.');
+  const previous = state.reveal.guessTokenTo ?? null;
+  if (previous === (target?.id ?? null)) return;
+  // Wie zelf raadde, mag het token voor zichzelf opeisen zolang niemand het
+  // heeft, en het weer teruggeven. Afnemen of doorgeven kan hij niet.
+  const full = actorId === state.reveal.playerId || actorId === state.hostId;
+  if (!full) {
+    const claim = target?.id === actorId && previous === null;
+    const giveBack = target === null && previous === actorId;
+    if (!claim && !giveBack) {
+      fail(
+        'NOT_ALLOWED',
+        previous && previous !== actorId
+          ? 'Het token van deze beurt is al aan iemand anders gegeven.'
+          : 'Je kan het token alleen voor jezelf opeisen; de host of de speler aan beurt kan het aan iemand anders geven.',
+      );
+    }
+  }
+  // Wie het token had (en nog meespeelt), geeft het terug.
+  const old = previous ? findPlayer(state, previous) : null;
+  if (old) old.guessTokens = Math.max(0, (old.guessTokens ?? 0) - 1);
+  if (target) target.guessTokens = (target.guessTokens ?? 0) + 1;
+  state.reveal.guessTokenTo = target?.id ?? null;
 }
 
 /** Host: stop het lopende spel en ga terug naar de wachtkamer. */
@@ -316,7 +465,10 @@ export function backToLobby(state, actorId) {
   state.reveal = null;
   state.winnerIds = [];
   state.deck = [];
-  for (const p of state.players) p.timeline = [];
+  for (const p of state.players) {
+    p.timeline = [];
+    p.guessTokens = 0;
+  }
 }
 
 /**
@@ -338,6 +490,8 @@ export function viewFor(state, playerId, online = new Set()) {
       name: p.name,
       online: online.has(p.id),
       timeline: p.timeline.map((c) => ({ ...c })),
+      // Oudere opgeslagen kamers kennen het veld nog niet: dat telt als 0.
+      guessTokens: p.guessTokens ?? 0,
     })),
     deckLeft: state.deck.length,
     // Welke lijst er gespeeld wordt; de nummers zelf gaan niet mee.
@@ -347,6 +501,10 @@ export function viewFor(state, playerId, online = new Set()) {
           playerId: state.turn.playerId,
           number: state.turn.number,
           pendingIndex: state.turn.pendingIndex,
+          // Tijdens `challenge`: de vastgelegde plaats en wie waar inzette.
+          ...(state.phase === 'challenge'
+            ? { placedIndex: state.turn.placedIndex, bets: state.turn.bets.map((b) => ({ ...b })) }
+            : {}),
           ...(isHost ? { trackId: state.turn.card.id } : {}),
         }
       : null,
@@ -356,6 +514,9 @@ export function viewFor(state, playerId, online = new Set()) {
           card: { ...state.reveal.card },
           index: state.reveal.index,
           correct: state.reveal.correct,
+          guessTokenTo: state.reveal.guessTokenTo ?? null,
+          bets: (state.reveal.bets ?? []).map((b) => ({ ...b })),
+          cardTo: state.reveal.cardTo !== undefined ? state.reveal.cardTo : state.reveal.correct ? state.reveal.playerId : null,
         }
       : null,
     winnerIds: state.winnerIds.slice(),

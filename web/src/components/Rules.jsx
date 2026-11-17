@@ -8,6 +8,8 @@ export function Rules({ open = false, target = 10 }) {
         <li>Leg het nummer op je tijdlijn: vóór, tussen of na de kaarten die je al hebt.</li>
         <li>Juist? Je houdt de kaart. Fout? De kaart is weg.</li>
         <li>Daarna wordt het nummer onthuld en is de volgende aan de beurt.</li>
+        <li>Wie aan de beurt is, mag hardop artiest en nummer raden (fout of geen idee? dan de volgende); wie het eerst juist heeft, krijgt na de onthulling een token.</li>
+        <li>Met een token kan je bij de beurt van een ander, nadat die zijn kaart legde, een andere plaats kiezen: ligt die speler fout en jij juist, dan krijg jij de kaart. Een ingezet token ben je altijd kwijt.</li>
         <li>Wie eerst {target} kaarten heeft, wint. Hetzelfde jaar als een buurkaart mag ervoor of erna.</li>
       </ol>
     </details>

@@ -8,22 +8,40 @@ export function Game({ view, send, music, onLeave }) {
   const isHost = me === view.hostId;
   const byId = new Map(view.players.map((p) => [p.id, p]));
   const playing = view.phase === 'playing';
+  // Tussenfase: de plaats ligt vast, anderen kunnen nog een token inzetten.
+  const challenge = view.phase === 'challenge';
   const finished = view.phase === 'finished';
   const reveal = view.reveal;
-  const activeId = playing ? view.turn.playerId : reveal?.playerId;
+  const activeId = playing || challenge ? view.turn.playerId : reveal?.playerId;
   const active = byId.get(activeId);
   const mine = byId.get(me);
   const myTurn = playing && activeId === me;
   const target = view.settings.target;
 
   // Jouw voorlopige keuze: meteen zichtbaar bij jou, en via de server bij de rest.
-  const turnKey = playing ? `${view.game}:${view.turn.number}:${activeId}` : '';
+  const turnKey = playing || challenge ? `${view.game}:${view.turn.number}:${activeId}` : '';
   const [pick, setPick] = useState(null);
   const [placing, setPlacing] = useState(false);
+  // Waar jij een token wil inzetten: eerst aantikken, dan bevestigen.
+  const [betPick, setBetPick] = useState(null);
   useEffect(() => {
     setPick(myTurn ? view.turn.pendingIndex : null);
     setPlacing(false);
+    setBetPick(null);
   }, [turnKey]);
+
+  const bets = challenge ? view.turn.bets : [];
+  const myBet = bets.find((b) => b.playerId === me);
+  const canBet = challenge && activeId !== me && !myBet && (mine?.guessTokens ?? 0) > 0;
+  const taken = new Set(challenge ? [view.turn.placedIndex, ...bets.map((b) => b.index)] : []);
+  // Nam iemand anders jouw plaats net in, dan vervalt je keuze.
+  const betChoice = canBet && betPick !== null && !taken.has(betPick) ? betPick : null;
+  const nameOf = (id) => (id === me ? 'jij' : byId.get(id)?.name ?? 'iemand');
+  // Namen bij de gaten: wie zette waar in (en na de onthulling: juist of fout).
+  const marks = (challenge ? bets : reveal?.bets ?? []).map((b) => ({
+    ...b,
+    name: b.playerId === me ? 'Jij' : byId.get(b.playerId)?.name ?? 'Iemand',
+  }));
 
   function choose(i) {
     setPick(i);
@@ -35,11 +53,14 @@ export function Game({ view, send, music, onLeave }) {
     if (send({ t: 'place', index: pick })) setPlacing(true);
   }
 
-  const pendingIndex = playing ? (myTurn ? pick : view.turn.pendingIndex) : null;
+  const pendingIndex = playing ? (myTurn ? pick : view.turn.pendingIndex) : challenge ? betChoice : null;
   const canContinue = view.phase === 'reveal' && (me === reveal.playerId || isHost);
+  // Het token geven mag wie ook mag doorgaan, en ook nog na de beslissende
+  // kaart; de anderen kunnen het alleen voor zichzelf opeisen.
+  const canGiveToken = Boolean(reveal) && (me === reveal.playerId || isHost);
 
   return (
-    <main class={`page game${myTurn && pick !== null ? ' has-bar' : ''}`}>
+    <main class={`page game${(myTurn && pick !== null) || betChoice !== null ? ' has-bar' : ''}`}>
       {finished && <Winners view={view} byId={byId} />}
 
       {playing && (
@@ -54,7 +75,29 @@ export function Game({ view, send, music, onLeave }) {
         </section>
       )}
 
-      {reveal && <Reveal reveal={reveal} name={reveal.playerId === me ? 'Jij' : byId.get(reveal.playerId)?.name ?? 'Iemand'} own={reveal.playerId === me} />}
+      {challenge && (
+        <ChallengeBanner
+          view={view}
+          send={send}
+          activeName={nameOf(activeId)}
+          canReveal={activeId === me || isHost}
+          canBet={canBet}
+          myBet={myBet}
+          tokens={mine?.guessTokens ?? 0}
+        />
+      )}
+
+      {reveal && (
+        <Reveal
+          reveal={reveal}
+          name={reveal.playerId === me ? 'Jij' : byId.get(reveal.playerId)?.name ?? 'Iemand'}
+          own={reveal.playerId === me}
+          tokenName={reveal.guessTokenTo ? (reveal.guessTokenTo === me ? 'jou' : byId.get(reveal.guessTokenTo)?.name) : null}
+          cardTo={reveal.cardTo ? (reveal.cardTo === me ? 'Jij krijgt' : `${byId.get(reveal.cardTo)?.name ?? 'Iemand'} krijgt`) : null}
+        />
+      )}
+
+      {reveal && (canGiveToken ? <TokenPicker view={view} send={send} /> : <TokenClaim view={view} send={send} />)}
 
       {view.phase === 'reveal' &&
         (canContinue ? (
@@ -87,8 +130,13 @@ export function Game({ view, send, music, onLeave }) {
             testid="active-timeline"
             cards={active.timeline}
             pendingIndex={pendingIndex}
-            onPick={myTurn && !placing ? choose : undefined}
+            onPick={myTurn && !placing ? choose : canBet ? setBetPick : undefined}
             reveal={reveal && reveal.playerId === active.id ? reveal : undefined}
+            lockedIndex={challenge ? view.turn.placedIndex : null}
+            lockedText={`Hier legde ${activeId === me ? 'je' : active.name} het nummer`}
+            pickText={challenge ? 'Hier zet je je token' : undefined}
+            blocked={taken}
+            marks={marks}
           />
         </section>
       )}
@@ -99,7 +147,7 @@ export function Game({ view, send, music, onLeave }) {
             Jouw tijdlijn
             <Score n={mine.timeline.length} target={target} />
           </h2>
-          <Timeline testid="my-timeline" cards={mine.timeline} />
+          <Timeline testid="my-timeline" cards={mine.timeline} freshId={reveal?.cardTo === me ? reveal.card.id : null} />
         </section>
       )}
 
@@ -110,7 +158,7 @@ export function Game({ view, send, music, onLeave }) {
             .slice()
             .sort((a, b) => b.timeline.length - a.timeline.length)
             .map((p) => (
-              <PlayerRow key={p.id} p={p} view={view} isActive={p.id === activeId && playing} isHost={isHost} send={send} />
+              <PlayerRow key={p.id} p={p} view={view} isActive={p.id === activeId && (playing || challenge)} isHost={isHost} send={send} />
             ))}
         </ul>
         <p class="muted small">
@@ -132,6 +180,14 @@ export function Game({ view, send, music, onLeave }) {
           </button>
         </div>
       )}
+
+      {betChoice !== null && (
+        <div class="confirm-bar">
+          <button class="btn primary big" onClick={() => send({ t: 'challenge', index: betChoice })} data-testid="confirm-bet">
+            Zet token {slotLabel(active.timeline, betChoice)}
+          </button>
+        </div>
+      )}
     </main>
   );
 }
@@ -144,7 +200,35 @@ function Score({ n, target }) {
   );
 }
 
-function Reveal({ reveal, name, own }) {
+/**
+ * Tussenfase na het leggen. De speler aan beurt en de host kunnen onthullen;
+ * wie een token heeft, kan het inzetten op een andere plaats.
+ */
+function ChallengeBanner({ view, send, activeName, canReveal, canBet, myBet, tokens }) {
+  const mineTurn = view.turn.playerId === view.you;
+  const who = activeName[0].toUpperCase() + activeName.slice(1);
+  let text;
+  if (mineTurn) text = 'Je kaart ligt vast. Wie een token heeft, kan het nog inzetten op een andere plaats.';
+  else if (myBet) text = `Je zette een token in. Wachten tot ${activeName} of de host onthult…`;
+  else if (canBet) {
+    text = `Ligt ${activeName} fout? Tik een andere plaats aan en zet er een token in. Je hebt ${tokens} ${tokens === 1 ? 'token' : 'tokens'}.`;
+  } else text = `${who} legde het nummer. Wie een token heeft, kan nog inzetten. Wachten op de onthulling…`;
+  return (
+    <section class="now challenge" data-testid="challenge-banner" data-active={view.turn.playerId} data-can-bet={canBet ? 'yes' : 'no'}>
+      <div class="grow">
+        <p class="now-who">{mineTurn ? 'Nog even wachten' : canBet ? 'Token inzetten?' : 'Even wachten'}</p>
+        <p class="now-what">{text}</p>
+        {canReveal && (
+          <button class="btn primary big challenge-reveal" onClick={() => send({ t: 'reveal' })} data-testid="reveal-now">
+            Onthul
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Reveal({ reveal, name, own, tokenName, cardTo }) {
   const { card, correct } = reveal;
   return (
     <section class={`reveal ${correct ? 'good' : 'bad'}`} data-testid="reveal" data-correct={correct ? 'yes' : 'no'} data-track={card.id}>
@@ -157,7 +241,86 @@ function Reveal({ reveal, name, own }) {
       <a class="spotify-link" href={`https://open.spotify.com/track/${card.id}`} target="_blank" rel="noopener noreferrer">
         Open in Spotify
       </a>
+      {reveal.bets.length > 0 && !correct && (
+        <p class="reveal-token" data-testid="reveal-card-to" data-player={reveal.cardTo ?? ''}>
+          {cardTo ? `${cardTo} de kaart dankzij een token.` : 'Geen enkele inzet lag juist.'}
+        </p>
+      )}
+      {reveal.bets.length > 0 && correct && <p class="reveal-token">De ingezette tokens zijn verloren.</p>}
+      {tokenName && (
+        <p class="reveal-token" data-testid="reveal-token" data-player={reveal.guessTokenTo}>
+          Token voor {tokenName}
+        </p>
+      )}
     </section>
+  );
+}
+
+/**
+ * Wie artiest en nummer als eerste juist raadde (hardop aan tafel), krijgt het
+ * token van deze beurt. Raadvolgorde: eerst wie aan de beurt was, dan de
+ * volgenden in beurtvolgorde. Nog eens tikken neemt het terug.
+ */
+function TokenPicker({ view, send }) {
+  const players = view.players;
+  const start = Math.max(0, players.findIndex((p) => p.id === view.reveal.playerId));
+  const order = players.slice(start).concat(players.slice(0, start));
+  const given = view.reveal.guessTokenTo ?? null;
+  return (
+    <section class="guess" data-testid="token-picker" aria-labelledby="guess-title">
+      <p class="guess-title" id="guess-title">
+        Wie raadde artiest en nummer?
+      </p>
+      <div class="guess-list">
+        {order.map((p) => {
+          const on = p.id === given;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              class={`guess-btn${on ? ' on' : ''}`}
+              aria-pressed={on ? 'true' : 'false'}
+              onClick={() => send({ t: 'token', playerId: on ? null : p.id })}
+              data-testid="token-button"
+              data-player={p.id}
+            >
+              {on && <span aria-hidden="true">✓ </span>}
+              {p.id === view.you ? 'Ikzelf' : p.name}
+            </button>
+          );
+        })}
+      </div>
+      <p class="muted small">{given ? 'Tik nog eens om het token terug te nemen.' : 'Niemand? Dan geef je geen token.'}</p>
+    </section>
+  );
+}
+
+/** Voor de andere spelers: het token van deze beurt voor zichzelf opeisen. */
+function TokenClaim({ view, send }) {
+  const given = view.reveal.guessTokenTo ?? null;
+  if (given && given !== view.you) return null;
+  const mine = given === view.you;
+  return (
+    <section class="guess" data-testid="token-claim">
+      <button
+        type="button"
+        class={`btn${mine ? '' : ' primary'}`}
+        onClick={() => send({ t: 'token', playerId: mine ? null : view.you })}
+        data-testid={mine ? 'token-unclaim' : 'token-claim-button'}
+      >
+        {mine ? 'Toch niet' : 'Ik raadde artiest en nummer'}
+      </button>
+      <p class="muted small">{mine ? 'Het token van deze beurt is voor jou.' : 'Als eerste juist geraden? Eis dan het token op.'}</p>
+    </section>
+  );
+}
+
+/** Aantal tokens als gewone tekst ("2 tokens"), zodat het ook zonder kleur leest. */
+function Tokens({ n }) {
+  return (
+    <span class={`tokens push${n ? '' : ' none'}`} data-testid="token-count" data-count={n}>
+      {n} {n === 1 ? 'token' : 'tokens'}
+    </span>
   );
 }
 
@@ -172,7 +335,22 @@ function Winners({ view, byId }) {
     <section class="winner" data-testid="winner" data-winners={view.winnerIds.join(',')}>
       <p class="winner-label">Spel afgelopen</p>
       <p class="winner-name">{text}</p>
+      <TokenSummary view={view} />
     </section>
+  );
+}
+
+/** Op het eindscherm: wie hoeveel tokens verdiende. */
+function TokenSummary({ view }) {
+  const withTokens = view.players
+    .filter((p) => (p.guessTokens ?? 0) > 0)
+    .sort((a, b) => b.guessTokens - a.guessTokens);
+  return (
+    <p class="winner-tokens" data-testid="winner-tokens">
+      {withTokens.length === 0
+        ? 'Geen tokens dit spel.'
+        : `Tokens: ${withTokens.map((p) => `${p.id === view.you ? 'jij' : p.name} ${p.guessTokens}`).join(' · ')}`}
+    </p>
   );
 }
 
@@ -180,14 +358,15 @@ function PlayerRow({ p, view, isActive, isHost, send }) {
   const [open, setOpen] = useState(false);
   const target = view.settings.target;
   return (
-    <li class={`board-row${isActive ? ' active' : ''}${p.online ? '' : ' offline'}`} data-testid="board-row" data-player={p.id} data-count={p.timeline.length}>
+    <li class={`board-row${isActive ? ' active' : ''}${p.online ? '' : ' offline'}`} data-testid="board-row" data-player={p.id} data-count={p.timeline.length} data-tokens={p.guessTokens ?? 0}>
       <button type="button" class="board-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span class={`dot ${p.online ? 'on' : ''}`} aria-hidden="true" />
         <span class="person-name">{p.name}</span>
         {p.id === view.you && <span class="chip soft">jij</span>}
         {p.id === view.hostId && <span class="chip">host</span>}
         {!p.online && <span class="muted small">offline</span>}
-        <span class="push score">
+        <Tokens n={p.guessTokens ?? 0} />
+        <span class="score">
           {p.timeline.length} / {target}
         </span>
       </button>
@@ -212,7 +391,8 @@ function PlayerRow({ p, view, isActive, isHost, send }) {
 
 function HostControls({ view, send, music }) {
   const [settings, setSettings] = useState(false);
-  const playing = view.phase === 'playing';
+  // Ook in de tussenfase loopt de beurt nog: overslaan kan dan ook.
+  const playing = view.phase === 'playing' || view.phase === 'challenge';
   const trackId = music.currentTrackId;
   const needsSetup = !music.ready;
   return (

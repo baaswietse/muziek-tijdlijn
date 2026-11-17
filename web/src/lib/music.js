@@ -219,7 +219,10 @@ export function useMusic({ enabled, view }) {
 
   // Nieuwe beurt = nieuw nummer. De sleutel wordt onthouden, zodat het nummer
   // niet opnieuw begint als de host de pagina herlaadt of even weg was.
-  const trackId = view?.phase === 'playing' ? view.turn?.trackId : null;
+  // In de tussenfase (tokens inzetten) loopt dezelfde beurt verder: dezelfde
+  // sleutel, dus het nummer start niet opnieuw.
+  const turnRunning = view?.phase === 'playing' || view?.phase === 'challenge';
+  const trackId = turnRunning ? view.turn?.trackId : null;
   const key = trackId ? `${view.code}:${view.game}:${view.turn.number}:${trackId}` : null;
 
   // Speelt de browser zelf, dan viel het geluid weg bij het herladen. Zet de
@@ -244,7 +247,7 @@ export function useMusic({ enabled, view }) {
   const wasPlaying = useRef(false);
   useEffect(() => {
     if (!enabled) return;
-    const active = phase === 'playing' || phase === 'reveal';
+    const active = phase === 'playing' || phase === 'challenge' || phase === 'reveal';
     if (wasPlaying.current && !active && deviceRef.current) player.release(deviceRef.current.id);
     wasPlaying.current = active;
   }, [enabled, phase]);

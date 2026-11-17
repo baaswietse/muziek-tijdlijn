@@ -423,3 +423,468 @@ test('normaliseTracks filtert ongeldige en dubbele nummers', () => {
   assert.deepEqual(normaliseTracks({ tracks: [{ id: 'a', artist: 'A', title: 'T', year: 1 }] }), []);
   assert.deepEqual(normaliseTracks('rommel'), []);
 });
+
+// ---------- tokens voor wie artiest en nummer raadt ----------
+
+/** Speelt tot de onthulling, met een niet-host aan de beurt. */
+function toReveal(seed = 31, names) {
+  const state = newRoom(names);
+  rules.startGame(state, 'p0', makeTracks(40), seeded(seed));
+  while (state.turn.playerId === 'p0') rules.skipTurn(state, 'p0');
+  const active = state.turn.playerId;
+  rules.placeCard(state, active, correctIndex(state));
+  return { state, active };
+}
+
+const tokensOf = (state, id) => rules.findPlayer(state, id).guessTokens;
+
+test('token: geven, verplaatsen, nog eens dezelfde, terugnemen', () => {
+  const { state, active } = toReveal();
+  const other = state.players.find((p) => p.id !== active && p.id !== 'p0').id;
+  for (const p of state.players) assert.equal(p.guessTokens, 0);
+
+  rules.giveToken(state, active, active);
+  assert.equal(tokensOf(state, active), 1);
+  assert.equal(state.reveal.guessTokenTo, active);
+
+  // Dezelfde speler nog eens: niets verandert.
+  rules.giveToken(state, 'p0', active);
+  assert.equal(tokensOf(state, active), 1);
+
+  // Een andere speler: het token verhuist.
+  rules.giveToken(state, 'p0', other);
+  assert.equal(tokensOf(state, active), 0);
+  assert.equal(tokensOf(state, other), 1);
+  assert.equal(state.reveal.guessTokenTo, other);
+
+  // Terugnemen, ook twee keer na elkaar.
+  rules.giveToken(state, active, null);
+  assert.equal(tokensOf(state, other), 0);
+  assert.equal(state.reveal.guessTokenTo, null);
+  rules.giveToken(state, active, null);
+  for (const p of state.players) assert.equal(p.guessTokens, 0);
+});
+
+test('token: host en speler aan beurt alles, een ander alleen voor zichzelf als het nog vrij is', () => {
+  const { state, active } = toReveal(33, ['Ann', 'Bob', 'Cas', 'Dirk']);
+  const [bystander, other] = state.players.filter((p) => p.id !== active && p.id !== 'p0').map((p) => p.id);
+  throwsCode(() => rules.giveToken(state, 'onbekend', active), 'NOT_IN_ROOM');
+  throwsCode(() => rules.giveToken(state, 'p0', 'bestaat-niet'), 'NOT_FOUND');
+  // Een ander geven kan een gewone speler niet (Nederlandstalige fout).
+  assert.throws(() => rules.giveToken(state, bystander, active), /alleen voor jezelf opeisen/);
+  throwsCode(() => rules.giveToken(state, bystander, other), 'NOT_ALLOWED');
+  assert.equal(state.reveal.guessTokenTo ?? null, null);
+  for (const p of state.players) assert.equal(p.guessTokens, 0);
+
+  // Voor zichzelf opeisen mag, en weer teruggeven ook.
+  rules.giveToken(state, bystander, bystander);
+  assert.equal(tokensOf(state, bystander), 1);
+  rules.giveToken(state, bystander, bystander); // nog eens: niets verandert
+  assert.equal(tokensOf(state, bystander), 1);
+  // Een andere gewone speler kan het niet afnemen of terugzetten.
+  assert.throws(() => rules.giveToken(state, other, other), /al aan iemand anders gegeven/);
+  throwsCode(() => rules.giveToken(state, other, null), 'NOT_ALLOWED');
+  assert.equal(tokensOf(state, bystander), 1);
+  rules.giveToken(state, bystander, null);
+  assert.equal(tokensOf(state, bystander), 0);
+  assert.equal(state.reveal.guessTokenTo, null);
+
+  // De speler aan beurt kan het van een opeiser afnemen; die kan het dan niet terugpakken.
+  rules.giveToken(state, other, other);
+  rules.giveToken(state, active, active);
+  assert.equal(tokensOf(state, other), 0);
+  throwsCode(() => rules.giveToken(state, other, other), 'NOT_ALLOWED');
+  throwsCode(() => rules.giveToken(state, other, null), 'NOT_ALLOWED');
+  assert.equal(tokensOf(state, active), 1);
+  rules.giveToken(state, active, null);
+
+  // Na "volgende beurt" is het te laat, en in de wachtkamer kan het ook niet.
+  rules.giveToken(state, active, active);
+  rules.nextTurn(state, active);
+  throwsCode(() => rules.giveToken(state, 'p0', active), 'BAD_PHASE');
+  assert.equal(tokensOf(state, active), 1, 'het token blijft na de beurt');
+  const lobby = newRoom();
+  throwsCode(() => rules.giveToken(lobby, 'p0', 'p1'), 'BAD_PHASE');
+});
+
+test('token: één per beurt, tellers lopen op over beurten', () => {
+  const { state, active } = toReveal(35);
+  rules.giveToken(state, active, 'p0');
+  rules.nextTurn(state, 'p0');
+  // Volgende beurt: een nieuw token, ook voor dezelfde speler.
+  rules.placeCard(state, state.turn.playerId, 0);
+  assert.equal(state.reveal.guessTokenTo ?? null, null);
+  rules.giveToken(state, 'p0', 'p0');
+  assert.equal(tokensOf(state, 'p0'), 2);
+  rules.giveToken(state, 'p0', 'p0');
+  assert.equal(tokensOf(state, 'p0'), 2);
+});
+
+test('token: kan nog bij de beslissende laatste kaart', () => {
+  const state = newRoom(['Ann', 'Bob']);
+  rules.setSettings(state, 'p0', { target: 3 });
+  rules.startGame(state, 'p0', makeTracks(40), seeded(11));
+  let guard = 0;
+  while (state.phase !== 'finished' && guard++ < 100) {
+    rules.placeCard(state, state.turn.playerId, correctIndex(state));
+    if (state.phase === 'reveal') rules.nextTurn(state, state.hostId);
+  }
+  assert.equal(state.phase, 'finished');
+  const winner = state.winnerIds[0];
+  const loser = state.players.find((p) => p.id !== winner).id;
+  rules.giveToken(state, winner, loser);
+  assert.equal(tokensOf(state, loser), 1);
+  rules.giveToken(state, 'p0', winner);
+  assert.equal(tokensOf(state, loser), 0);
+  assert.equal(tokensOf(state, winner), 1);
+  assert.equal(rules.viewFor(state, loser).reveal.guessTokenTo, winner);
+  // Het token verandert niets aan de winnaar.
+  assert.deepEqual(state.winnerIds, [winner]);
+  // Een nieuw spel zet alles terug op 0, en dan kan het niet meer.
+  rules.startGame(state, 'p0', makeTracks(40), seeded(12));
+  for (const p of state.players) assert.equal(p.guessTokens, 0);
+  throwsCode(() => rules.giveToken(state, 'p0', 'p0'), 'BAD_PHASE');
+});
+
+test('token: na een lege stapel (geen onthulling meer) kan het niet', () => {
+  const state = newRoom(['Ann', 'Bob']);
+  rules.startGame(state, 'p0', makeTracks(4), seeded(2)); // 2 startkaarten + 2 beurten
+  let guard = 0;
+  while (state.phase !== 'finished' && guard++ < 20) {
+    rules.placeCard(state, state.turn.playerId, wrongIndex(state) ?? 0);
+    if (state.phase === 'reveal') rules.nextTurn(state, state.hostId);
+  }
+  assert.equal(state.phase, 'finished');
+  assert.equal(state.reveal, null);
+  throwsCode(() => rules.giveToken(state, 'p0', 'p0'), 'BAD_PHASE');
+});
+
+test('token: terug naar 0 in de wachtkamer en bij een nieuw spel, laat instappen begint op 0', () => {
+  const { state, active } = toReveal(37);
+  rules.giveToken(state, 'p0', active);
+  const late = rules.addPlayer(state, { id: 'late', token: 'token-late-xxxx', name: 'Laat' });
+  assert.equal(late.guessTokens, 0);
+  rules.backToLobby(state, 'p0');
+  for (const p of state.players) assert.equal(p.guessTokens, 0);
+  rules.startGame(state, 'p0', makeTracks(40), seeded(38));
+  while (state.turn.playerId === 'p0') rules.skipTurn(state, 'p0');
+  rules.placeCard(state, state.turn.playerId, 0);
+  rules.giveToken(state, 'p0', 'p1');
+  assert.equal(tokensOf(state, 'p1'), 1);
+  // "Nog een spel" na afloop (fase finished): ook terug op 0.
+  rules.backToLobby(state, 'p0');
+  rules.startGame(state, 'p0', makeTracks(40), seeded(39));
+  for (const p of state.players) assert.equal(p.guessTokens, 0);
+});
+
+test('token: verwijderde speler neemt het token van deze beurt mee', () => {
+  const { state, active } = toReveal(41, ['Ann', 'Bob', 'Cas', 'Dirk']);
+  const other = state.players.find((p) => p.id !== active && p.id !== 'p0').id;
+  rules.giveToken(state, active, other);
+  rules.removePlayer(state, 'p0', other);
+  assert.equal(state.reveal.guessTokenTo, null);
+  for (const p of state.players) assert.equal(p.guessTokens, 0);
+  // Daarna gewoon opnieuw geven.
+  rules.giveToken(state, active, active);
+  assert.equal(tokensOf(state, active), 1);
+  // De speler aan beurt zelf verwijderen: alleen de host kan nog geven, en doorgaan werkt.
+  rules.removePlayer(state, 'p0', active);
+  assert.equal(state.reveal.guessTokenTo, null);
+  rules.giveToken(state, 'p0', 'p0');
+  assert.equal(tokensOf(state, 'p0'), 1);
+  rules.nextTurn(state, 'p0');
+  assert.equal(state.phase, 'playing');
+});
+
+test('token: view toont tellers en ontvanger, oude kamers zonder veld tellen als 0', () => {
+  const state = newRoom();
+  rules.startGame(state, 'p0', makeTracks(30), seeded(43));
+  // Een kamer uit de opslag van voor de tokens.
+  for (const p of state.players) delete p.guessTokens;
+  const card = state.turn.card;
+  for (const p of state.players) {
+    const v = rules.viewFor(state, p.id);
+    for (const x of v.players) assert.equal(x.guessTokens, 0);
+    const json = JSON.stringify(v);
+    assert.ok(!json.includes(card.title), 'titel lekt niet');
+    assert.ok(!json.includes('"token'), 'geheime sleutels lekken niet');
+  }
+  const active = state.turn.playerId;
+  rules.placeCard(state, active, 0);
+  assert.equal(rules.viewFor(state, 'p1').reveal.guessTokenTo, null);
+  rules.giveToken(state, active, 'p2');
+  for (const p of state.players) {
+    const v = rules.viewFor(state, p.id);
+    assert.equal(v.reveal.guessTokenTo, 'p2');
+    assert.equal(v.players.find((x) => x.id === 'p2').guessTokens, 1);
+    assert.equal(v.players.find((x) => x.id === 'p1').guessTokens, 0);
+  }
+});
+
+test('room: actie token geeft, verplaatst en neemt terug', async () => {
+  const state = room.createRoomState('ABCD', 0);
+  const host = room.join(state, 'Host');
+  const guest = room.join(state, 'Gast');
+  const loadTracks = async () => makeTracks(30);
+  await room.applyAction(state, host.playerId, { t: 'start' }, { loadTracks });
+  const active = state.turn.playerId;
+  await room.applyAction(state, active, { t: 'place', index: 0 }, { loadTracks });
+  await room.applyAction(state, active, { t: 'token', playerId: guest.playerId }, { loadTracks });
+  assert.equal(tokensOf(state, guest.playerId), 1);
+  await room.applyAction(state, host.playerId, { t: 'token', playerId: host.playerId }, { loadTracks });
+  assert.equal(tokensOf(state, guest.playerId), 0);
+  assert.equal(tokensOf(state, host.playerId), 1);
+  await room.applyAction(state, host.playerId, { t: 'token', playerId: '' }, { loadTracks });
+  assert.equal(tokensOf(state, host.playerId), 0);
+  await room.applyAction(state, host.playerId, { t: 'token', playerId: guest.playerId }, { loadTracks });
+  await room.applyAction(state, host.playerId, { t: 'token', playerId: null }, { loadTracks });
+  assert.equal(tokensOf(state, guest.playerId), 0);
+  await assert.rejects(
+    room.applyAction(state, host.playerId, { t: 'token', playerId: 'niemand' }, { loadTracks }),
+    (e) => e.code === 'NOT_FOUND',
+  );
+});
+
+// ---------- een token inzetten bij de beurt van een ander ----------
+
+const yearCards = (years, prefix) =>
+  years.map((year, i) => ({ id: `${prefix}${i}`, artist: `A ${prefix}${i}`, title: `T ${prefix}${i}`, year }));
+
+/**
+ * Een spel met vier spelers waarin `active` (geen host) aan de beurt is met
+ * een gekende tijdlijn en kaart; `tokens` = aantal tokens per speler-ID.
+ */
+function betSetup({ years = [1970, 1980, 1990], cardYear = 1985, tokens = {}, target } = {}) {
+  const state = newRoom(['Ann', 'Bob', 'Cas', 'Dirk']);
+  if (target) rules.setSettings(state, 'p0', { target });
+  rules.startGame(state, 'p0', makeTracks(40), seeded(51));
+  while (state.turn.playerId !== 'p1') rules.skipTurn(state, 'p0');
+  for (const p of state.players) {
+    p.timeline = yearCards([2000 + Number(p.id.slice(1))], `${p.id}-`);
+    p.guessTokens = tokens[p.id] ?? 0;
+  }
+  rules.findPlayer(state, 'p1').timeline = yearCards(years, 'act');
+  state.turn.card = { id: 'geheim01', artist: 'Geheime Artiest', title: 'Geheime Titel', year: cardYear };
+  return state;
+}
+
+test('inzet: zonder tokens bij de anderen volgt de onthulling meteen', () => {
+  // De speler aan beurt zelf heeft wel een token: dat telt niet.
+  const state = betSetup({ tokens: { p1: 2 } });
+  rules.placeCard(state, 'p1', 2);
+  assert.equal(state.phase, 'reveal');
+  assert.equal('bets' in state.reveal, false);
+  assert.equal(rules.viewFor(state, 'p2').reveal.cardTo, 'p1');
+  assert.deepEqual(rules.viewFor(state, 'p2').reveal.bets, []);
+});
+
+test('inzet: tussenfase, wie mag waar inzetten en de view lekt niets', () => {
+  const state = betSetup({ tokens: { p0: 1, p2: 2, p3: 1 } });
+  throwsCode(() => rules.placeBet(state, 'p2', 0), 'BAD_PHASE'); // nog niet geplaatst
+  rules.placeCard(state, 'p1', 2);
+  assert.equal(state.phase, 'challenge');
+  // De speler aan beurt kan niet meer verplaatsen.
+  throwsCode(() => rules.selectSlot(state, 'p1', 1), 'BAD_PHASE');
+  throwsCode(() => rules.placeCard(state, 'p1', 1), 'BAD_PHASE');
+  throwsCode(() => rules.nextTurn(state, 'p0'), 'BAD_PHASE');
+  throwsCode(() => rules.placeBet(state, 'p1', 0), 'NOT_ALLOWED');
+  throwsCode(() => rules.placeBet(state, 'p2', 2), 'SLOT_TAKEN');
+  throwsCode(() => rules.placeBet(state, 'p2', 4), 'BAD_INDEX');
+  throwsCode(() => rules.placeBet(state, 'p2', -1), 'BAD_INDEX');
+  rules.placeBet(state, 'p2', 3);
+  assert.equal(tokensOf(state, 'p2'), 1, 'inzetten kost meteen een token');
+  throwsCode(() => rules.placeBet(state, 'p2', 0), 'ALREADY_BET');
+  throwsCode(() => rules.placeBet(state, 'p3', 3), 'SLOT_TAKEN');
+  rules.placeBet(state, 'p3', 0);
+  assert.equal(tokensOf(state, 'p3'), 0);
+  // Late instapper: startkaart, maar geen token om in te zetten.
+  rules.addPlayer(state, { id: 'p4', token: 'token-4-xxxxxxxx', name: 'Els' });
+  throwsCode(() => rules.placeBet(state, 'p4', 1), 'NO_TOKEN');
+
+  for (const p of state.players) {
+    const v = rules.viewFor(state, p.id);
+    const json = JSON.stringify(v);
+    assert.equal(v.phase, 'challenge');
+    assert.equal(v.turn.placedIndex, 2);
+    assert.equal(v.turn.pendingIndex, 2);
+    assert.deepEqual(v.turn.bets, [
+      { playerId: 'p2', index: 3 },
+      { playerId: 'p3', index: 0 },
+    ]);
+    assert.equal(v.reveal, null);
+    assert.ok(!json.includes('Geheime'), 'titel en artiest lekken niet');
+    assert.ok(!json.includes('1985'), 'het jaar lekt niet');
+    assert.ok(!json.includes('"token'), 'geheime sleutels lekken niet');
+    if (p.id === 'p0') assert.equal(v.turn.trackId, 'geheim01');
+    else assert.ok(!json.includes('geheim01'), 'track-ID lekt niet naar gewone spelers');
+  }
+
+  // Onthullen: alleen de speler aan beurt of de host.
+  throwsCode(() => rules.revealTurn(state, 'p2'), 'NOT_ALLOWED');
+  rules.revealTurn(state, 'p1');
+  assert.equal(state.phase, 'reveal');
+  throwsCode(() => rules.revealTurn(state, 'p1'), 'BAD_PHASE');
+  throwsCode(() => rules.placeBet(state, 'p0', 1), 'BAD_PHASE');
+});
+
+test('inzet: speler aan beurt juist, hij houdt de kaart en de inzetten zijn verloren', () => {
+  const state = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 2); // 1985 tussen 1980 en 1990: juist
+  rules.placeBet(state, 'p2', 3);
+  rules.placeBet(state, 'p3', 1);
+  rules.revealTurn(state, 'p0');
+  assert.equal(state.reveal.correct, true);
+  assert.equal(state.reveal.cardTo, 'p1');
+  assert.deepEqual(state.reveal.bets, [
+    { playerId: 'p2', index: 3, correct: false },
+    { playerId: 'p3', index: 1, correct: false },
+  ]);
+  assert.deepEqual(rules.findPlayer(state, 'p1').timeline.map((c) => c.year), [1970, 1980, 1985, 1990]);
+  assert.equal(tokensOf(state, 'p2'), 0);
+  assert.equal(tokensOf(state, 'p3'), 0);
+  assert.equal(rules.findPlayer(state, 'p2').timeline.length, 1);
+});
+
+test('inzet: speler aan beurt fout, de juiste inzetter krijgt de kaart op zijn eigen tijdlijn', () => {
+  const state = betSetup({ cardYear: 1975, tokens: { p2: 1, p3: 3 } });
+  rules.placeCard(state, 'p1', 3); // na 1990: fout
+  rules.placeBet(state, 'p2', 0); // vóór 1970: fout
+  rules.placeBet(state, 'p3', 1); // tussen 1970 en 1980: juist
+  rules.revealTurn(state, 'p1');
+  assert.equal(state.reveal.correct, false);
+  assert.equal(state.reveal.cardTo, 'p3');
+  assert.deepEqual(rules.findPlayer(state, 'p1').timeline.map((c) => c.year), [1970, 1980, 1990]);
+  // Op de juiste plaats in de eigen tijdlijn van p3 (die had 2003).
+  assert.deepEqual(rules.findPlayer(state, 'p3').timeline.map((c) => c.year), [1975, 2003]);
+  assert.equal(tokensOf(state, 'p3'), 2, 'ook bij winst is het token verbruikt');
+  assert.equal(tokensOf(state, 'p2'), 0);
+  const v = rules.viewFor(state, 'p0');
+  assert.equal(v.reveal.cardTo, 'p3');
+  assert.equal(v.reveal.card.title, 'Geheime Titel');
+  assert.deepEqual(v.reveal.bets.map((b) => b.correct), [false, true]);
+  // Daarna gewoon verder.
+  rules.nextTurn(state, 'p1');
+  assert.equal(state.turn.playerId, 'p2');
+});
+
+test('inzet: niemand juist, de kaart is weg', () => {
+  const state = betSetup({ cardYear: 1975, tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 0);
+  rules.placeBet(state, 'p2', 2);
+  rules.placeBet(state, 'p3', 3);
+  rules.revealTurn(state, 'p0');
+  assert.equal(state.reveal.cardTo, null);
+  for (const p of state.players) assert.ok(!p.timeline.some((c) => c.id === 'geheim01'));
+  assert.equal(tokensOf(state, 'p2') + tokensOf(state, 'p3'), 0);
+});
+
+test('inzet: gelijke jaren zijn aan beide kanten juist, de eerste inzetter wint', () => {
+  // Kaart uit 1980 en een 1980 op de tijdlijn: plaats 1 en 2 zijn allebei juist.
+  const state = betSetup({ cardYear: 1980, tokens: { p0: 1, p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 0); // fout
+  rules.placeBet(state, 'p3', 2); // juist (na 1980), eerst ingezet
+  rules.placeBet(state, 'p2', 1); // juist (vóór 1980), later
+  rules.placeBet(state, 'p0', 3); // fout
+  rules.revealTurn(state, 'p0');
+  assert.equal(state.reveal.cardTo, 'p3');
+  assert.deepEqual(state.reveal.bets.map((b) => [b.playerId, b.correct]), [
+    ['p3', true],
+    ['p2', true],
+    ['p0', false],
+  ]);
+  assert.equal(rules.findPlayer(state, 'p3').timeline.length, 2);
+  assert.equal(rules.findPlayer(state, 'p2').timeline.length, 1);
+});
+
+test('inzet: wie zo zijn laatste kaart krijgt, wint', () => {
+  const state = betSetup({ cardYear: 1975, tokens: { p2: 1 }, target: 3 });
+  rules.findPlayer(state, 'p2').timeline = yearCards([1950, 2010], 'p2x');
+  rules.placeCard(state, 'p1', 3);
+  rules.placeBet(state, 'p2', 1);
+  rules.revealTurn(state, 'p1');
+  assert.equal(state.phase, 'finished');
+  assert.deepEqual(state.winnerIds, ['p2']);
+  assert.deepEqual(rules.findPlayer(state, 'p2').timeline.map((c) => c.year), [1950, 1975, 2010]);
+  assert.equal(state.reveal.cardTo, 'p2');
+  // Het raad-token kan bij deze laatste onthulling nog gegeven worden.
+  rules.giveToken(state, 'p1', 'p0');
+  assert.equal(tokensOf(state, 'p0'), 1);
+});
+
+test('inzet: overslaan en verwijderen geven ingezette tokens terug', () => {
+  // Ander nummer: de beurt telt niet.
+  let state = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 0);
+  rules.placeBet(state, 'p2', 1);
+  throwsCode(() => rules.skipTrack(state, 'p2'), 'HOST_ONLY');
+  rules.skipTrack(state, 'p0');
+  assert.equal(state.phase, 'playing');
+  assert.equal(state.turn.playerId, 'p1');
+  assert.equal(tokensOf(state, 'p2'), 1);
+
+  // Beurt overslaan.
+  state = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 0);
+  rules.placeBet(state, 'p2', 1);
+  rules.placeBet(state, 'p3', 2);
+  rules.skipTurn(state, 'p0');
+  assert.equal(state.phase, 'playing');
+  assert.equal(state.turn.playerId, 'p2');
+  assert.equal(tokensOf(state, 'p2'), 1);
+  assert.equal(tokensOf(state, 'p3'), 1);
+
+  // De speler aan beurt wordt verwijderd: inzetters krijgen hun token terug.
+  state = betSetup({ tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 0);
+  rules.placeBet(state, 'p2', 1);
+  rules.removePlayer(state, 'p0', 'p1');
+  assert.equal(state.phase, 'playing');
+  assert.equal(state.turn.playerId, 'p2');
+  assert.equal(tokensOf(state, 'p2'), 1);
+
+  // Een inzetter wordt verwijderd: zijn inzet vervalt, de rest loopt door.
+  state = betSetup({ cardYear: 1975, tokens: { p2: 1, p3: 1 } });
+  rules.placeCard(state, 'p1', 0);
+  rules.placeBet(state, 'p2', 1); // juist, maar p2 vertrekt
+  rules.placeBet(state, 'p3', 2);
+  rules.removePlayer(state, 'p0', 'p2');
+  assert.equal(state.phase, 'challenge');
+  assert.deepEqual(state.turn.bets, [{ playerId: 'p3', index: 2 }]);
+  assert.equal(tokensOf(state, 'p3'), 0);
+  rules.revealTurn(state, 'p1');
+  assert.equal(state.reveal.cardTo, null);
+  assert.deepEqual(state.reveal.bets, [{ playerId: 'p3', index: 2, correct: false }]);
+});
+
+test('inzet: tokens verdien je alleen door te raden, ook een nieuw spel begint op 0', () => {
+  const state = betSetup({ tokens: {} });
+  rules.placeCard(state, 'p1', 2);
+  assert.equal(state.phase, 'reveal', 'zonder tokens geen tussenfase');
+  rules.giveToken(state, 'p1', 'p2');
+  rules.nextTurn(state, 'p1');
+  // p2 is nu zelf aan de beurt: zijn token telt dan niet.
+  assert.equal(state.turn.playerId, 'p2');
+  rules.placeCard(state, 'p2', 0);
+  assert.equal(state.phase, 'reveal');
+  rules.nextTurn(state, 'p2');
+  // Bij de volgende speler kan p2 het token wel inzetten.
+  rules.placeCard(state, 'p3', 0);
+  assert.equal(state.phase, 'challenge');
+  rules.placeBet(state, 'p2', 1);
+  assert.equal(tokensOf(state, 'p2'), 0);
+  rules.backToLobby(state, 'p0');
+  rules.startGame(state, 'p0', makeTracks(40), seeded(52));
+  for (const p of state.players) assert.equal(p.guessTokens, 0);
+});
+
+test('room: acties challenge en reveal', async () => {
+  const state = betSetup({ cardYear: 1975, tokens: { p2: 1 } });
+  const opts = { loadTracks: async () => makeTracks(30) };
+  await room.applyAction(state, 'p1', { t: 'place', index: 3 }, opts);
+  assert.equal(state.phase, 'challenge');
+  await assert.rejects(room.applyAction(state, 'p2', { t: 'challenge', index: 'x' }, opts), (e) => e.code === 'BAD_INDEX');
+  await room.applyAction(state, 'p2', { t: 'challenge', index: 1 }, opts);
+  await assert.rejects(room.applyAction(state, 'p3', { t: 'reveal' }, opts), (e) => e.code === 'NOT_ALLOWED');
+  await room.applyAction(state, 'p0', { t: 'reveal' }, opts);
+  assert.equal(state.reveal.cardTo, 'p2');
+});
