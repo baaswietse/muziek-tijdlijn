@@ -653,20 +653,33 @@ test('token inzetten: komt de bevestiging niet aan, dan zegt het scherm dat en i
 // speler aan beurt onthullen. Wie wegvalt, houdt niets tegen; de host heeft
 // een noodknop voor wie verbonden is maar niet reageert.
 
-/** Drie gsm's, een gast (Bob) aan de beurt en het nummer gelegd: de tussenfase. */
+/**
+ * Drie gsm's, een gast (Bob) aan de beurt en het nummer juist gelegd: de
+ * tussenfase. `wrong` is een andere plaats waar het nummer zeker fout ligt.
+ */
 async function bobPlaced(browser) {
   const phones = await threePhones(browser);
   const { host, pages, ids } = phones;
   await host.getByTestId('start-game').click();
   for (const p of pages) await expect(p.getByTestId('turn-banner')).toBeVisible();
-  const n = await skipUntil({ host, ids }, 1, ids[1]);
-  const turn = await currentTurn({ pages, host, ids, n });
-  await place(pages, turn, rightSlot(turn.years, turn.year), { challenge: true });
-  return { ...phones, turn, n };
+  let n = await skipUntil({ host, ids }, 1, ids[1]);
+  let turn = await currentTurn({ pages, host, ids, n });
+  // Hetzelfde jaar als Bobs kaart is overal juist: dan eerst een ander nummer,
+  // zodat een inzet op de andere plaats zeker fout ligt.
+  for (let i = 0; i < 10 && badSlot(turn.years, turn.year) === null; i++) {
+    await host.getByTestId('skip-track').click();
+    n++;
+    turn = await currentTurn({ pages, host, ids, n });
+  }
+  const right = rightSlot(turn.years, turn.year);
+  const wrong = badSlot(turn.years, turn.year, right);
+  expect(wrong).not.toBeNull();
+  await place(pages, turn, right, { challenge: true });
+  return { ...phones, turn, n, wrong };
 }
 
 test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen allebei', async ({ browser }) => {
-  const { host, bob, cas, pages, ids, turn } = await bobPlaced(browser);
+  const { host, bob, cas, pages, ids, turn, wrong } = await bobPlaced(browser);
   const [hanne, , casId] = ids;
   // Bob ziet Onthul, maar uitgeschakeld, en op wie er gewacht wordt. De host
   // moet zelf nog kiezen: zijn balk toont eerst zijn eigen keuze.
@@ -702,9 +715,8 @@ test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen all
   await expect(bob.getByTestId('reveal-now')).toBeDisabled();
   await expectTokens(pages, { [casId]: START });
 
-  // Hanne zet een token in: dat telt ook als kiezen.
-  const slot = rightSlot(turn.years, turn.year) === 0 ? 1 : 0;
-  await host.getByTestId(`slot-${slot}`).click();
+  // Hanne zet een token in (op een plaats waar het zeker fout ligt): dat telt ook als kiezen.
+  await host.getByTestId(`slot-${wrong}`).click();
   await host.getByTestId('confirm-bet').click();
   await expectTokens(pages, { [hanne]: START - 1 });
   for (const p of pages) {
@@ -722,7 +734,10 @@ test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen all
   for (const p of pages) if (p !== host) expect(leaked(p, turn.trackId), 'antwoord lekte in de tussenfase').toBe(false);
   await expect(bob.getByTestId('reveal-now')).toBeEnabled();
   await bob.getByTestId('reveal-now').click();
-  for (const p of pages) await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', turn.trackId);
+  for (const p of pages) {
+    await expect(p.getByTestId('reveal')).toHaveAttribute('data-track', turn.trackId);
+    await expect(p.getByTestId('reveal')).toHaveAttribute('data-correct', 'yes');
+  }
   await expect(host.getByTestId('reveal-my-bet')).toHaveAttribute('data-correct', 'no');
   await expect(host.getByTestId('bet-missed')).toHaveCount(0);
   await expectTokens(pages, { [hanne]: START - 1, [casId]: START });
