@@ -122,6 +122,19 @@ export function useMusic({ enabled, view }) {
         setStatus('playing');
       } catch (err) {
         if (err?.deviceGone && current.local) {
+          // Een pas gestarte speler in de browser is soms nog niet bekend bij
+          // Spotify: even wachten en opnieuw proberen voor we opgeven.
+          for (let attempt = 0; attempt < 3; attempt++) {
+            await new Promise((r) => setTimeout(r, 700));
+            if (deviceRef.current?.id !== current.id) return;
+            try {
+              await player.play(trackId, current.id, opts);
+              setStatus('playing');
+              return;
+            } catch (again) {
+              if (!again?.deviceGone) return fail(again);
+            }
+          }
           setLocal('off');
           return fail({ message: 'Het geluid op dit toestel is weggevallen. Tik op «Dit toestel» om het weer aan te zetten.' });
         }

@@ -306,24 +306,28 @@ test('dit toestel: afspelen in de browser zelf met de Spotify-speler', async ({ 
   await expect(page.getByTestId('device-sdk-dev-1')).toHaveCount(0);
   await expect(page.getByTestId('music-status')).toHaveAttribute('data-ready', 'yes');
 
-  // Het spel stuurt het nummer naar de speler in de browser.
+  // Het spel stuurt het nummer naar de speler in de browser. Kent Spotify de
+  // pas gestarte speler nog niet (404), dan probeert het spel even later opnieuw.
+  spotify.nextPlay = { status: 404, body: { error: { status: 404, message: 'Device not found', reason: 'NO_ACTIVE_DEVICE' } } };
   await page.getByTestId('start-game').click();
   await expect(page.getByTestId('turn-banner')).toBeVisible();
-  await expect.poll(() => spotify.plays().length).toBe(1);
-  expect(spotify.plays()[0].query).toEqual({ device_id: 'sdk-dev-1' });
-  const playing = spotify.plays()[0].body.uris[0];
+  await expect.poll(() => spotify.plays().length).toBe(2);
+  expect(spotify.plays()[1].query).toEqual({ device_id: 'sdk-dev-1' });
+  await expect(page.getByTestId('host-music-error')).toHaveCount(0);
+  await expect(page.getByTestId('host-music-status')).toContainText('Speelt op');
+  const playing = spotify.plays()[1].body.uris[0];
 
   // Na herladen is de speler weg: het spel zegt dat, en één tik zet hem weer aan.
   await page.reload();
   await expect(page.getByTestId('turn-banner')).toBeVisible();
   await expect(page.getByTestId('browser-off')).toBeVisible();
-  expect(spotify.plays()).toHaveLength(1); // nog niets opnieuw gestart: er is geen geluid om op te spelen
+  expect(spotify.plays()).toHaveLength(2); // nog niets opnieuw gestart: er is geen geluid om op te spelen
   await page.getByTestId('device-browser').click();
   await expect(page.getByTestId('browser-off')).toHaveCount(0);
   // Het geluid viel weg bij het herladen, dus het lopende nummer begint opnieuw op de nieuwe speler.
-  await expect.poll(() => spotify.plays().length).toBe(2);
-  expect(spotify.plays()[1].query).toEqual({ device_id: 'sdk-dev-1' });
-  expect(spotify.plays()[1].body.uris[0]).toBe(playing);
+  await expect.poll(() => spotify.plays().length).toBe(3);
+  expect(spotify.plays()[2].query).toEqual({ device_id: 'sdk-dev-1' });
+  expect(spotify.plays()[2].body.uris[0]).toBe(playing);
   await expect(page.getByTestId('host-music-status')).toContainText('Speelt op');
 
   // Een ander toestel kiezen sluit de speler in de browser af.
