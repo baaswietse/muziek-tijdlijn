@@ -319,7 +319,7 @@ h2 {
   line-height: 1;
 }
 
-:is(.btn, .tab, .slot-btn, .device, .board-head, .input, summary, a):focus-visible {
+:is(.btn, .tab, .slot-btn, .device, .board-head, .guess-btn, .input, summary, a):focus-visible {
   outline: 3px solid var(--amber);
   outline-offset: 2px;
 }
@@ -749,6 +749,17 @@ details ul {
   opacity: 0.85;
 }
 
+/* Tussenfase: de kaart ligt vast, anderen kunnen nog een token inzetten. */
+.now.challenge {
+  background: var(--surface);
+  color: var(--ink);
+  border: 2px dashed var(--amber);
+}
+
+.challenge-reveal {
+  margin-top: 12px;
+}
+
 .eq {
   display: flex;
   align-items: flex-end;
@@ -890,6 +901,31 @@ details ul {
   display: flex;
 }
 
+/* Een ingezet token bij een gat op de tijdlijn van de speler aan beurt. */
+.tl-bet {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid var(--amber);
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber-ink);
+  font-size: 0.875rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.tl-bet.good {
+  border-color: var(--good);
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.tl-bet.bad {
+  border-color: var(--bad);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
 .slot-btn {
   flex: 1;
   display: flex;
@@ -995,6 +1031,55 @@ details ul {
   text-underline-offset: 3px;
 }
 
+.reveal-token {
+  margin-top: 8px;
+  font-weight: 700;
+}
+
+/* Wie raadde artiest en nummer: één knop per speler, compact zodat ook
+   12 spelers op een gsm-scherm passen. */
+.guess {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.guess-title {
+  font-weight: 700;
+}
+
+.guess-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.guess-btn {
+  appearance: none;
+  min-height: 40px;
+  max-width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.guess-btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
 .winner {
   padding: 20px 16px;
   border-radius: var(--radius);
@@ -1019,6 +1104,12 @@ details ul {
   overflow-wrap: anywhere;
 }
 
+.winner-tokens {
+  margin-top: 6px;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
 /* scorebord */
 .board {
   display: flex;
@@ -1040,6 +1131,19 @@ details ul {
 
 .board-row.active .person-name {
   color: var(--accent);
+}
+
+.board-head .tokens {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-head .tokens.none {
+  color: var(--muted);
+  font-weight: 400;
 }
 
 .board-head {

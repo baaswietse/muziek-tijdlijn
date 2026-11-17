@@ -74,6 +74,16 @@ export async function applyAction(state, playerId, msg, { loadTracks, random = s
     case 'next':
       rules.nextTurn(state, playerId);
       break;
+    case 'token':
+      // Lege of ontbrekende playerId: het token van deze beurt terugnemen.
+      rules.giveToken(state, playerId, msg.playerId ? String(msg.playerId) : null);
+      break;
+    case 'challenge':
+      rules.placeBet(state, playerId, Number(msg.index));
+      break;
+    case 'reveal':
+      rules.revealTurn(state, playerId);
+      break;
     case 'skipTrack':
       rules.skipTrack(state, playerId);
       break;

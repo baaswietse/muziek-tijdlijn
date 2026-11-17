@@ -51,9 +51,12 @@ test('volledig spel met drie gsm\'s: binnenkomen, beurten, onthulling, winnaar, 
   await host.getByTestId('start-game').click();
   for (const p of pages) await expect(p.getByTestId('turn-banner')).toBeVisible();
 
-  // Iedereen start met één onthulde kaart en ziet die van de anderen.
+  // Iedereen start met één onthulde kaart en 2 tokens, en ziet die van de anderen.
   for (const p of pages) {
-    for (const id of ids) expect(await countOf(p, id)).toBe(1);
+    for (const id of ids) {
+      expect(await countOf(p, id)).toBe(1);
+      await expect(p.locator(`[data-testid="board-row"][data-player="${id}"]`)).toHaveAttribute('data-tokens', '2');
+    }
   }
 
   let turns = 0;
@@ -67,6 +70,8 @@ test('volledig spel met drie gsm\'s: binnenkomen, beurten, onthulling, winnaar, 
     const res = await playTurn({ pages, hostPage: host, ids, want, playsSoFar: played.length });
     played.push(res.trackId);
     turns++;
+    // Niemand zet in, dus de anderen houden hun tokens: elke beurt de tussenfase.
+    expect(res.challenge).toBe(true);
     const expected = res.cardsBefore + (res.correct ? 1 : 0);
     for (const p of pages) expect(await countOf(p, res.activeId)).toBe(expected);
     if (res.correct) {
@@ -142,6 +147,10 @@ test('herverbinden na een weggevallen verbinding en na herladen', async ({ brows
   }
   await host.getByTestId('slot-0').click();
   await host.getByTestId('confirm-place').click();
+  // Bob heeft zijn 2 starttokens nog (ook offline): eerst de tussenfase.
+  await expect(host.getByTestId('challenge-banner')).toBeVisible();
+  await expect(host.getByTestId('reveal')).toHaveCount(0);
+  await host.getByTestId('reveal-now').click();
   await expect(host.getByTestId('reveal')).toBeVisible();
   const track = await host.getByTestId('reveal').getAttribute('data-track');
   await expect(bob.getByTestId('reveal')).toHaveCount(0); // Bob heeft nog niets gezien
@@ -229,7 +238,7 @@ test('host-bediening: muziekfout, ander nummer, beurt overslaan, laat instappen,
   await expect(host.getByTestId('turn-banner')).not.toHaveAttribute('data-active', active);
   await expect(bob.getByTestId('skip-turn')).toHaveCount(0);
 
-  // Laat instappen: Cas krijgt meteen een startkaart.
+  // Laat instappen: Cas krijgt meteen een startkaart en 2 tokens.
   const cas = await openPhone(browser);
   await cas.getByTestId('code-input').fill(code);
   await cas.getByTestId('name-input').fill('Cas');
@@ -238,6 +247,7 @@ test('host-bediening: muziekfout, ander nummer, beurt overslaan, laat instappen,
   const casId = await myId(cas);
   expect(await countOf(cas, casId)).toBe(1);
   await expect(host.getByTestId('board-row')).toHaveCount(3);
+  for (const p of [host, cas]) await expect(p.locator(`[data-testid="board-row"][data-player="${casId}"]`)).toHaveAttribute('data-tokens', '2');
 
   // Speler verwijderen: Cas vliegt eruit en belandt op het startscherm.
   await host.locator(`[data-testid="board-row"][data-player="${casId}"] .board-head`).click();

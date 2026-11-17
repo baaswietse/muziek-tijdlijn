@@ -9,12 +9,20 @@ Spotify van de host.
 
 ## Spelregels
 
-1. Iedereen begint met één onthulde kaart: een nummer met zijn jaartal.
+1. Iedereen begint met één onthulde kaart (een nummer met zijn jaartal) en 2 tokens.
 2. Wie aan de beurt is, hoort een nummer. Titel en artiest blijven geheim.
 3. Die speler legt het nummer op zijn tijdlijn: vóór, tussen of na de kaarten die hij al heeft.
 4. Juist: hij houdt de kaart. Fout: de kaart is weg.
 5. Het nummer wordt onthuld (artiest, titel, jaar) en de volgende is aan de beurt.
 6. Wie eerst 10 kaarten heeft, wint. De host kan dat aantal in de wachtkamer aanpassen (3 tot 20).
+7. Raden voor een token: vóór de onthulling mag wie aan de beurt is hardop artiest en nummer raden. Fout of geen idee?
+   Dan mag de volgende in de beurtvolgorde, enzovoort. Wie het eerst juist heeft, krijgt een token extra: na de onthulling
+   tikt de speler aan beurt of de host op diens naam, of eist die speler het zelf op.
+8. Een token inzetten: heeft iemand anders dan de speler aan beurt een token, dan ligt na het leggen de gekozen plaats
+   eerst vast en kan wie een token heeft een ándere, nog vrije plaats op diens tijdlijn kiezen (1 token, één keer per
+   beurt). Daarna tikt de speler aan beurt of de host op *Onthul*. Lag de speler aan beurt juist, dan houdt hij de kaart.
+   Lag hij fout, dan krijgt de eerste inzetter die juist lag de kaart op zijn eigen tijdlijn. Ingezette tokens zijn
+   altijd op.
 
 Details:
 
@@ -24,6 +32,17 @@ Details:
 - De host kan een ander nummer vragen (als er een niet afspeelt), een beurt overslaan en een speler verwijderen.
 - Een tweede spel in dezelfde kamer herhaalt geen nummers zolang er genoeg ongespeelde zijn.
 - De host kiest de nummers: de standaardlijst van het spel of een van zijn eigen Spotify-playlists.
+- Tokens: hoogstens één per beurt, ook nog bij de kaart die het spel beslist. De host en de speler aan beurt kunnen
+  het aan eender wie geven, verplaatsen of terugnemen; een andere speler kan het alleen voor zichzelf opeisen zolang
+  niemand het heeft, en het weer teruggeven. Iedereen ziet de tellers op het bord en op het eindscherm. Elk spel
+  begint weer met 2 tokens per speler, ook "Nog een spel"; wie laat instapt, krijgt er ook 2. Daarbovenop verdien je
+  tokens alleen door te raden.
+- Inzetten: omdat iedereen met tokens begint, komt na het leggen bijna altijd de tussenfase met *Onthul*. Heeft geen
+  enkele andere speler nog een token (allemaal ingezet, of je speelt alleen), dan volgt de onthulling meteen. Zijn
+  alle andere plaatsen al bezet, dan kan je niet meer inzetten en hou je je tokens. Wie eerst inzet, heeft die
+  plaats. Gelijke jaren mogen ook hier aan beide kanten. Krijgt een inzetter zo zijn laatste kaart, dan wint hij.
+  *Ander nummer* of *Sla beurt over* tijdens het inzetten geeft de tokens terug, net als het verwijderen van de speler
+  aan beurt. Het raad-token van een beurt kan je pas in een latere beurt inzetten.
 
 ## Hoe het in elkaar zit
 
@@ -50,6 +69,11 @@ gsm host  ──┘        │
 - **Het antwoord lekt niet.** Titel, artiest, jaar en track-ID van het lopende nummer gaan pas bij de onthulling naar de
   spelers. Alleen de gsm van de host krijgt het track-ID eerder, omdat die Spotify moet aansturen. Voor de host is het
   dus te vinden voor wie echt wil zoeken; dat kan niet anders zolang zijn gsm de muziek start.
+- **Acties.** Een gsm stuurt `{ t: 'hello', token }` om zich aan te melden en daarna een van deze acties: `start`,
+  `settings`, `clearDeck`, `select`, `place`, `challenge` (met `index`: een token inzetten), `reveal` (einde van het
+  inzetten), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
+  `skipTrack`, `skipTurn`, `remove` en `lobby`. De server antwoordt met `{ t: 'state' }` of
+  `{ t: 'error', code, message }`. Zie `server/src/room.js`.
 - **Spotify blijft bij de host.** De host logt in met Authorization Code + PKCE, volledig in de browser. Er is geen
   Client Secret, en de tokens gaan nooit naar de spelserver.
 - **Twee manieren om geluid te maken.** De site stuurt een Spotify-toestel aan (Spotify Connect): een gsm, laptop, tv
@@ -275,7 +299,10 @@ De workflow `.github/workflows/ci.yml` draait dit alles bij elke pull request.
 
 Gedekt, automatisch:
 
-- De spelregels: plaatsen, gelijke jaren, winnen, lege stapel, overslaan, verwijderen, laat instappen.
+- De spelregels: plaatsen, gelijke jaren, winnen, lege stapel, overslaan, verwijderen, laat instappen, tokens.
+- Tokens met drie browsers: geven, verplaatsen, opeisen en terugnemen, wie de knoppen ziet, tellers over beurten heen
+  en na herverbinden, 2 tokens bij de start en weer 2 bij een nieuw spel, en een token inzetten (gewonnen en verloren,
+  alle plaatsen bezet, zonder lek van het antwoord), en meteen onthullen zodra de anderen hun tokens op hebben.
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
 - Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag

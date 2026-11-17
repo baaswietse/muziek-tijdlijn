@@ -2,9 +2,13 @@ import { defineConfig } from '@playwright/test';
 
 // De tests draaien tegen de echte spelserver (Node) en de gebouwde site, met
 // een nagebootste Spotify-laag (?mock=1) en een vaste lijst testnummers.
-const SERVER_PORT = 8787;
-const WEB_PORT = 4173;
-const TRACKS_PORT = 4174;
+// MT_PORT_OFFSET schuift alle poorten op (standaard 0), zodat twee testruns
+// naast elkaar kunnen draaien zonder elkaars servers te gebruiken.
+const OFFSET = Number(process.env.MT_PORT_OFFSET || 0);
+const SERVER_PORT = 8787 + OFFSET;
+const WEB_PORT = 4173 + OFFSET;
+const TRACKS_PORT = 4174 + OFFSET;
+const INSPECTOR_PORT = 9229 + OFFSET; // debugpoort van wrangler dev
 
 // MT_LIVE=1 test de echte site op GitHub Pages met de echte spelserver. Er
 // start dan niets lokaal; Spotify blijft nagebootst. Achter een proxy
@@ -32,7 +36,7 @@ export default defineConfig({
     process.env.MT_SERVER === 'cloudflare'
       ? {
           command:
-            `npx wrangler dev --port ${SERVER_PORT} --ip 127.0.0.1 ` +
+            `npx wrangler dev --port ${SERVER_PORT} --ip 127.0.0.1 --inspector-port ${INSPECTOR_PORT} ` +
             `--var ALLOWED_ORIGINS:* --var TRACKS_URL:http://127.0.0.1:${TRACKS_PORT}/tracks.json`,
           env: { WRANGLER_SEND_METRICS: 'false' },
           url: `http://127.0.0.1:${SERVER_PORT}/api/health`,
@@ -52,7 +56,8 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: 'npm run build && npm run preview',
+      // De poort via de CLI: vite.config.js zet strictPort, dus een bezette poort faalt meteen.
+      command: `npm run build && npm run preview -- --port ${WEB_PORT}`,
       env: { VITE_SERVER_URL: `http://127.0.0.1:${SERVER_PORT}` },
       url: `http://127.0.0.1:${WEB_PORT}/muziek-tijdlijn/`,
       reuseExistingServer: !process.env.CI,
