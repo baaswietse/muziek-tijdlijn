@@ -162,7 +162,11 @@ test('hoofdknop: een melding verschijnt boven de balk en bedekt de knop niet', a
     };
   });
   expect(seen).toEqual({ toast: true, onTop: true, aboveBar: true });
-  // Weer verbonden: opnieuw tikken lukt.
+  // Weer verbonden: opnieuw tikken lukt. Wacht op wat Bob ziet: de melding
+  // "Geen verbinding" verdwijnt pas als de nieuwe verbinding er is. Alleen op
+  // het bolletje wachten volstaat niet: dat blijft groen tot de oude verbinding
+  // echt dicht is, wat tegen de echte server enkele honderden ms duurt.
+  await expect(bob.getByTestId('toast')).toHaveCount(0, { timeout: 15_000 });
   await expect(bob.getByTestId('net-status')).toHaveAttribute('data-status', 'online', { timeout: 15_000 });
   await bob.getByTestId('confirm-place').click();
   for (const p of pages) await expect(p.getByTestId('challenge-banner')).toBeVisible();
