@@ -16,7 +16,10 @@ export class SpotifyError extends Error {
   }
 }
 
-function explain(status, reason, detail) {
+function explain(status, reason, detail, path = '') {
+  if (status === 404 && !path.startsWith('/me/player')) {
+    return new SpotifyError('Spotify vindt dit niet (meer). Bestaat de playlist nog?', { status, reason });
+  }
   if (status === 404) {
     return new SpotifyError(
       'Spotify vindt het toestel niet. Open de Spotify-app op dat toestel, speel even iets af en probeer opnieuw.',
@@ -28,7 +31,7 @@ function explain(status, reason, detail) {
   }
   if (status === 403) {
     return new SpotifyError(
-      'Spotify weigert dit commando. Mogelijke oorzaken: het toestel laat geen bediening op afstand toe, of dit account staat niet bij de gebruikers van de Spotify-app (dashboard > User Management).',
+      'Spotify weigert dit. Mogelijke oorzaken: het toestel laat geen bediening op afstand toe, de playlist is niet van jou, of dit account staat niet bij de gebruikers van de Spotify-app (dashboard > User Management).',
       { status, reason },
     );
   }
@@ -65,7 +68,7 @@ async function call(method, path, { query, body } = {}, retried = false) {
   } catch {
     // Sommige player-commando's antwoorden met platte tekst; negeren.
   }
-  if (!res.ok) throw explain(res.status, data?.error?.reason || '', data?.error?.message || '');
+  if (!res.ok) throw explain(res.status, data?.error?.reason || '', data?.error?.message || '', path);
   return data;
 }
 
@@ -103,6 +106,49 @@ export const connect = {
 
   async resume(deviceId) {
     await call('PUT', '/me/player/play', { query: deviceQuery(deviceId) });
+  },
+
+  /**
+   * De playlists van de host waarvan Spotify de nummers laat lezen: die van
+   * hemzelf en die waaraan hij meewerkt.
+   */
+  async playlists() {
+    const me = await call('GET', '/me');
+    const out = [];
+    for (let offset = 0; offset < 500; offset += 50) {
+      const page = await call('GET', '/me/playlists', { query: { limit: '50', offset: String(offset) } });
+      for (const p of page?.items || []) {
+        if (!p?.id || !(p.owner?.id === me?.id || p.collaborative)) continue;
+        // Sinds februari 2026 heet het veld 'items'; vroeger 'tracks'.
+        out.push({ id: p.id, name: p.name || 'Naamloos', total: p.items?.total ?? p.tracks?.total ?? 0 });
+      }
+      if (!page?.next) break;
+    }
+    return out;
+  },
+
+  /** Alle nummers van één playlist: [{ id, title, artists, spotifyDate }]. */
+  async playlistTracks(playlistId) {
+    const out = [];
+    const seen = new Set();
+    for (let offset = 0; offset < 2000; offset += 50) {
+      const page = await call('GET', `/playlists/${encodeURIComponent(playlistId)}/items`, {
+        query: { limit: '50', offset: String(offset), additional_types: 'track' },
+      });
+      for (const entry of page?.items || []) {
+        const item = entry?.item || entry?.track;
+        if (!item?.id || entry.is_local || (item.type && item.type !== 'track') || seen.has(item.id)) continue;
+        seen.add(item.id);
+        out.push({
+          id: item.id,
+          title: item.name || '',
+          artists: (item.artists || []).map((a) => a?.name).filter(Boolean),
+          spotifyDate: item.album?.release_date || null,
+        });
+      }
+      if (!page?.next) break;
+    }
+    return out;
   },
 
   /** Na het spel: herhalen weer uit, zodat Spotify gewoon verder werkt. */

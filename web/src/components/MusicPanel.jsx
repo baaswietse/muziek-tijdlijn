@@ -50,42 +50,58 @@ export function MusicPanel({ music }) {
       </div>
 
       <p class="label">Op welk toestel speelt de muziek? Dit scherm maakt zelf geen geluid.</p>
+      <ul class="devices">
+        {music.browserSupported && (
+          <li>
+            <button
+              type="button"
+              class={`device${music.device?.local && music.local === 'on' ? ' on' : ''}`}
+              data-testid="device-browser"
+              aria-pressed={Boolean(music.device?.local && music.local === 'on')}
+              disabled={music.local === 'starting'}
+              onClick={music.chooseBrowser}
+            >
+              <span class="device-name">Dit toestel</span>
+              <span class="muted small">
+                {music.local === 'starting' ? 'bezig met starten…' : 'geluid uit dit toestel zelf, zonder Spotify-app'}
+              </span>
+            </button>
+          </li>
+        )}
+        {(devices || []).map((d) => (
+          <li key={d.id}>
+            <button
+              type="button"
+              class={`device${music.device?.id === d.id ? ' on' : ''}`}
+              data-testid={`device-${d.id}`}
+              aria-pressed={music.device?.id === d.id}
+              disabled={d.restricted}
+              onClick={() => music.chooseDevice(d)}
+            >
+              <span class="device-name">{d.name}</span>
+              <span class="muted small">
+                {deviceType(d.type)}
+                {d.restricted ? ' · niet bedienbaar' : ''}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
       {devices === null ? (
-        <p class="muted small">Toestellen zoeken…</p>
-      ) : devices.length === 0 ? (
-        <p class="notice">
-          Geen toestel gevonden. Open de Spotify-app op het toestel dat aan de box hangt, speel even een nummer af en tik op
-          «Zoek opnieuw».
-        </p>
+        <p class="muted small">Andere toestellen zoeken…</p>
       ) : (
-        <ul class="devices">
-          {devices.map((d) => (
-            <li key={d.id}>
-              <button
-                type="button"
-                class={`device${music.device?.id === d.id ? ' on' : ''}`}
-                data-testid={`device-${d.id}`}
-                aria-pressed={music.device?.id === d.id}
-                disabled={d.restricted}
-                onClick={() => music.chooseDevice(d)}
-              >
-                <span class="device-name">{d.name}</span>
-                <span class="muted small">
-                  {deviceType(d.type)}
-                  {d.restricted ? ' · niet bedienbaar' : ''}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {devices && devices.length > 0 && (
         <p class="muted small" data-testid="device-hint">
-          Staat je toestel er niet bij? Open er de Spotify-app, speel even een nummer af en kom terug: de lijst ververst
-          vanzelf. Kies alleen een toestel dat hier in de kamer staat.
+          {devices.length === 0 ? 'Spotify ziet nu geen andere toestellen. ' : ''}
+          Staat een toestel er niet bij (bv. je gsm aan de box)? Open er de Spotify-app, speel even een nummer af en kom
+          terug: de lijst ververst vanzelf. Kies alleen een toestel dat hier in de kamer staat.
         </p>
       )}
-      {music.device && devices && !devices.some((d) => d.id === music.device.id) && (
+      {music.device?.local && music.local === 'off' && (
+        <p class="notice" data-testid="browser-off">
+          Het geluid op dit toestel staat nog uit. Tik op «Dit toestel» om het aan te zetten.
+        </p>
+      )}
+      {music.device && !music.device.local && devices && !devices.some((d) => d.id === music.device.id) && (
         <p class="notice">
           «{music.device.name}» is nu niet zichtbaar voor Spotify. Open er de Spotify-app en tik op «Zoek opnieuw».
         </p>
@@ -101,7 +117,11 @@ export function MusicPanel({ music }) {
       </div>
 
       <p class="music-status" data-testid="music-status" data-ready={music.ready ? 'yes' : 'no'}>
-        {music.ready ? `Klaar: speelt op «${music.device.name}». ` : 'Kies een toestel. '}
+        {music.ready
+          ? music.device.local
+            ? 'Klaar: het geluid komt uit dit toestel. '
+            : `Klaar: speelt op «${music.device.name}». `
+          : 'Kies een toestel. '}
         {STATUS[music.status]}
       </p>
       {music.error && (

@@ -8,8 +8,20 @@ import { storage } from '../lib/session.js';
 const AUTHORIZE_URL = 'https://accounts.spotify.com/authorize';
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 
-// Afspelen aansturen en de lijst met toestellen lezen. Meer is niet nodig.
-export const SCOPES = ['user-modify-playback-state', 'user-read-playback-state'];
+// Wat de host aan Spotify toestaat:
+// - afspelen aansturen en de lijst met toestellen lezen;
+// - zijn eigen playlists lezen, om er een te kiezen voor het spel;
+// - afspelen in de browser zelf (Web Playback SDK). Spotify vraagt daarvoor
+//   ook de twee user-read-scopes, om na te gaan dat het account Premium is.
+export const SCOPES = [
+  'user-modify-playback-state',
+  'user-read-playback-state',
+  'playlist-read-private',
+  'playlist-read-collaborative',
+  'streaming',
+  'user-read-email',
+  'user-read-private',
+];
 
 const TOKENS = 'mt.spotify.tokens';
 const PKCE = 'mt.spotify.pkce';
@@ -77,7 +89,15 @@ function storeTokens(data, previous) {
     // Bij vernieuwen stuurt Spotify niet altijd een nieuw refresh-token mee.
     refresh: data.refresh_token || previous?.refresh || null,
     expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+    // Welke toestemmingen de host gaf (bij vernieuwen stuurt Spotify ze niet altijd mee).
+    scope: data.scope || previous?.scope || '',
   });
+}
+
+/** Heeft het bewaarde token alle toestemmingen die de site nu nodig heeft? */
+function hasAllScopes(tokens) {
+  const granted = new Set(String(tokens?.scope || '').split(' '));
+  return SCOPES.every((s) => granted.has(s));
 }
 
 /**
@@ -103,23 +123,28 @@ export async function completeLogin() {
     return { error: 'Het inloggen kon niet gecontroleerd worden. Probeer opnieuw.' };
   }
   try {
-    storeTokens(
-      await tokenRequest({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: redirectUri(),
-        code_verifier: pending.verifier,
-      }),
-    );
+    const data = await tokenRequest({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri(),
+      code_verifier: pending.verifier,
+    });
+    // De host gaf zonet toestemming voor alles wat de site vroeg. Bewaar die
+    // lijst zelf, los van hoe Spotify ze in het antwoord opsomt.
+    storeTokens({ ...data, scope: SCOPES.join(' ') });
     return { ok: true };
   } catch (err) {
     return { error: `Inloggen bij Spotify mislukte: ${err.message}` };
   }
 }
 
+/**
+ * Ingelogd met alle nodige toestemmingen. Wie inlogde voor er toestemmingen
+ * bijkwamen, moet opnieuw inloggen.
+ */
 export function isLoggedIn() {
   const t = storage.read(TOKENS);
-  return Boolean(t && (t.refresh || t.expiresAt > Date.now()));
+  return Boolean(t && (t.refresh || t.expiresAt > Date.now()) && hasAllScopes(t));
 }
 
 export function logout() {

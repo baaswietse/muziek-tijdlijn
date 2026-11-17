@@ -3,6 +3,7 @@ import { Connection } from './lib/net.js';
 import { loadSession, saveSession } from './lib/session.js';
 import { keepAwake } from './lib/wakelock.js';
 import { useMusic } from './lib/music.js';
+import { useDeck } from './lib/deck.js';
 import { isMock } from './spotify/index.js';
 import { APP_NAME } from './config.js';
 import { Home } from './screens/Home.jsx';
@@ -70,6 +71,7 @@ export function App({ loginResult }) {
 
   const isHost = Boolean(view && view.you === view.hostId);
   const music = useMusic({ enabled: isHost, view });
+  const deck = useDeck({ code, token });
 
   useEffect(() => {
     keepAwake(Boolean(session));
@@ -88,7 +90,7 @@ export function App({ loginResult }) {
       </main>
     );
   } else if (view.phase === 'lobby') {
-    screen = <Lobby view={view} send={send} music={music} onLeave={leave} notify={notify} />;
+    screen = <Lobby view={view} send={send} music={music} deck={deck} onLeave={leave} notify={notify} />;
   } else {
     screen = <Game view={view} send={send} music={music} onLeave={leave} />;
   }
