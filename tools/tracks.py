@@ -395,14 +395,22 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
         if total > len(recordings):
             # Bekende nummers hebben honderden opnames (live, bootlegs); de eerste
             # honderd zijn niet noodzakelijk de oudste en de studio-opname zit er
-            # soms niet eens bij. Vraag daarom gericht naar officiële
-            # studio-uitgaven: dat zijn er hooguit enkele tientallen.
+            # soms niet eens bij.
             studio = f"({query}){_STUDIO_FILTER}"
-            found = _better(found, pick_year(search(studio)[0], wanted, artists))
+            if not (found and found["official"]):
+                # Geen officiële studio-uitgave op de eerste pagina: vraag er
+                # gericht naar. Dat zijn er hooguit enkele tientallen.
+                found = _better(found, pick_year(search(studio)[0], wanted, artists))
             # Een opname met een vroegere officiële uitgave heeft ook een vroegere
             # 'eerste release'. Kijk dus of er vóór het gevonden jaar nog iets zit.
+            # `seen`: alle opnames met een eerste release vóór dat jaar zijn al
+            # bekeken (een volledige pagina). Ligt een officieel jaar daar niet na,
+            # dan kan er niets vroegers meer bestaan en is een verzoek overbodig.
+            seen = None
             for _ in range(5):
                 if not found:
+                    break
+                if found["official"] and seen is not None and found["year"] <= seen:
                     break
                 before = f" AND firstreleasedate:[1900-01-01 TO {found['year'] - 1}-12-31]"
                 older, older_total = search(f"({query}){before}")
@@ -410,6 +418,8 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
                 if older_total > len(older):
                     # Nog altijd te veel om te overzien: opnieuw alleen studio-uitgaven.
                     improved = _better(improved, pick_year(search(studio + before)[0], wanted, artists))
+                else:
+                    seen = found["year"]
                 if improved is found:
                     break
                 found = improved

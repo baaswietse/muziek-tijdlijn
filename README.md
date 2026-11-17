@@ -219,7 +219,17 @@ Goed om te weten:
 In de wachtkamer kiest de host onder *Nummers* een van zijn Spotify-playlists. Spotify toont alleen playlists die hij
 zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van de eerste release op bij MusicBrainz.
 
-- Dat opzoeken duurt de eerste keer ongeveer 3 seconden per nummer (MusicBrainz laat 1 verzoek per seconde toe). Alles
+- **Je hoeft niet te wachten.** Wat al gekend is (een eigen verbetering, de standaardlijst, de gedeelde lijst op de
+  server, wat de browser onthield) is er meteen. Zodra er 10 nummers met een jaartal klaar zijn, kan de host starten.
+  Het scherm zegt hoeveel nummers klaar zijn, hoeveel er nog opgezocht worden en hoe lang dat ongeveer nog duurt.
+- De rest wordt op de achtergrond opgezocht, in willekeurige volgorde: wie vroeg start, speelt met een greep uit de
+  hele playlist en niet alleen met het begin ervan. Het opzoeken loopt door in de wachtkamer en tijdens het spel, op
+  de gsm van de host, en gaat na een herlaad verder waar het was. Wat er tijdens een spel bijkomt, doet mee vanaf het
+  volgende spel (*Nog een spel* of vanuit de wachtkamer): de stapel van een lopend spel verandert nooit.
+- *Stop met opzoeken* houdt wat al klaar is; de playlist later opnieuw kiezen zoekt alleen de rest op. Een andere
+  playlist of *Terug naar de standaardlijst* stopt het opzoeken ook.
+- Het opzoeken kost gemiddeld anderhalf verzoek per nummer, en MusicBrainz laat 1 verzoek per seconde toe: reken de
+  eerste keer op ongeveer 2 seconden per nummer, 500 nieuwe nummers duren zo'n kwartier. Alles
   wat opgezocht is, onthoudt de browser van de host en gaat ook naar de gedeelde lijst op de server. Een tweede keer
   gaat het meteen, ook op een ander toestel, in een andere browser of bij een andere host. Op de server staan alleen
   track-ID, jaar, bron en twijfels; alleen een host van een lopend spel kan ze lezen of aanvullen.
@@ -229,10 +239,13 @@ zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van 
 - Een remix krijgt het jaar van de remix, niet dat van het origineel: de spelers horen de remix. Dat zie je aan de
   titel ("- X Remix", "(X Remix)", ook "Rework", "Bootleg", "Mashup" en "Refix"). "Radio Edit", "Extended Mix" of
   "Remastered" tellen als het origineel. Kent MusicBrainz de remix niet, dan geldt het jaar van het Spotify-album.
-- Na afloop toont het spel de jaartallen waar Spotify en MusicBrainz het oneens zijn. De host kan ze daar verbeteren;
+- Het spel toont de jaartallen waar Spotify en MusicBrainz het oneens zijn, ook al terwijl de rest nog opgezocht
+  wordt. De host kan ze daar verbeteren;
   ook dat wordt onthouden en gedeeld, apart gemarkeerd als handmatig, zodat het ook voor andere hosts geldt. Die lijst
   verklapt wel antwoorden.
-- Een lijst telt minstens 10 en hoogstens 500 nummers. Dubbels en nummers zonder jaartal doen niet mee.
+- Een lijst telt minstens 10 en hoogstens 500 nummers. Dubbels en nummers zonder jaartal doen niet mee. Heeft de
+  playlist meer dan 500 nummers, dan kiest het spel er willekeurig 500 uit en zoekt alleen daarvan het jaar op; een
+  volgende keer is dat een andere greep.
 
 ### De titel geheim houden voor de host
 
@@ -272,6 +285,13 @@ nummer het jaar van de eerste release op bij MusicBrainz, en neemt het vroegste 
 alleen officiële studio-uitgaven: bootlegs, live-albums en demo's zijn er vaak fout of veel te vroeg gedateerd.
 Een remix krijgt het jaar van die remix zelf; vindt MusicBrainz ze niet, dan het jaar van het Spotify-album (en
 nooit dat van het origineel). "Edit", "Mix" en "Remastered" zonder het woord "remix" tellen als het origineel.
+
+Zo zoekt het (in het script en in de browser hetzelfde): eerst op titel en artiest. Passen alle opnames op één pagina
+(hoogstens 100), dan is dat genoeg: 1 verzoek. Bekende nummers hebben honderden opnames; dan volgt één gericht verzoek
+naar de opnames die vóór het gevonden jaar voor het eerst uitkwamen. Is die pagina volledig, dan bestaat er zeker
+geen vroegere officiële uitgave: een officiële uitgave is nooit vroeger dan de eerste release van haar opname. Alleen
+als de eerste pagina geen officiële studio-uitgave bevat, of als ook de oudere opnames niet op één pagina passen, komt
+er een verzoek bij met alleen officiële studio-uitgaven. Gemiddeld kost een nummer zo anderhalf verzoek.
 
 Draaien op Windows (Python 3.9 of nieuwer, geen extra pakketten):
 
@@ -361,7 +381,12 @@ Gedekt, automatisch:
   de verbeteringen van de eerste; gasten en onbestaande spellen worden geweigerd; zonder die routes op de server (een
   oudere server, of onbereikbaar) werkt een playlist zoals vroeger. De verzonnen nummers krijgen bij elke run nieuwe
   ID's, zodat ook `npm run test:live` herhaalbaar is; zo'n run laat 8 rijen achter in de echte gedeelde lijst.
-- De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script).
+- Een eigen playlist zonder wachten, tegen een trage nagebootste MusicBrainz: starten terwijl er nog opgezocht wordt,
+  doorzoeken tijdens het spel zonder de stapel van dat spel te raken en meer nummers in het volgende spel, verder na
+  een herlaad, een willekeurige greep uit een playlist van meer dan 500 nummers, en stoppen, een andere playlist of
+  de standaardlijst kiezen midden in het opzoeken. Een run laat hoogstens 28 rijen achter in de gedeelde lijst.
+- De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script), ook met een nagebootste
+  MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet.
 - Installeren als app: het manifest, de iconen (bestaan, PNG, juiste afmetingen), de meta's voor iOS, en dat Chromium
   de site installeerbaar vindt. De iconen maak je opnieuw met `node tools/iconen.mjs`.
 - Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.

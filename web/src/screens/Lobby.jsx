@@ -11,6 +11,12 @@ export function Lobby({ view, send, music, deck, onLeave, notify }) {
   const qr = useMemo(() => qrPath(url), [url]);
   const target = view.settings.target;
 
+  // Eerst de lijst met alles wat nu klaar is naar de server, dan pas starten.
+  async function start() {
+    await deck.flush();
+    send({ t: 'start' });
+  }
+
   async function share() {
     try {
       if (navigator.share) await navigator.share({ title: 'Muziek-tijdlijn', text: `Doe mee met code ${view.code}`, url });
@@ -81,16 +87,14 @@ export function Lobby({ view, send, music, deck, onLeave, notify }) {
                 </button>
               </span>
             </div>
-            <button
-              class="btn primary big"
-              disabled={!music.ready || Boolean(deck.job)}
-              onClick={() => send({ t: 'start' })}
-              data-testid="start-game"
-            >
+            <button class="btn primary big" disabled={!music.ready || !deck.canStart} onClick={start} data-testid="start-game">
               Start het spel
             </button>
             {!music.ready && <p class="muted small center-text">Stel eerst de muziek in.</p>}
-            {music.ready && deck.job && <p class="muted small center-text">Even wachten tot de jaartallen opgezocht zijn.</p>}
+            {music.ready && !deck.canStart && <p class="muted small center-text">Even wachten tot er genoeg jaartallen opgezocht zijn.</p>}
+            {music.ready && deck.canStart && deck.job && (
+              <p class="muted small center-text">Je start met de nummers die nu klaar zijn; de rest wordt intussen verder opgezocht.</p>
+            )}
           </section>
         </>
       ) : (

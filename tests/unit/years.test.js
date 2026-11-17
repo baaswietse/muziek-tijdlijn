@@ -129,25 +129,97 @@ test('pickYear: bootlegs, live-albums en demo\'s tellen niet', () => {
   assert.equal(Y.pickYear([comp], 'Lied', ['Band']).year, 1980);
 });
 
+/**
+ * Een nagebootste MusicBrainz die zich gedraagt als de echte: de filters op
+ * eerste release en studio-uitgave werken, en er komt hoogstens `limit`
+ * opnames per pagina terug, met het totale aantal treffers.
+ */
+function index(recordings, { limit = 100, calls = [] } = {}) {
+  return async (query) => {
+    calls.push(query);
+    let list = recordings;
+    const to = /firstreleasedate:\[1900-01-01 TO (\d{4})-12-31\]/.exec(query);
+    if (to) list = list.filter((r) => Y.yearOf(r['first-release-date']) !== null && Y.yearOf(r['first-release-date']) <= Number(to[1]));
+    if (query.includes('status:official')) {
+      // Zoals bij MusicBrainz telt dit per opname: één live-uitgave sluit ze al uit.
+      const types = (r) => r.releases.flatMap((x) => x['release-group']['secondary-types'].map((t) => t.toLowerCase()));
+      list = list.filter((r) => r.releases.some((x) => x.status === 'Official') && !types(r).some((t) => t === 'live' || t === 'demo'));
+    }
+    return { recordings: list.slice(0, limit), total: list.length };
+  };
+}
+
+/** `n` live-opnames van een nummer, tussen `from` en `to`. */
+function lives(title, artist, n, from, to) {
+  return Array.from({ length: n }, (_, i) => {
+    const year = String(from + (i % (to - from + 1)));
+    return rec(title, artist, year, `live${i}`, { releases: [rel(year, 'Official', ['Live'])] });
+  });
+}
+
 test('lookup: zoekt gericht naar oudere opnames', async () => {
   const calls = [];
-  const search = async (query) => {
-    calls.push(query);
-    if (!query.includes('firstreleasedate')) return { recordings: [rec('Whole Lotta Love', 'Led Zeppelin', '1970', 'p1')], total: 600 };
-    if (query.includes('TO 1969-12-31')) {
-      // Het origineel staat ook op een live-compilatie: alleen zonder filter te vinden.
-      if (query.includes('status:official')) return { recordings: [], total: 0 };
-      return { recordings: [rec('Whole Lotta Love', 'Led Zeppelin', '1969-10-22', 'orig')], total: 1 };
-    }
-    return { recordings: [], total: 0 };
-  };
+  // Het origineel staat ook op een live-compilatie: alleen zonder studio-filter te vinden.
+  const orig = rec('Whole Lotta Love', 'Led Zeppelin', '1969-10-22', 'orig', { releases: [rel('1969-10-22'), rel('1975', 'Official', ['Compilation', 'Live'])] });
+  const search = index([rec('Whole Lotta Love', 'Led Zeppelin', '1970', 'p1'), ...lives('Whole Lotta Love', 'Led Zeppelin', 150, 1971, 2010), orig], { calls });
   const found = await Y.lookup('Whole Lotta Love - 1990 Remaster', ['Led Zeppelin'], search);
   assert.deepEqual(found, { year: 1969, official: true, method: 'exact', mbid: 'orig' });
+  // Al een officiële uitgave op de eerste pagina (1970): meteen de oudere opnames
+  // vragen. Die pagina is volledig, dus vroeger dan 1969 kan er niets meer zijn.
+  assert.equal(calls.length, 2);
   assert.ok(calls[0].includes('recording:"Whole Lotta Love"'));
   assert.ok(!calls[0].includes('status:official'));
-  assert.ok(calls[1].includes('status:official'));
-  assert.ok(calls.at(-1).includes('TO 1968-12-31'));
-  assert.equal(calls.length, 4);
+  assert.ok(calls[1].includes('TO 1969-12-31'));
+  assert.ok(!calls[1].includes('status:official'));
+});
+
+test('lookup: een officiële uitgave op de eerste pagina en een volledige pagina oudere opnames: klaar', async () => {
+  const calls = [];
+  const search = index(
+    [
+      rec('Lied', 'Band', '2001', 'heruitgave'),
+      ...lives('Lied', 'Band', 120, 1990, 2020),
+      rec('Lied', 'Band', '1975', 'orig'),
+      rec('Lied', 'Band', '1972', 'boot', { releases: [rel('1972', 'Bootleg')] }),
+    ],
+    { calls },
+  );
+  // Vroeger 3 verzoeken: eerste pagina, studio-filter, ouder dan 1975.
+  const found = await Y.lookup('Lied', ['Band'], search);
+  assert.deepEqual([found.year, found.mbid, found.official], [1975, 'orig', true]);
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].includes('TO 2000-12-31'));
+});
+
+test('lookup: zonder officiële uitgave op de eerste pagina blijft de studio-filter nodig', async () => {
+  const calls = [];
+  const search = index([rec('Ander lied', 'Band', '2001', 'ander'), ...lives('Lied', 'Band', 300, 1990, 2020), rec('Lied', 'Band', '1995', 'studio')], {
+    calls,
+  });
+  const found = await Y.lookup('Lied', ['Band'], search);
+  assert.deepEqual([found.year, found.mbid, found.official], [1995, 'studio', true]);
+  assert.ok(calls[1].includes('NOT secondarytype:live'));
+  assert.ok(!calls[1].includes('firstreleasedate'));
+});
+
+test('lookup: een officieel jaar na de bekeken jaren wordt nog nagekeken', async () => {
+  // Een bootleg uit 1975 op de eerste pagina; een opname die eerst als bootleg
+  // (1970) en pas in 1980 officieel uitkwam; en een die in 1977 officieel
+  // uitkwam. Beide staan ook op een live-album: de studio-filter mist ze.
+  const calls = [];
+  const search = index(
+    [
+      rec('Lied', 'Band', '1975', 'boot75', { releases: [rel('1975', 'Bootleg')] }),
+      ...lives('Lied', 'Band', 150, 1990, 2020),
+      rec('Lied', 'Band', '1970', 'laat', { releases: [rel('1970', 'Bootleg'), rel('1980', 'Official', ['Compilation']), rel('1985', 'Official', ['Live'])] }),
+      rec('Lied', 'Band', '1977', 'orig', { releases: [rel('1977'), rel('1990', 'Official', ['Live'])] }),
+    ],
+    { calls },
+  );
+  const found = await Y.lookup('Lied', ['Band'], search);
+  // Officieel gaat voor op onofficieel; alle opnames vóór 1980 zijn bekeken: 1977.
+  assert.deepEqual([found.year, found.mbid, found.official], [1977, 'orig', true]);
+  assert.ok(calls.some((q) => q.includes('TO 1979-12-31')));
 });
 
 test('lookup: oudere bootlegs vervangen geen officiële uitgave', async () => {
@@ -160,24 +232,21 @@ test('lookup: oudere bootlegs vervangen geen officiële uitgave', async () => {
 });
 
 test('lookup: studio-opname die niet op de eerste pagina staat', async () => {
+  // Zoals "Master of Puppets": honderden opnames, de eerste honderd zijn allemaal
+  // live of heruitgaven, en ook vóór 2017 zijn er te veel om te overzien.
   const calls = [];
-  const search = async (query) => {
-    calls.push(query);
-    if (query.includes('firstreleasedate')) return { recordings: [], total: 0 };
-    if (query.includes('status:official')) {
-      return { recordings: [rec('Master of Puppets', 'Metallica', '1986', 'studio'), rec('Master of Puppets', 'Metallica', '2017', 'box')], total: 55 };
-    }
-    return {
-      recordings: [
-        rec('Master of Puppets', 'Metallica', '2017-11-10', 'box'),
-        rec('Master of Puppets', 'Metallica', '2003', 'live', { releases: [rel('2003', 'Official', ['Live'])] }),
-      ],
-      total: 791,
-    };
-  };
+  const search = index(
+    [
+      rec('Master of Puppets', 'Metallica', '2017-11-10', 'box'),
+      rec('Master of Puppets', 'Metallica', '2003', 'live', { releases: [rel('2003', 'Official', ['Live'])] }),
+      ...lives('Master of Puppets', 'Metallica', 300, 1987, 2016),
+      rec('Master of Puppets', 'Metallica', '1986', 'studio'),
+    ],
+    { calls },
+  );
   const found = await Y.lookup('Master Of Puppets', ['Metallica'], search);
   assert.deepEqual([found.year, found.mbid, found.official], [1986, 'studio', true]);
-  assert.ok(calls[1].includes('NOT secondarytype:live'));
+  assert.ok(calls.some((q) => q.includes('NOT secondarytype:live') && q.includes('TO 2016-12-31')));
 });
 
 test('lookup: geen extra verzoek als alles gezien is, en niets gevonden', async () => {

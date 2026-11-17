@@ -83,7 +83,7 @@ export function App({ loginResult }) {
 
   const isHost = Boolean(view && view.you === view.hostId);
   const music = useMusic({ enabled: isHost, view });
-  const deck = useDeck({ code, token });
+  const deck = useDeck({ code, token, phase: view?.phase ?? null });
 
   useEffect(() => {
     keepAwake(Boolean(session));
@@ -110,7 +110,7 @@ export function App({ loginResult }) {
   } else if (view.phase === 'lobby') {
     screen = <Lobby view={view} send={send} music={music} deck={deck} onLeave={leave} notify={notify} />;
   } else {
-    screen = <Game view={view} send={send} music={music} onLeave={leave} />;
+    screen = <Game view={view} send={send} music={music} deck={deck} onLeave={leave} />;
   }
 
   return (

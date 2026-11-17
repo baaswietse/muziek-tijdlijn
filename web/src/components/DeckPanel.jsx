@@ -2,6 +2,7 @@
 // eigen Spotify-playlist van de host. Alleen op de gsm van de host.
 
 import { useState } from 'preact/hooks';
+import { MAX_DECK as MAX } from '../lib/deckplan.js';
 
 export function DeckPanel({ view, send, deck, loggedIn }) {
   const [open, setOpen] = useState(false);
@@ -30,39 +31,29 @@ export function DeckPanel({ view, send, deck, loggedIn }) {
         {playlist ? `Playlist «${playlist.name}» · ${playlist.count} nummers` : 'Standaardlijst van het spel'}
       </p>
 
-      {job ? (
-        <div class="deck-job" data-testid="deck-job">
-          <p class="small">
-            {job.phase === 'tracks' && `«${job.name}» lezen…`}
-            {job.phase === 'years' && `«${job.name}»: jaartallen opzoeken, ${job.done} van ${job.total}`}
-            {job.phase === 'upload' && `«${job.name}» doorsturen…`}
-          </p>
-          <progress value={job.done} max={Math.max(1, job.total)} />
-          {job.phase === 'years' && job.todo > 0 && (
-            <p class="muted small">
-              {job.todo} nummers zijn nieuw en worden opgezocht bij MusicBrainz: ongeveer {deck.minutes} min. Dat is eenmalig, ook voor
-              andere hosts: daarna zijn ze onthouden. Laat dit scherm open. De spelers kunnen intussen binnenkomen.
-            </p>
-          )}
-          <button class="btn" onClick={deck.cancel}>
-            Stop
-          </button>
-        </div>
-      ) : !deck.available ? (
+      {job && <JobStatus job={job} deck={deck} />}
+      {deck.result?.sampled && (
+        <p class="muted small" data-testid="deck-sample">
+          Deze playlist heeft {deck.result.total} nummers; het spel koos er willekeurig {MAX} uit en zoekt alleen daarvan het jaar op.
+          Kies de playlist later opnieuw voor een andere greep.
+        </p>
+      )}
+
+      {!deck.available ? (
         <p class="muted small">Een eigen playlist kiezen kan niet in de testmodus.</p>
       ) : !loggedIn ? (
         <p class="muted small">Log in bij Spotify (hierboven) om met een eigen playlist te spelen.</p>
       ) : (
         <div class="row gap">
           <button class="btn" onClick={openList} data-testid="deck-open">
-            Kies een playlist uit Spotify
+            {job ? 'Kies een andere playlist' : 'Kies een playlist uit Spotify'}
           </button>
-          {!playlist && deck.last && (
+          {!playlist && !job && deck.last && (
             <button class="btn" onClick={() => deck.choose(deck.last)} data-testid="deck-last">
               Opnieuw «{deck.last.name}»
             </button>
           )}
-          {playlist && (
+          {(playlist || job) && (
             <button class="btn link" onClick={useDefault} data-testid="deck-default">
               Terug naar de standaardlijst
             </button>
@@ -70,7 +61,7 @@ export function DeckPanel({ view, send, deck, loggedIn }) {
         </div>
       )}
 
-      {open && !job && (
+      {open && (
         <div class="deck-list" data-testid="deck-list">
           {deck.loading && <p class="muted small">Playlists ophalen…</p>}
           {deck.playlists && deck.playlists.length === 0 && (
@@ -103,19 +94,59 @@ export function DeckPanel({ view, send, deck, loggedIn }) {
         </p>
       )}
 
-      {deck.result && !job && (
+      {deck.result && (
         <>
           {deck.result.note && <p class="notice warn">{deck.result.note}</p>}
-          {deck.result.skipped > 0 && (
+          {deck.result.finished && deck.result.skipped > 0 && (
             <p class="muted small">
-              {deck.result.skipped === 1 ? '1 nummer doet' : `${deck.result.skipped} nummers doen`} niet mee (geen jaartal
-              gevonden, of meer dan 500 nummers).
+              {deck.result.skipped === 1 ? '1 nummer doet' : `${deck.result.skipped} nummers doen`} niet mee (geen jaartal gevonden).
             </p>
           )}
           {deck.result.doubts.length > 0 && <Doubts doubts={deck.result.doubts} onYear={deck.setYear} />}
         </>
       )}
     </section>
+  );
+}
+
+/** Hoe ver het opzoeken staat, en of de host al kan starten. */
+function JobStatus({ job, deck }) {
+  if (job.phase === 'tracks') {
+    return (
+      <div class="deck-job" data-testid="deck-job">
+        <p class="small">«{job.name}» lezen…</p>
+        <button class="btn" onClick={deck.cancel}>
+          Stop
+        </button>
+      </div>
+    );
+  }
+  const need = deck.minDeck - job.ready;
+  return (
+    <div class="deck-job" data-testid="deck-job">
+      <p class="small" data-testid="deck-progress">
+        «{job.name}»: <strong>{job.ready}</strong> {job.ready === 1 ? 'nummer' : 'nummers'} klaar, nog {deck.left} op te zoeken
+        {deck.left > 0 && <> (ongeveer {deck.minutes} min)</>}.
+      </p>
+      <progress value={job.done} max={Math.max(1, job.todo)} />
+      {need <= 0 ? (
+        <p class="notice ok small" data-testid="deck-can-start">
+          Je kan al starten met de {job.ready} nummers die klaar zijn. Het opzoeken loopt door, ook tijdens het spel; wat erbij komt,
+          doet mee vanaf het volgende spel.
+        </p>
+      ) : (
+        <p class="muted small" data-testid="deck-need">
+          Nog {need} {need === 1 ? 'nummer' : 'nummers'} met een jaartal nodig voor je kan starten.
+        </p>
+      )}
+      <p class="muted small">
+        Nieuwe nummers worden een voor een opgezocht bij MusicBrainz (dat laat 1 verzoek per seconde toe). Dat is eenmalig, ook voor
+        andere hosts: daarna zijn ze onthouden. Laat het spel open op deze gsm; na een herlaad gaat het verder.
+      </p>
+      <button class="btn" onClick={deck.cancel} data-testid="deck-stop">
+        Stop met opzoeken
+      </button>
+    </div>
   );
 }
 

@@ -281,18 +281,28 @@ export async function lookup(title, artists, search) {
     let found = pickYear(first.recordings, wanted, artists);
     if (first.total > first.recordings.length) {
       // Bekende nummers hebben honderden opnames (live, bootlegs); de eerste
-      // honderd zijn niet noodzakelijk de oudste. Vraag gericht naar officiële
-      // studio-uitgaven: dat zijn er hooguit enkele tientallen.
+      // honderd zijn niet noodzakelijk de oudste.
       const studio = `(${query})${STUDIO_FILTER}`;
-      found = better(found, pickYear((await search(studio)).recordings, wanted, artists));
+      if (!found?.official) {
+        // Geen officiële studio-uitgave op de eerste pagina: vraag er gericht
+        // naar. Dat zijn er hooguit enkele tientallen.
+        found = better(found, pickYear((await search(studio)).recordings, wanted, artists));
+      }
       // Een opname met een vroegere officiële uitgave heeft ook een vroegere
       // 'eerste release'. Kijk dus of er vóór het gevonden jaar nog iets zit.
+      // `seen`: alle opnames met een eerste release vóór dat jaar zijn al
+      // bekeken (een volledige pagina). Ligt een officieel jaar daar niet na,
+      // dan kan er niets vroegers meer bestaan en is een verzoek overbodig.
+      let seen = null;
       for (let i = 0; i < 5 && found; i++) {
+        if (found.official && seen !== null && found.year <= seen) break;
         const before = ` AND firstreleasedate:[1900-01-01 TO ${found.year - 1}-12-31]`;
         const older = await search(`(${query})${before}`);
         let improved = better(found, pickYear(older.recordings, wanted, artists));
         if (older.total > older.recordings.length) {
           improved = better(improved, pickYear((await search(studio + before)).recordings, wanted, artists));
+        } else {
+          seen = found.year;
         }
         if (improved === found) break;
         found = improved;
