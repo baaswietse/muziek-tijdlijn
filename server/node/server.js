@@ -154,12 +154,12 @@ function sendJson(req, res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-async function readJson(req) {
+async function readJson(req, limit = MAX_BODY) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new GameError('TOO_LARGE', 'Verzoek te groot.');
+    if (size > limit) throw new GameError('TOO_LARGE', 'Verzoek te groot.');
     chunks.push(chunk);
   }
   try {
@@ -191,6 +191,15 @@ const server = http.createServer(async (req, res) => {
       const creds = room.join(r.state, body.name);
       broadcast(r);
       return sendJson(req, res, 200, { code: r.state.code, ...creds });
+    }
+    const d = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/deck$/);
+    if (req.method === 'POST' && d) {
+      // De host stuurt een eigen lijst met nummers (een gekozen playlist).
+      const body = await readJson(req, room.MAX_DECK_BODY);
+      const r = getRoom(d[1]);
+      room.setDeck(r.state, body);
+      broadcast(r);
+      return sendJson(req, res, 200, { ok: true, count: r.state.custom.tracks.length });
     }
     return sendJson(req, res, 404, { error: 'NOT_FOUND', message: 'Niet gevonden.' });
   } catch (err) {

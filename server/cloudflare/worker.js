@@ -50,9 +50,9 @@ function errorResponse(err) {
   return json({ error: payload.code, message: payload.message }, status);
 }
 
-async function readBody(request) {
+async function readBody(request, limit = MAX_BODY) {
   const text = await request.text();
-  if (text.length > MAX_BODY) throw new GameError('TOO_LARGE', 'Verzoek te groot.');
+  if (text.length > limit) throw new GameError('TOO_LARGE', 'Verzoek te groot.');
   try {
     return JSON.parse(text || '{}');
   } catch {
@@ -101,6 +101,13 @@ export default {
         });
         return withCors(res, request, env);
       }
+      m = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/deck$/);
+      if (request.method === 'POST' && m) {
+        // De host stuurt een eigen lijst met nummers (een gekozen playlist).
+        const body = await readBody(request, room.MAX_DECK_BODY);
+        const res = await stubFor(m[1]).fetch('https://room/deck', { method: 'POST', body: JSON.stringify(body) });
+        return withCors(res, request, env);
+      }
       m = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/ws$/);
       if (m) {
         if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'UPGRADE', message: 'WebSocket verwacht.' }, 426);
@@ -121,6 +128,9 @@ export class GameRoom extends DurableObject {
     this.tracks = null;
     ctx.blockConcurrencyWhile(async () => {
       this.state = (await ctx.storage.get('state')) ?? null;
+      // De eigen lijst van de host staat apart, zodat geen enkele waarde in de
+      // opslag te groot wordt.
+      if (this.state) this.state.custom = (await ctx.storage.get('custom')) ?? null;
     });
     // Pings beantwoordt Cloudflare zelf, zonder de kamer wakker te maken.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"t":"ping"}', '{"t":"pong"}'));
@@ -145,6 +155,13 @@ export class GameRoom extends DurableObject {
         await this.save();
         this.broadcast();
         return json({ code: this.state.code, ...creds });
+      }
+      if (url.pathname === '/deck') {
+        if (!this.state) throw new GameError('NO_ROOM', 'Dit spel bestaat niet (meer). Controleer de code.');
+        room.setDeck(this.state, await request.json());
+        await this.save({ custom: true });
+        this.broadcast();
+        return json({ ok: true, count: this.state.custom.tracks.length });
       }
       if (url.pathname.endsWith('/ws')) {
         const pair = new WebSocketPair();
@@ -184,7 +201,9 @@ export class GameRoom extends DurableObject {
     const playerId = ws.deserializeAttachment()?.playerId;
     if (!playerId) return;
     try {
+      const hadCustom = Boolean(this.state.custom);
       await room.applyAction(this.state, playerId, msg, { loadTracks: () => this.loadTracks() });
+      const customChanged = hadCustom !== Boolean(this.state.custom);
       // Een verwijderde speler krijgt nog één melding en wordt dan afgesloten.
       for (const other of this.ctx.getWebSockets()) {
         const id = other.deserializeAttachment()?.playerId;
@@ -198,7 +217,7 @@ export class GameRoom extends DurableObject {
           }
         }
       }
-      await this.save();
+      await this.save({ custom: customChanged });
       this.broadcast();
     } catch (err) {
       if (!(err instanceof GameError)) console.error(err);
@@ -236,8 +255,14 @@ export class GameRoom extends DurableObject {
     }
   }
 
-  async save() {
-    await this.ctx.storage.put('state', this.state);
+  /** Bewaart het spel. De eigen lijst alleen als die veranderd is (`custom`). */
+  async save({ custom = false } = {}) {
+    const { custom: deck, ...rest } = this.state;
+    await this.ctx.storage.put('state', rest);
+    if (custom) {
+      if (deck) await this.ctx.storage.put('custom', deck);
+      else await this.ctx.storage.delete('custom');
+    }
     await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS);
   }
 

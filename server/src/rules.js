@@ -8,6 +8,10 @@ export const LIMITS = {
   minTarget: 3,
   maxTarget: 20,
   defaultTarget: 10,
+  // Een eigen lijst van de host (gekozen playlist).
+  minDeck: 10,
+  maxDeck: 500,
+  maxDeckName: 60,
 };
 
 /** Fout met een code voor de client en een Nederlandse boodschap voor de speler. */
@@ -60,6 +64,7 @@ export function createRoom({ code, now }) {
     hostId: null,
     players: [], // volgorde = beurtvolgorde
     deck: [], // nog te spelen kaarten; de bovenste is de laatste
+    custom: null, // eigen lijst van de host: { name, tracks }, anders de standaardlijst
     used: [], // track-ID's die in deze kamer al gespeeld zijn
     turn: null, // { playerId, card, pendingIndex, number }
     turnCount: 0, // aantal beurten in het lopende spel
@@ -120,6 +125,35 @@ export function setSettings(state, actorId, { target }) {
     fail('BAD_SETTINGS', `Kies een doel tussen ${LIMITS.minTarget} en ${LIMITS.maxTarget} kaarten.`);
   }
   state.settings.target = t;
+}
+
+/**
+ * Host: speel met een eigen lijst (een playlist die hij koos). `tracks` is al
+ * nagekeken door normaliseTracks. De lijst blijft op de server; spelers zien
+ * alleen de naam en het aantal nummers.
+ */
+export function setDeck(state, actorId, { name, tracks }) {
+  requireHost(state, actorId);
+  if (state.phase !== 'lobby' && state.phase !== 'finished') {
+    fail('BAD_PHASE', 'De lijst met nummers kan alleen tussen twee spellen veranderen.');
+  }
+  if (!Array.isArray(tracks) || tracks.length < LIMITS.minDeck) {
+    fail('DECK_TOO_SMALL', `Een lijst heeft minstens ${LIMITS.minDeck} nummers met een jaartal nodig.`);
+  }
+  if (tracks.length > LIMITS.maxDeck) {
+    fail('DECK_TOO_LARGE', `Een lijst mag hoogstens ${LIMITS.maxDeck} nummers hebben.`);
+  }
+  const clean = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, LIMITS.maxDeckName) || 'Eigen lijst';
+  state.custom = { name: clean, tracks: tracks.map(toCard) };
+}
+
+/** Host: terug naar de standaardlijst. */
+export function clearDeck(state, actorId) {
+  requireHost(state, actorId);
+  if (state.phase !== 'lobby' && state.phase !== 'finished') {
+    fail('BAD_PHASE', 'De lijst met nummers kan alleen tussen twee spellen veranderen.');
+  }
+  state.custom = null;
 }
 
 /**
@@ -306,6 +340,8 @@ export function viewFor(state, playerId, online = new Set()) {
       timeline: p.timeline.map((c) => ({ ...c })),
     })),
     deckLeft: state.deck.length,
+    // Welke lijst er gespeeld wordt; de nummers zelf gaan niet mee.
+    playlist: state.custom ? { name: state.custom.name, count: state.custom.tracks.length } : null,
     turn: state.turn
       ? {
           playerId: state.turn.playerId,
