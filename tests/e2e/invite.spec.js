@@ -223,3 +223,47 @@ test('server onbereikbaar: het instapscherm toont de melding en opnieuw proberen
   await expect(host.getByTestId('lobby-player')).toHaveCount(2);
   for (const p of [host, cas]) await p.context().close();
 });
+
+/**
+ * Opent de site op een nieuwe gsm en zet de uitnodigingslink van `code` in de
+ * adresbalk zodra de app voor het eerst getekend is, nog vóór Preact de
+ * effecten uitvoert (die wachten op de volgende frame). Zo valt de link
+ * gegarandeerd in het venster waarin de app er nog niet naar luistert; op een
+ * trage gsm of in CI gebeurt dat soms vanzelf.
+ */
+async function openWithLateInvite(browser, code, { name = '' } = {}) {
+  const context = await browser.newContext();
+  await context.addInitScript(
+    ({ c, n }) => {
+      if (n) localStorage.setItem('mt.name', JSON.stringify(n));
+      new MutationObserver((_, obs) => {
+        if (!document.getElementById('app')?.firstChild) return;
+        obs.disconnect();
+        location.hash = `#/j/${c}`;
+      }).observe(document, { childList: true, subtree: true });
+    },
+    { c: code, n: name },
+  );
+  const page = await context.newPage();
+  await page.goto('./?mock=1');
+  return page;
+}
+
+test('link die binnenkomt vlak na het laden, voor de app luistert: gaat niet verloren', async ({ browser }) => {
+  const host = await openPhone(browser);
+  const code = await hostGame(host, 'Hanne');
+
+  // Zonder naam: het instapscherm, niet het gewone startscherm.
+  const cas = await openWithLateInvite(browser, code);
+  await expect(cas.getByTestId('invite-screen')).toContainText(`Je doet mee met spel ${code}`);
+  await expect(cas.getByRole('tab')).toHaveCount(0);
+
+  // Met een gekende naam: meteen mee, en maar één keer.
+  const bob = await openWithLateInvite(browser, code, { name: 'Bob' });
+  await expect(bob.getByTestId('big-code')).toHaveText(code);
+  await expect(bob.getByTestId('waiting')).toBeVisible();
+  await expect(lobbyRow(host, 'Bob')).toBeVisible();
+  await expect(host.getByTestId('lobby-player')).toHaveCount(2);
+  await expect(bob.getByTestId('toast')).toHaveCount(0);
+  for (const p of [host, cas, bob]) await p.context().close();
+});
