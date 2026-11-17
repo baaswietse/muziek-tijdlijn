@@ -1,7 +1,10 @@
 import { expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 
-export const TRACKS = JSON.parse(readFileSync(new URL('../fixtures/tracks.json', import.meta.url), 'utf8'));
+// Lokaal speelt de server met de testnummers; tegen de live site (MT_LIVE=1)
+// met de echte lijst die ook op de site staat.
+const TRACKS_FILE = process.env.MT_LIVE === '1' ? '../../web/public/tracks.json' : '../fixtures/tracks.json';
+export const TRACKS = JSON.parse(readFileSync(new URL(TRACKS_FILE, import.meta.url), 'utf8'));
 export const YEAR = new Map(TRACKS.map((t) => [t.id, t.year]));
 
 /** Opent een eigen browsercontext (= een eigen gsm) in testmodus. */

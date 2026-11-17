@@ -221,6 +221,7 @@ geluid, maar het hele spel werkt (`?mock=0` zet het weer uit).
 | `npm run test:py` | Unit-tests van het script voor de jaartallen (zonder netwerk). |
 | `npm run test:e2e` | Spelverloop met meerdere browsers tegen de Node-server. |
 | `MT_SERVER=cloudflare npm run test:e2e` | Hetzelfde tegen de Cloudflare-variant (lokaal via wrangler). |
+| `npm run test:live` | Hetzelfde tegen de echte site op GitHub Pages en de echte spelserver. Spotify blijft nagebootst. |
 
 De workflow `.github/workflows/ci.yml` draait dit alles bij elke pull request.
 
@@ -236,10 +237,9 @@ Gedekt, automatisch:
 - De Spotify-laag van de site tegen een nagebootste Spotify op netwerkniveau: inloggen met PKCE (zonder Client
   Secret), een toestel kiezen, het juiste nummer op het juiste toestel starten, een verlopen token vernieuwen en
   foutmeldingen bij een verdwenen toestel of een account zonder Premium.
-- Beide servervarianten (Node en Cloudflare, lokaal).
+- Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.
 
 Niet gedekt, alleen in het echt te testen:
 
 - Inloggen bij de echte Spotify en het echte afspelen op een toestel.
 - Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.
-- De uitgerolde server op Cloudflare of je eigen server.
