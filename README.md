@@ -145,7 +145,14 @@ zelf aan te zetten. Lukt dat niet (GitHub laat dat niet altijd toe aan een workf
    - Een ander toestel uit de lijst: een toestel waarop Spotify actief is. Staat het er niet bij, open er dan de
      Spotify-app, speel even iets af en kom terug.
 3. **Host:** tik op *Test het geluid*, en kies eventueel een eigen playlist (zie hieronder).
-4. **Spelers:** scan de QR-code of tik de code van 4 letters in.
+4. **Spelers:** scan de QR-code of tik de code van 4 letters in. Via de QR-code (of de gedeelde link) kom je meteen
+   in het spel: kent je gsm je naam nog van een vorige keer, dan zit je zonder iets in te vullen in de wachtkamer;
+   anders vul je enkel je naam in. Instappen in een spel dat al loopt kan ook: je krijgt dan een startkaart.
+   - Zat je nog in een ander spel als gast, dan stap je meteen over; je oude plaats blijft daar als offline speler
+     staan, net als bij *Verlaat het spel*.
+   - Ben je host van een ander spel, dan vraagt de site eerst of je overstapt: zonder host valt dat spel stil.
+   - Is je naam al bezet, of is de server even onbereikbaar, dan kies je een andere naam of tik je opnieuw. Bestaat
+     het spel niet (meer) of zit het vol, dan krijg je een melding en blijf je waar je was.
 5. **Host:** start het spel. Elke beurt begint het nummer vanzelf.
 
 ### Spelen met een eigen playlist
@@ -266,6 +273,8 @@ Gedekt, automatisch:
 - De spelregels: plaatsen, gelijke jaren, winnen, lege stapel, overslaan, verwijderen, laat instappen.
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
+- Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag
+  of je overstapt), naar je eigen spel, naar een onbestaand spel, met een bezette naam en zonder netwerk.
 - Dat het antwoord niet in de netwerkdata van gewone spelers zit vóór de onthulling.
 - Herverbinden na een weggevallen verbinding en na herladen; een herlaad bij de host start het nummer niet opnieuw.
 - De Spotify-laag van de site tegen een nagebootste Spotify op netwerkniveau: inloggen met PKCE (zonder Client
