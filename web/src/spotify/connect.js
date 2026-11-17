@@ -7,16 +7,19 @@ import { accessToken, beginLogin, isLoggedIn, logout, hasClientId, LoginRequired
 const API = 'https://api.spotify.com/v1';
 
 export class SpotifyError extends Error {
-  constructor(message, { status = 0, reason = '', loginRequired = false, deviceGone = false } = {}) {
+  constructor(message, { status = 0, reason = '', loginRequired = false, deviceGone = false, network = false, timeout = false, retryAfter = 0 } = {}) {
     super(message);
     this.status = status;
     this.reason = reason;
     this.loginRequired = loginRequired;
     this.deviceGone = deviceGone;
+    this.network = network; // geen verbinding
+    this.timeout = timeout; // geen antwoord binnen de tijd
+    this.retryAfter = retryAfter; // seconden (bij 429)
   }
 }
 
-function explain(status, reason, detail, path = '') {
+function explain(status, reason, detail, path = '', retryAfter = 0) {
   if (status === 404 && !path.startsWith('/me/player')) {
     return new SpotifyError('Spotify vindt dit niet (meer). Bestaat de playlist nog?', { status, reason });
   }
@@ -35,11 +38,16 @@ function explain(status, reason, detail, path = '') {
       { status, reason },
     );
   }
-  if (status === 429) return new SpotifyError('Te veel verzoeken naar Spotify. Wacht even en probeer opnieuw.', { status, reason });
+  if (status === 429) {
+    return new SpotifyError('Te veel verzoeken naar Spotify. Wacht even en probeer opnieuw.', { status, reason, retryAfter });
+  }
   if (status === 401) return new SpotifyError('Log opnieuw in bij Spotify.', { status, loginRequired: true });
   if (status >= 500) return new SpotifyError('Spotify heeft even een storing. Probeer opnieuw.', { status, reason });
   return new SpotifyError(detail || `Spotify gaf een fout (${status}).`, { status, reason });
 }
+
+/** Zo lang wacht de site op een antwoord van Spotify. */
+const TIMEOUT = 10_000;
 
 async function call(method, path, { query, body } = {}, retried = false) {
   let token;
@@ -47,28 +55,40 @@ async function call(method, path, { query, body } = {}, retried = false) {
     token = await accessToken({ force: retried });
   } catch (err) {
     if (err instanceof LoginRequired) throw new SpotifyError(err.message, { loginRequired: true });
-    throw new SpotifyError('Geen verbinding met Spotify. Controleer het internet van dit toestel.');
+    throw new SpotifyError('Geen verbinding met Spotify. Controleer het internet van dit toestel.', { network: true });
   }
   const qs = query ? `?${new URLSearchParams(query)}` : '';
+  // Een verzoek dat blijft hangen (zwak netwerk) mag de wachtrij met
+  // commando's niet eindeloos ophouden.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT);
   let res;
+  let text;
   try {
     res = await fetch(API + path + qs, {
       method,
       headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
     });
+    text = await res.text();
   } catch {
-    throw new SpotifyError('Geen verbinding met Spotify. Controleer het internet van dit toestel.');
+    if (controller.signal.aborted) throw new SpotifyError('Spotify antwoordt niet. Probeer opnieuw.', { timeout: true });
+    throw new SpotifyError('Geen verbinding met Spotify. Controleer het internet van dit toestel.', { network: true });
+  } finally {
+    clearTimeout(timer);
   }
   if (res.status === 401 && !retried) return call(method, path, { query, body }, true);
-  const text = await res.text();
   let data = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
     // Sommige player-commando's antwoorden met platte tekst; negeren.
   }
-  if (!res.ok) throw explain(res.status, data?.error?.reason || '', data?.error?.message || '', path);
+  if (!res.ok) {
+    const retryAfter = Number(res.headers.get('retry-after')) || 0;
+    throw explain(res.status, data?.error?.reason || '', data?.error?.message || '', path, retryAfter);
+  }
   return data;
 }
 
@@ -89,15 +109,39 @@ export const connect = {
       .map((d) => ({ id: d.id, name: d.name, type: d.type, active: d.is_active, restricted: d.is_restricted }));
   },
 
-  /** Speelt één nummer vanaf `positionMs` op het gekozen toestel. */
+  /**
+   * Speelt één nummer vanaf `positionMs` op het gekozen toestel. Alleen dit
+   * ene nummer (geen playlist of album als context), zodat Spotify geen eigen
+   * volgorde kan volgen. Herhalen zet music.js apart, na een bevestigde start.
+   */
   async play(trackId, deviceId, { positionMs = 0 } = {}) {
     await call('PUT', '/me/player/play', {
       query: deviceQuery(deviceId),
       body: { uris: [`spotify:track:${trackId}`], position_ms: positionMs },
     });
-    // Herhaal het nummer zolang de beurt duurt; anders begint Spotify na
-    // afloop zelf iets anders te spelen. Lukt dit niet, dan is dat geen ramp.
-    call('PUT', '/me/player/repeat', { query: { state: 'track', ...deviceQuery(deviceId) } }).catch(() => {});
+  },
+
+  /** Herhaalstand: 'track' (dit nummer opnieuw) of 'off'. */
+  async repeat(mode, deviceId) {
+    await call('PUT', '/me/player/repeat', { query: { state: mode, ...deviceQuery(deviceId) } });
+  },
+
+  /**
+   * Wat er nu echt speelt: { trackId, linkedFrom, deviceId, isPlaying,
+   * progressMs } of null (niets). Met `market=from_token` meldt Spotify bij
+   * "track relinking" ook het gevraagde nummer (linked_from). Gaat alleen naar
+   * het afspeelscherm van de site; titels worden nergens getoond.
+   */
+  async state() {
+    const data = await call('GET', '/me/player', { query: { market: 'from_token', additional_types: 'track' } });
+    if (!data || !data.item) return null;
+    return {
+      trackId: data.item.id || null,
+      linkedFrom: data.item.linked_from?.id || null,
+      deviceId: data.device?.id || null,
+      isPlaying: Boolean(data.is_playing),
+      progressMs: typeof data.progress_ms === 'number' ? data.progress_ms : null,
+    };
   },
 
   async pause(deviceId) {
@@ -151,8 +195,4 @@ export const connect = {
     return out;
   },
 
-  /** Na het spel: herhalen weer uit, zodat Spotify gewoon verder werkt. */
-  async release(deviceId) {
-    await call('PUT', '/me/player/repeat', { query: { state: 'off', ...deviceQuery(deviceId) } }).catch(() => {});
-  },
 };

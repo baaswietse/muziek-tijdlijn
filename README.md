@@ -108,6 +108,30 @@ gsm host  ──┘        │
 - **Twee manieren om geluid te maken.** De site stuurt een Spotify-toestel aan (Spotify Connect): een gsm, laptop, tv
   of box waarop Spotify actief is. Of ze speelt zelf af in de browser van de host («Dit toestel»), met de Web Playback
   SDK van Spotify; dan is er geen Spotify-app nodig.
+- **Het juiste nummer, nagekeken.** Spotify voert player-commando's niet gegarandeerd in volgorde uit, een toestel kan
+  «gelukt» antwoorden zonder over te schakelen, en een commando kan mislukken of pas laat aankomen. Dan speelde vroeger
+  het vorige nummer gewoon verder (met herhalen zelfs opnieuw van voren) terwijl het spel een nieuw verwachtte. Nu
+  (`web/src/lib/playback.js`):
+  - gaan alle commando's één voor één door één wachtrij; een commando van een vorige beurt dat nog wacht, vervalt en
+    komt dus nooit na het startcommando van een nieuwe beurt;
+  - kijkt het spel na het starten na wat er echt speelt (de Web API `GET /me/player` met `market=from_token`, of bij
+    *Dit toestel* de toestand van de speler in de browser) en vergelijkt dat met het verwachte nummer, ook als Spotify
+    een andere versie speelt («track relinking»: een ander track-ID, met het gevraagde in `linked_from`). Klopt het
+    niet, dan start het nog hoogstens twee keer opnieuw; bij storingen (502, 429, geen antwoord na 10 s) wacht het
+    even (bij 429 zo lang als Spotify vraagt, hoogstens 10 s);
+  - zet het, als het toch niet lukt, het verkeerde nummer stil en krijgt de host een waarschuwing met één knop
+    *Start het juiste nummer*. Die zegt nooit welk nummer er wel speelt;
+  - telt een nummer pas als gestart als dat bevestigd is (`mt.lastPlayed`); na een herlaad kijkt het spel één keer na
+    of het nog klopt, en ook als de host terugkomt op het scherm;
+  - gaat het herhalen («dit nummer») pas aan na een bevestigde start, en alleen voor dat nummer. Herhalen blijft: zonder
+    begint Spotify na afloop zelf iets anders (aanbevelingen), dat de spelers voor het nummer van de beurt kunnen
+    houden, terwijl het spel het vorige nummer nu herkent en rechtzet;
+  - volgt het bij *Dit toestel* de speler: verbindt Spotify hem opnieuw (soms met een ander id), dan speelt het spel
+    verder op het nieuwe id; meldt hij een ander nummer dan verwacht, dan herstelt het spel dat (hoogstens drie keer
+    per beurt). Valt hij langer dan 8 s weg, dan zet het spel hem stil en zegt het dat.
+  - Een beurt kost zo 4 verzoeken naar Spotify: starten, één controle, herhalen aan en een nacontrole na 8 s (voor een
+    commando dat Spotify pas laat uitvoert). Bij *Dit toestel* 2 (de controles vraagt het aan de speler zelf). Gaat er
+    iets mis, dan hoogstens een tiental. Ruim onder wat Spotify toelaat.
 - **Eigen playlist.** Kiest de host een eigen playlist, dan leest zijn browser de nummers bij Spotify, zoekt de
   jaartallen op bij MusicBrainz en stuurt de lijst naar de server. Die lijst blijft op de server; de andere spelers
   zien alleen de naam en het aantal nummers.
@@ -290,11 +314,14 @@ Een box of auto met een schermpje kan de titel ook tonen.
 | --- | --- |
 | Toestel niet in de lijst | Open de Spotify-app op dat toestel, speel even iets af en kom terug. Of kies *Dit toestel*. |
 | *Dit toestel* geeft geen geluid | Tik op *Opnieuw afspelen*. Na het herladen van de pagina eerst opnieuw op *Dit toestel* tikken. |
+| «Speelt niet het nummer van deze beurt» | Het toestel bleef bij een ander nummer (meestal het vorige), ook na een paar pogingen. Het spel zette het stil. Tik op *Start het juiste nummer*. Gebeurt het vaak met een box of tv, kies dan *Dit toestel* of een gsm/laptop aan de box. |
+| Het vorige nummer begint opnieuw | Het spel merkt dat nu zelf en start het juiste nummer. Gebeurt het toch, dan was de gsm van de host waarschijnlijk vergrendeld of de site stond op de achtergrond: dan kan de site Spotify niet aansturen tot je terug bent. Hou de site open op het scherm. |
 | «Spotify vindt het toestel niet» | Hetzelfde; tik daarna op *Opnieuw afspelen*. |
 | «Spotify weigert dit commando» | Geen Premium, of het account staat niet bij *User Management* van de app. |
 | Een nummer speelt niet af | *Ander nummer* (host): dezelfde speler krijgt een nieuw nummer. |
 | Iemand is even weg | *Sla beurt over* (host). |
-| Scherm was vergrendeld | Niets doen: de gsm herverbindt vanzelf. |
+| Scherm was vergrendeld | Niets doen: de gsm herverbindt vanzelf en kijkt na of het juiste nummer speelt. |
+| *Test het geluid* staat uit | Tijdens een spel zou de test het nummer van de beurt onderbreken: gebruik dan *Opnieuw afspelen*. |
 
 ## Nummers en jaartallen bijwerken
 
@@ -406,6 +433,12 @@ Gedekt, automatisch:
   foutmeldingen bij een verdwenen toestel of een account zonder Premium.
 - Afspelen op *Dit toestel* tegen een nagebootste Spotify-speler, en een eigen playlist tegen een nagebootste
   MusicBrainz: nummers lezen, jaartallen kiezen, twijfelgevallen verbeteren en ermee spelen.
+- Het juiste nummer door de boxen tegen een nagebootste Spotify die zich slecht gedraagt (`tests/e2e/playback.spec.js`):
+  een startcommando dat mislukt (502, 429), «gelukt» zonder over te schakelen, een commando dat pas laat uitgevoerd
+  wordt (omgekeerde volgorde), een toestel dat vast blijft hangen op het vorige nummer (waarschuwing zonder titel),
+  track relinking met en zonder `linked_from`, herladen terwijl er iets anders speelt, het aantal verzoeken per beurt,
+  en bij *Dit toestel*: een speler die opnieuw verbindt met een ander id, een vorig nummer dat opnieuw begint en een
+  herkansing van een vorig startcommando. De wachtrij en het vergelijken van nummers ook als unit-test.
 - De gedeelde jaartallen: een tweede host (ander toestel, ander spel) doet geen enkel verzoek naar MusicBrainz en krijgt
   de verbeteringen van de eerste; gasten en onbestaande spellen worden geweigerd; zonder die routes op de server (een
   oudere server, of onbereikbaar) werkt een playlist zoals vroeger. De verzonnen nummers krijgen bij elke run nieuwe
@@ -423,7 +456,8 @@ Gedekt, automatisch:
 
 Niet gedekt, alleen in het echt te testen:
 
-- Inloggen bij de echte Spotify en het echte afspelen op een toestel.
+- Inloggen bij de echte Spotify en het echte afspelen op een toestel; hoe snel een echte box of tv na een
+  startcommando overschakelt en wat ze dan meldt (de controle wacht tot ongeveer 5 s per poging).
 - De echte Spotify-speler in de browser (*Dit toestel*), zeker op een gsm.
 - Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.
 - De app echt installeren op Android en iPhone, en inloggen bij Spotify vanuit de geïnstalleerde app.

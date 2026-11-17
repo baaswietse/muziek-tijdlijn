@@ -7,6 +7,9 @@ import { randomBytes } from 'node:crypto';
 export const CORS = { 'access-control-allow-origin': '*' };
 
 // Nagebootste Web Playback SDK: maakt van de pagina een "toestel" sdk-dev-N.
+// Wat de speler speelt, volgt de nagebootste Web API (hieronder): de speler
+// vraagt die toestand regelmatig op, zoals de echte SDK ze via Spotify krijgt,
+// en meldt veranderingen met player_state_changed.
 const FAKE_SDK = `
   window.__sdkPlayers = [];
   window.Spotify = {
@@ -16,19 +19,49 @@ const FAKE_SDK = `
         this.listeners = {};
         this.activated = false;
         this.disconnected = false;
+        this.state = null;
         window.__sdkPlayers.push(this);
       }
       addListener(name, fn) { this.listeners[name] = fn; return true; }
+      emit(name, arg) { if (this.listeners[name]) this.listeners[name](arg); }
       activateElement() { this.activated = true; return Promise.resolve(); }
       connect() {
         const n = window.__sdkPlayers.length;
         this.options.getOAuthToken((token) => {
           this.token = token;
-          setTimeout(() => this.listeners.ready && this.listeners.ready({ device_id: 'sdk-dev-' + n }), 10);
+          setTimeout(() => { this.deviceId = 'sdk-dev-' + n; this.emit('ready', { device_id: this.deviceId }); }, 10);
         });
+        this.poll = setInterval(() => this.sync(), 100);
         return Promise.resolve(true);
       }
-      disconnect() { this.disconnected = true; }
+      async sync() {
+        if (this.disconnected || !this.deviceId) return;
+        let data = null;
+        try {
+          const res = await fetch('https://api.spotify.com/v1/me/player?fake_sdk=1');
+          data = res.status === 200 ? await res.json() : null;
+        } catch { return; }
+        const mine = data && data.device && data.device.id === this.deviceId && data.item;
+        const next = mine
+          ? { paused: !data.is_playing, position: data.progress_ms, track_window: { current_track: { id: data.item.id, uri: data.item.uri, linked_from: data.item.linked_from || { id: null, uri: null } } } }
+          : null;
+        const before = this.state;
+        this.state = next;
+        const changed = (before && before.track_window.current_track.id) !== (next && next.track_window.current_track.id)
+          || (before && before.paused) !== (next && next.paused)
+          || (before && next && next.position < before.position);
+        if (changed && next) this.emit('player_state_changed', next);
+      }
+      getCurrentState() { return Promise.resolve(this.state); }
+      pause() {
+        return fetch('https://api.spotify.com/v1/me/player/pause?fake_sdk=1&device_id=' + this.deviceId, { method: 'PUT' });
+      }
+      /** Test: de speler valt even weg en komt terug, met een ander id. */
+      reconnect(id) {
+        this.emit('not_ready', { device_id: this.deviceId });
+        setTimeout(() => { this.deviceId = id; this.emit('ready', { device_id: id }); }, 50);
+      }
+      disconnect() { this.disconnected = true; clearInterval(this.poll); }
     },
   };
   if (window.onSpotifyWebPlaybackSDKReady) window.onSpotifyWebPlaybackSDKReady();
@@ -43,8 +76,60 @@ export async function fakeSpotify(context) {
     devices: [{ id: 'dev-1', name: 'Gsm van de host', type: 'Smartphone', is_active: true, is_restricted: false }],
     playlists: [],
     playlistItems: {},
-    nextPlay: null, // { status, body } voor het eerstvolgende play-commando
+    nextPlay: null, // { status, body, headers } voor het eerstvolgende play-commando
     issued: 0,
+    // Wat er speelt: { trackId, deviceId, startedAt, pausedAt, repeat } of null.
+    player: null,
+    repeat: 'off',
+    // Slecht gedrag, om na te bootsen wat echte toestellen en Spotify soms doen:
+    bad: {
+      playFailures: [], // per play-commando om de beurt: { status, body, headers }
+      ignorePlays: 0, // zoveel play-commando's antwoorden «gelukt» zonder over te schakelen
+      applyDelays: [], // per play-commando: pas na zoveel ms uitvoeren (volgorde niet gegarandeerd)
+      responseDelays: [], // per play-commando: zo lang wachten met antwoorden
+      relink: {}, // track-ID -> { id, linked }: speelt een andere versie (met of zonder linked_from)
+      report: null, // meld altijd dit track-ID, wat er ook gevraagd werd (toestel hangt vast)
+    },
+  };
+
+  const now = () => Date.now();
+  const playing = () => spotify.player;
+  /** Voert een play-commando uit op het nagebootste toestel. */
+  function apply(trackId, deviceId, positionMs) {
+    spotify.player = { trackId, deviceId, startedAt: now() - positionMs, pausedAt: null };
+  }
+  /** Test: het nummer is ten einde. Met herhalen begint het opnieuw, anders is het gedaan. */
+  spotify.endTrack = () => {
+    const p = playing();
+    if (!p) return;
+    if (spotify.repeat === 'track') p.startedAt = now();
+    else spotify.player = null;
+  };
+  /** Test: wat het toestel nu echt speelt (zoals de spelers het horen). */
+  spotify.heard = () => {
+    const p = playing();
+    if (!p || p.pausedAt) return null;
+    return spotify.bad.report || spotify.bad.relink[p.trackId]?.id || p.trackId;
+  };
+  spotify.playerJson = () => {
+    const p = playing();
+    if (!p) return null;
+    const relink = spotify.bad.relink[p.trackId];
+    const id = spotify.bad.report || relink?.id || p.trackId;
+    return {
+      device: { id: p.deviceId, is_active: true },
+      is_playing: !p.pausedAt,
+      progress_ms: (p.pausedAt || now()) - p.startedAt,
+      repeat_state: spotify.repeat,
+      timestamp: p.startedAt,
+      item: {
+        type: 'track',
+        id,
+        uri: `spotify:track:${id}`,
+        name: 'Titel die nooit op het scherm mag',
+        ...(relink?.linked && !spotify.bad.report ? { linked_from: { id: p.trackId, uri: `spotify:track:${p.trackId}` } } : {}),
+      },
+    };
   };
 
   // Inloggen: Spotify stuurt de browser terug naar de redirect URI met een code.
@@ -89,7 +174,29 @@ export async function fakeSpotify(context) {
       body: req.postData() ? JSON.parse(req.postData()) : null,
       auth: req.headers()['authorization'],
     };
-    spotify.calls.push(call);
+    // De nagebootste SDK in de pagina vraagt zelf de toestand op: dat is geen verzoek van de site.
+    const fromSdk = url.searchParams.has('fake_sdk');
+    if (!fromSdk) spotify.calls.push(call);
+    if (call.path === '/me/player' && call.method === 'GET') {
+      const json = spotify.playerJson();
+      return json ? route.fulfill({ headers: CORS, json }) : route.fulfill({ status: 204, headers: CORS, body: '' });
+    }
+    if (call.path === '/me/player/repeat') {
+      spotify.repeat = call.query.state;
+      return route.fulfill({ status: 204, headers: CORS, body: '' });
+    }
+    if (call.path === '/me/player/pause') {
+      if (spotify.player && !spotify.player.pausedAt) spotify.player.pausedAt = now();
+      return route.fulfill({ status: 204, headers: CORS, body: '' });
+    }
+    if (call.path === '/me/player/play' && !call.body?.uris) {
+      const p = spotify.player;
+      if (p?.pausedAt) {
+        p.startedAt += now() - p.pausedAt;
+        p.pausedAt = null;
+      }
+      return route.fulfill({ status: 204, headers: CORS, body: '' });
+    }
     if (call.path === '/me/player/devices') {
       return route.fulfill({ headers: CORS, json: { devices: spotify.devices } });
     }
@@ -108,10 +215,25 @@ export async function fakeSpotify(context) {
       });
     }
     const isPlay = call.path === '/me/player/play' && call.body?.uris;
-    if (isPlay && spotify.nextPlay) {
-      const { status, body } = spotify.nextPlay;
-      spotify.nextPlay = null;
-      return route.fulfill({ status, headers: CORS, json: body });
+    if (isPlay) {
+      const bad = spotify.bad;
+      const wait = bad.responseDelays.shift() || 0;
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      const failure = spotify.nextPlay || bad.playFailures.shift();
+      if (spotify.nextPlay) spotify.nextPlay = null;
+      if (failure) {
+        return route
+          .fulfill({ status: failure.status, headers: { ...CORS, ...(failure.headers || {}) }, json: failure.body || { error: { status: failure.status, message: 'fout' } } })
+          .catch(() => {});
+      }
+      const trackId = call.body.uris[0].replace('spotify:track:', '');
+      const deviceId = call.query.device_id || spotify.player?.deviceId || spotify.devices[0]?.id;
+      const positionMs = call.body.position_ms || 0;
+      const later = bad.applyDelays.shift() || 0;
+      if (bad.ignorePlays > 0) bad.ignorePlays -= 1;
+      else if (later) setTimeout(() => apply(trackId, deviceId, positionMs), later);
+      else apply(trackId, deviceId, positionMs);
+      return route.fulfill({ status: 204, headers: CORS, body: '' }).catch(() => {});
     }
     return route.fulfill({ status: 204, headers: CORS, body: '' });
   });
