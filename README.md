@@ -179,6 +179,20 @@ zelf aan te zetten. Lukt dat niet (GitHub laat dat niet altijd toe aan een workf
      het spel niet (meer) of zit het vol, dan krijg je een melding en blijf je waar je was.
 5. **Host:** start het spel. Elke beurt begint het nummer vanzelf.
 
+### Als app op het beginscherm
+
+De site kan als app op je beginscherm, met een eigen icoon en zonder adresbalk.
+
+- **Android (Chrome):** open de site, tik op het menu (⋮) en kies *App installeren* of *Toevoegen aan startscherm*.
+- **iPhone (Safari):** open de site, tik op de deelknop en kies *Zet op beginscherm*.
+
+Goed om te weten:
+
+- Een QR-code scannen opent de browser, niet de app (op iPhone altijd). Spelers doen dus gewoon mee in de browser.
+- Op iPhone heeft de app een eigen geheugen, los van Safari: je naam, een lopend spel en de Spotify-login moet je er
+  opnieuw invullen of opnieuw doen.
+- Het loont vooral voor de host, die de site elke spelavond opent.
+
 ### Spelen met een eigen playlist
 
 In de wachtkamer kiest de host onder *Nummers* een van zijn Spotify-playlists. Spotify toont alleen playlists die hij
@@ -315,6 +329,8 @@ Gedekt, automatisch:
 - Afspelen op *Dit toestel* tegen een nagebootste Spotify-speler, en een eigen playlist tegen een nagebootste
   MusicBrainz: nummers lezen, jaartallen kiezen, twijfelgevallen verbeteren en ermee spelen.
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script).
+- Installeren als app: het manifest, de iconen (bestaan, PNG, juiste afmetingen), de meta's voor iOS, en dat Chromium
+  de site installeerbaar vindt. De iconen maak je opnieuw met `node tools/iconen.mjs`.
 - Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.
 
 Niet gedekt, alleen in het echt te testen:
@@ -322,3 +338,4 @@ Niet gedekt, alleen in het echt te testen:
 - Inloggen bij de echte Spotify en het echte afspelen op een toestel.
 - De echte Spotify-speler in de browser (*Dit toestel*), zeker op een gsm.
 - Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.
+- De app echt installeren op Android en iPhone, en inloggen bij Spotify vanuit de geïnstalleerde app.

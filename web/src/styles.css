@@ -119,7 +119,9 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+  /* Links en rechts: in liggende stand valt de rand anders onder de notch. */
+  padding: calc(10px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px
+    max(16px, env(safe-area-inset-left));
   background: var(--bg); /* voor browsers zonder color-mix() */
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   -webkit-backdrop-filter: blur(8px);
