@@ -225,6 +225,142 @@ test('decide: vroegste van Spotify en MusicBrainz, met twijfels', () => {
   assert.deepEqual(r.doubts, ['live-opname']);
 });
 
+// ---------------------------------------------------------------- remixes
+// Titels zoals Spotify en MusicBrainz ze echt schrijven (nagekeken in november 2026).
+
+test('remixParts: alleen uitdrukkelijke remix-woorden maken een remix', () => {
+  const remixes = {
+    'A Little Less Conversation - JXL Radio Edit Remix': ['A Little Less Conversation', 'JXL Radio Edit Remix'],
+    'Brimful of Asha - Norman Cook Remix Single Version': ['Brimful of Asha', 'Norman Cook Remix Single Version'],
+    'Roses - Imanbek Remix': ['Roses', 'Imanbek Remix'],
+    'Roses (Imanbek Remix)': ['Roses', 'Imanbek Remix'],
+    'Ignition - Remix': ['Ignition', 'Remix'],
+    'Titel (feat. Y) [X Remix]': ['Titel', 'X Remix'],
+    'Titel - X Remix - Radio Edit': ['Titel', 'X Remix'],
+    'Titel - X Remix (feat. Y)': ['Titel', 'X Remix'],
+    'Titel (X Remix) - 2011 Remaster': ['Titel', 'X Remix'],
+    'Titel - X Rmx': ['Titel', 'X Rmx'],
+    'Titel - X Re-Work': ['Titel', 'X Re-Work'],
+    'Titel (X Bootleg)': ['Titel', 'X Bootleg'],
+    'Titel - Mash-Up': ['Titel', 'Mash-Up'],
+    'Titel - X Refix': ['Titel', 'X Refix'],
+    'Titel (Remixed by X)': ['Titel', 'Remixed by X'],
+  };
+  for (const [raw, [base, remix]] of Object.entries(remixes)) {
+    assert.deepEqual(Y.remixParts(raw), { base, remix }, raw);
+    assert.equal(Y.isRemix(raw), true, raw);
+  }
+  for (const title of [
+    'Smalltown Boy - Extended Mix',
+    'Blue Monday - Club Mix',
+    'One More Time - Radio Edit',
+    'Help! - 2009 Stereo Mix',
+    'Heroes - Single Version',
+    'Something - Remastered 2011',
+    'Bohemian Rhapsody',
+    'Remix',
+    'Mixed Emotions',
+    'Remix to Ignition',
+  ]) {
+    assert.equal(Y.isRemix(title), false, title);
+  }
+});
+
+test('cleanTitle: de remix-aanduiding blijft, andere toevoegingen niet', () => {
+  assert.equal(Y.cleanTitle('Roses - Imanbek Remix'), 'Roses (Imanbek Remix)');
+  assert.equal(Y.cleanTitle('A Little Less Conversation - JXL Radio Edit Remix'), 'A Little Less Conversation (JXL Radio Edit Remix)');
+  assert.equal(Y.cleanTitle('Titel (feat. Y) [X Remix]'), 'Titel (X Remix)');
+  assert.equal(Y.cleanTitle('Smalltown Boy - Extended Mix'), 'Smalltown Boy');
+  assert.equal(Y.cleanTitle('One More Time - Radio Edit'), 'One More Time');
+  // Een remix en het origineel zijn geen dubbel.
+  assert.notEqual(Y.songKey('Roses - Imanbek Remix', ['SAINt JHN']), Y.songKey('Roses', ['SAINt JHN']));
+  assert.equal(Y.songKey('Roses - Imanbek Remix', ['SAINt JHN']), Y.songKey('Roses (Imanbek Remix)', ['SAINt JHN']));
+  assert.equal(Y.isLive('Titel (X Remix) - Live'), true);
+  assert.equal(Y.isLive('Roses - Imanbek Remix'), false);
+});
+
+test('titleMatches: een remix past alleen bij dezelfde remix', () => {
+  const jxl = Y.cleanTitle('A Little Less Conversation - JXL Radio Edit Remix');
+  assert.equal(Y.titleMatches('A Little Less Conversation (JXL radio edit remix)', jxl), true);
+  assert.equal(Y.titleMatches('A Little Less Conversation [JXL radio edit remix]', jxl), true);
+  assert.equal(Y.titleMatches('A Little Less Conversation (JXL remix)', jxl), true);
+  assert.equal(Y.titleMatches('A Little Less Conversation', jxl), false);
+  assert.equal(Y.titleMatches('A Little Less Conversation (vs JXL)', jxl), false);
+  assert.equal(Y.titleMatches('A Little Less Conversation (JXL radio edit remix) (Elvis vs JXL)', jxl), false);
+
+  const asha = Y.cleanTitle('Brimful of Asha - Norman Cook Remix Single Version');
+  assert.equal(Y.titleMatches('Brimful of Asha (Norman Cook remix)', asha), true);
+  assert.equal(Y.titleMatches('Brimful of Asha (The Norman Cook remix, single version)', asha), true);
+  assert.equal(Y.titleMatches('Brimful of Asha (Norman Cook remix extended version)', asha), false);
+  assert.equal(Y.titleMatches('Brimful of Asha (Norman Cook extended mix)', asha), false);
+  assert.equal(Y.titleMatches('Brimful of Asha', asha), false);
+
+  const ignition = Y.cleanTitle('Ignition - Remix');
+  assert.equal(Y.titleMatches('Ignition (remix)', ignition), true);
+  assert.equal(Y.titleMatches('Ignition - Remix', ignition), true);
+  assert.equal(Y.titleMatches('Ignition (remix) (album version)', ignition), true);
+  assert.equal(Y.titleMatches('Ignition (remix) (instrumental)', ignition), false);
+  assert.equal(Y.titleMatches('Ignition (Slang Tech remix)', ignition), false);
+  assert.equal(Y.titleMatches('Ignition', ignition), false);
+
+  const roses = Y.cleanTitle('Roses (feat. Iemand) [Imanbek Remix]');
+  assert.equal(Y.titleMatches('Roses (Imanbek remix)', roses), true);
+  assert.equal(Y.titleMatches('Roses (Imanbek remix radio edit)', Y.cleanTitle('Roses - Imanbek Remix - Radio Edit')), true);
+  assert.equal(Y.titleMatches('Roses (Remix by Imanbek)', roses), true);
+  assert.equal(Y.titleMatches('Roses (Andere remix)', roses), false);
+  assert.equal(Y.titleMatches('Roses', roses), false);
+
+  // Gewone nummers: zoals vroeger, ook als MusicBrainz een remix teruggeeft.
+  assert.equal(Y.titleMatches('Smalltown Boy (extended mix)', Y.cleanTitle('Smalltown Boy - Extended Mix')), true);
+  assert.equal(Y.titleMatches('Roses (Imanbek remix)', 'Roses'), true);
+});
+
+test('lookup: een remix zoekt de remix, niet het oudere origineel', async () => {
+  const calls = [];
+  // Zoals bij MusicBrainz: "Elvis Presley vs. JXL" als twee credits.
+  const remix = rec('A Little Less Conversation (JXL radio edit remix)', 'Elvis Presley', '2002-06-10', 'remix');
+  remix['artist-credit'] = [
+    { name: 'Elvis Presley', joinphrase: ' vs. ', artist: { name: 'Elvis Presley' } },
+    { name: 'JXL', artist: { name: 'Junkie XL' } },
+  ];
+  const search = async (query) => {
+    calls.push(query);
+    return {
+      recordings: [
+        rec('A Little Less Conversation', 'Elvis Presley', '1968', 'orig'),
+        rec('A Little Less Conversation (JXL remix)', 'Elvis Presley', '2007', 'later'),
+        remix,
+      ],
+      total: 3,
+    };
+  };
+  const found = await Y.lookup('A Little Less Conversation - JXL Radio Edit Remix', ['Elvis Presley', 'JXL'], search);
+  assert.deepEqual(found, { year: 2002, official: true, method: 'exact', mbid: 'remix' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], 'recording:"A Little Less Conversation" AND recording:(jxl AND remix) AND artist:"Elvis Presley"');
+});
+
+test('lookup en decide: een onbekende remix krijgt het jaar van het Spotify-album', async () => {
+  const calls = [];
+  const search = async (query) => {
+    calls.push(query);
+    return { recordings: [rec('Roses', 'SAINt JHN', '2016', 'orig'), rec('Roses (Imanbek remix)', 'SAINt JHN', '2019', 'imanbek')], total: 2 };
+  };
+  const title = 'Roses - Bestaat Niet Remix';
+  const mb = await Y.lookup(title, ['SAINt JHN'], search);
+  assert.equal(mb.year, null);
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].startsWith('recording:(Roses AND bestaat AND niet AND remix)'));
+
+  const r = Y.decide({ title, spotifyYear: 2021 }, mb);
+  assert.deepEqual([r.year, r.source], [2021, 'spotify']);
+  assert.deepEqual(r.doubts, ['remix niet gevonden bij MusicBrainz; jaar van het Spotify-album']);
+
+  // Gevonden: zoals bij elk nummer het vroegste van de twee, met twijfel bij meer dan een jaar verschil.
+  const found = Y.decide({ title: 'Roses - Imanbek Remix', spotifyYear: 2020 }, { year: 2019, official: true, method: 'exact' });
+  assert.deepEqual([found.year, found.source, found.doubts], [2019, 'musicbrainz', []]);
+});
+
 test('mbSearch: wacht tussen verzoeken, probeert opnieuw als de server bezet is en stopt op vraag', async () => {
   globalThis.__mtLookupInterval = 20;
   try {
