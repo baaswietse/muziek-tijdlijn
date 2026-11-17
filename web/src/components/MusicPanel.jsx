@@ -49,7 +49,7 @@ export function MusicPanel({ music }) {
         </button>
       </div>
 
-      <p class="label">Op welk toestel speelt de muziek?</p>
+      <p class="label">Op welk toestel speelt de muziek? Dit scherm maakt zelf geen geluid.</p>
       {devices === null ? (
         <p class="muted small">Toestellen zoeken…</p>
       ) : devices.length === 0 ? (
@@ -78,6 +78,12 @@ export function MusicPanel({ music }) {
             </li>
           ))}
         </ul>
+      )}
+      {devices && devices.length > 0 && (
+        <p class="muted small" data-testid="device-hint">
+          Staat je toestel er niet bij? Open er de Spotify-app, speel even een nummer af en kom terug: de lijst ververst
+          vanzelf. Kies alleen een toestel dat hier in de kamer staat.
+        </p>
       )}
       {music.device && devices && !devices.some((d) => d.id === music.device.id) && (
         <p class="notice">
