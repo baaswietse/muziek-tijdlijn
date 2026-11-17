@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Timeline, YearChips, slotLabel } from '../components/Timeline.jsx';
+import { step, useSlotDrag } from '../lib/drag.js';
 import { MusicPanel } from '../components/MusicPanel.jsx';
 import { Rules } from '../components/Rules.jsx';
 import { MockChip, NetBanner, NetDot } from '../components/Status.jsx';
@@ -23,6 +24,10 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
   const mine = byId.get(me);
   const myTurn = playing && activeId === me;
   const target = view.settings.target;
+
+  // Welke beurt dit is; blijft staan tijdens de onthulling (dan is er geen `turn`).
+  const turnNo = useRef(null);
+  if (view.turn) turnNo.current = `${view.game}:${view.turn.number}`;
 
   // Welk paneel open is: null, 'stand' of 'menu'.
   const [panel, setPanel] = useState(null);
@@ -107,16 +112,6 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
     name: b.playerId === me ? 'Jij' : byId.get(b.playerId)?.name ?? 'Iemand',
   }));
 
-  function choose(i) {
-    setPick(i);
-    send({ t: 'select', index: i });
-  }
-
-  function chooseBet(i) {
-    setBetPick(i);
-    setBetSend(null);
-  }
-
   function confirmBet() {
     if (betChoice === null || betSend === 'sending') return;
     // Lukt het versturen niet, dan blijft je keuze staan en zegt het scherm waarom.
@@ -186,45 +181,132 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
   if (mine && active?.id !== me) views.push({ id: me, label: 'Mijn tijdlijn', testid: 'view-mine' });
   if (shown && !views.some((v) => v.id === shown.id)) views.push({ id: shown.id, label: shown.name, testid: 'view-other' });
 
+  // Zelf iets leggen: je kaart op je eigen beurt, of je token in de tussenfase.
+  // Het stuk ligt eerst in de houder boven de zwevende balk en gaat met slepen
+  // of met de knoppen omhoog/omlaag naar een plaats op de tijdlijn die er staat.
+  const onActive = Boolean(shown) && shown.id === activeId;
+  const placeKind = myTurn && !placing && onActive ? 'card' : canBet && onActive ? 'token' : null;
+  const placeIndex = placeKind === 'card' ? pick : placeKind === 'token' ? betChoice : null;
+  const placeCards = active?.timeline ?? [];
+  const placeBlocked = placeKind === 'token' ? taken : null;
+  const placeName = (i) => (i === null ? 'in de houder' : slotLabel(placeCards, i));
+  const listRef = useRef(null);
+  // Na een tik op omhoog/omlaag: de focus blijft op die knop, ook al staat het
+  // stuk nu ergens anders, en het stuk blijft in beeld.
+  const refocus = useRef(null);
+  const [announce, setAnnounce] = useState('');
+
+  function moveTo(i) {
+    if (placeKind === 'card') {
+      setPick(i);
+      // De voorlopige keuze gaat naar de server, zodat de anderen zien waar je twijfelt.
+      send({ t: 'select', index: i });
+      setAnnounce(i === null ? 'De kaart ligt weer in de houder.' : `De kaart ligt nu ${placeName(i)}.`);
+    } else if (placeKind === 'token') {
+      setBetPick(i);
+      setBetSend(null);
+      setAnnounce(i === null ? 'Je token ligt weer in de houder.' : `Je token ligt nu ${placeName(i)}, nog niet ingezet.`);
+    }
+  }
+
+  function moveStep(dir) {
+    const next = step(placeIndex, dir, placeCards.length, placeBlocked);
+    if (next === undefined) return;
+    refocus.current = dir;
+    moveTo(next);
+  }
+
+  const drag = useSlotDrag({
+    listRef,
+    count: placeCards.length,
+    index: placeIndex,
+    blocked: placeBlocked,
+    enabled: Boolean(placeKind) && betSend !== 'sending',
+    onDrop: moveTo,
+    labelFor: placeName,
+    // Verandert de tijdlijn onder de vinger (nieuwe beurt, iemand zet in), dan stopt de sleep.
+    resetKey: `${turnKey}:${placeKind}:${placeCards.length}:${[...taken].join(',')}`,
+  });
+  // Verbinding weg: een lopende sleep stopt, de kaart gaat terug waar ze lag.
+  useEffect(() => {
+    if (net !== 'online') drag.cancel();
+  }, [net]);
+
+  useLayoutEffect(() => {
+    const dir = refocus.current;
+    if (!dir) return;
+    refocus.current = null;
+    const piece = document.querySelector('[data-testid="drag-card"], [data-testid="drag-token"]');
+    if (!piece) return;
+    const btn = piece.closest('[data-row], .holder')?.querySelector(`[data-testid="move-${dir}"]`);
+    (btn && !btn.disabled ? btn : piece).focus({ preventScroll: true });
+    // Tussen de bovenbalk en de zwevende balk houden.
+    const head = document.querySelector('.game-top')?.getBoundingClientRect().bottom ?? 0;
+    const room = window.innerHeight - barHeight();
+    const r = piece.getBoundingClientRect();
+    if (r.bottom > room - 8) window.scrollBy(0, r.bottom - room + 8);
+    else if (r.top < head + 8) window.scrollBy(0, r.top - head - 8);
+  });
+
+  const moveProps = {
+    upTo: placeKind ? step(placeIndex, 'up', placeCards.length, placeBlocked) : undefined,
+    downTo: placeKind ? step(placeIndex, 'down', placeCards.length, placeBlocked) : undefined,
+    name: placeName,
+    onStep: moveStep,
+    disabled: betSend === 'sending',
+  };
+  const piece = (where) =>
+    placeKind === 'card' ? (
+      <DragCard index={placeIndex} name={placeName} where={where} onPointerDown={drag.onPointerDown} move={moveProps} />
+    ) : (
+      <DragToken index={placeIndex} name={placeName} onPointerDown={drag.onPointerDown} move={moveProps} sending={betSend === 'sending'} />
+    );
+
   const timelineProps = { cards: shown?.timeline ?? [] };
-  if (shown && shown.id === activeId) {
+  if (onActive) {
     Object.assign(timelineProps, {
       testid: 'active-timeline',
-      pendingIndex: playing ? (myTurn ? pick : view.turn.pendingIndex) : challenge ? betChoice : null,
-      onPick: myTurn && !placing ? choose : canBet ? chooseBet : undefined,
+      pendingIndex: playing ? (myTurn ? pick : view.turn.pendingIndex) : null,
+      pendingText: myTurn ? 'Hier leg je het nummer' : `${active.name} twijfelt hier`,
       reveal: reveal && reveal.playerId === active.id ? reveal : undefined,
       lockedIndex: challenge ? view.turn.placedIndex : null,
       lockedText: `Hier legde ${activeId === me ? 'je' : active.name} het nummer`,
-      betPick: betChoice === null ? undefined : betPickProps(),
-      blocked: taken,
       marks,
     });
+    if (placeKind) {
+      timelineProps.place = {
+        listRef,
+        index: placeIndex,
+        row:
+          placeKind === 'card' ? (
+            <li key="pick" class="tl-pick-row" data-row data-pick data-slot={placeIndex} data-testid="pending-card">
+              {piece('timeline')}
+            </li>
+          ) : (
+            <BetPick key="pick" index={placeIndex} name={placeName} betSend={betSend} onConfirm={confirmBet}>
+              {piece('timeline')}
+            </BetPick>
+          ),
+      };
+    }
   } else if (shown) {
     timelineProps.testid = shown.id === me ? 'my-timeline' : 'other-timeline';
     timelineProps.freshId = reveal?.cardTo === shown.id ? reveal.card.id : null;
   }
 
-  function betPickProps() {
-    return {
-      state: betSend ?? 'picked',
-      title: betSend === 'sending' ? 'Token wordt ingezet…' : 'Nog niet ingezet',
-      hint: betSend === 'sending' ? 'Even geduld.' : 'Je token is pas ingezet als je op de knop tikt.',
-      action: (
-        <>
-          {(betSend === 'offline' || betSend === 'slow') && (
-            <p class="notice error" role="alert" data-testid="bet-error">
-              {betSend === 'offline'
-                ? 'Geen verbinding: je token is nog niet ingezet. Tik opnieuw zodra je weer verbonden bent.'
-                : 'Je token is nog niet ingezet: de server gaf geen antwoord. Tik opnieuw.'}
-            </p>
-          )}
-          <button type="button" class="btn primary big" onClick={confirmBet} disabled={betSend === 'sending'} data-testid="confirm-bet">
-            {betSend === 'sending' ? 'Even geduld…' : `Zet token ${slotLabel(active.timeline, betChoice)}`}
-          </button>
-        </>
-      ),
-    };
-  }
+  // De houder boven de knop in de zwevende balk: daar ligt het stuk zolang er
+  // geen plaats gekozen is, en daar sleep je het terug om niet te kiezen.
+  const holder = placeKind && (
+    <div class={`holder${placeIndex === null ? '' : ' empty'}`} ref={drag.holderRef} data-testid="card-holder">
+      {placeIndex === null ? (
+        piece('holder')
+      ) : (
+        <p class="holder-empty">
+          {placeKind === 'card' ? 'Sleep de kaart hierheen om opnieuw te kiezen' : 'Sleep je token hierheen om het niet in te zetten'}
+        </p>
+      )}
+    </div>
+  );
 
   // Van het menu naar de muziekinstellingen (bv. vanuit een melding op het scherm).
   function openSettings() {
@@ -284,6 +366,7 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
         tokens={myTokens}
         waitText={blocked && !waitInBar ? waitText : null}
         canContinue={canContinue}
+        holdKey={turnNo.current}
       >
         {myTurn && !placing && <BuyCard key={turnKey} tokens={myTokens} cards={mine.timeline.length} target={target} send={send} />}
         {challenge && isHost && blocked && (
@@ -413,7 +496,32 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
         </div>
       </Sheet>
 
-      {action && <ActionBar action={action} actionKey={`${action.kind}:${turnKey}`} />}
+      {action && <ActionBar action={action} actionKey={`${action.kind}:${turnKey}`} holder={holder} />}
+
+      {/* Wat je sleept: een kopie die de vinger volgt (verplaatst met transform). */}
+      {drag.ghost && (
+        <div
+          class={`drag-ghost${placeKind === 'token' ? ' token' : ''}`}
+          ref={drag.ghostRef}
+          style={{ left: `${drag.ghost.left}px`, top: `${drag.ghost.top}px`, width: `${drag.ghost.width}px`, height: `${drag.ghost.height}px` }}
+          data-testid="drag-ghost"
+          aria-hidden="true"
+        >
+          {placeKind === 'token' ? (
+            <>
+              <Coin /> Je token
+            </>
+          ) : (
+            <>
+              <span class="tl-year">?</span>
+              <span class="tl-title">Het nummer</span>
+            </>
+          )}
+        </div>
+      )}
+      <p class="visually-hidden" aria-live="polite" data-testid="announce">
+        {announce}
+      </p>
     </main>
   );
 }
@@ -451,7 +559,7 @@ function useHeightVar(ref, name, cls) {
  * gaat naar --bar-h, zodat de pagina erboven uit te scrollen is en meldingen
  * en de uitkomst erboven verschijnen.
  */
-function ActionBar({ action, actionKey }) {
+function ActionBar({ action, actionKey, holder }) {
   // Pas als de tijd voor deze knop om is, komt zijn sleutel hier terecht.
   const [readyKey, setReadyKey] = useState(null);
   const cooling = readyKey !== actionKey;
@@ -463,6 +571,7 @@ function ActionBar({ action, actionKey }) {
   useHeightVar(bar, '--bar-h', 'has-bar');
   return (
     <div class="confirm-bar" ref={bar} data-testid="action-bar" data-kind={action.kind}>
+      {holder}
       {action.note && (
         <p class="bar-note" data-testid="bar-note">
           <span data-testid="waiting-for" role="status">
@@ -639,7 +748,23 @@ function joinNames(names) {
  * Eén regel uitleg: wie aan de beurt is of wat jij nu moet doen, met hoogstens
  * één zin erbij. Wat echt uitleg is, staat in de spelregels (menu).
  */
-function Headline({ view, me, active, myTurn, nameOf, canBet, myBet, myPassed, slotsFull, tokens, waitText, canContinue, children }) {
+function Headline({ view, me, active, myTurn, nameOf, canBet, myBet, myPassed, slotsFull, tokens, waitText, canContinue, holdKey, children }) {
+  // Binnen één beurt wordt de uitleg nooit lager: zo schuift de tijdlijn
+  // eronder niet omhoog als de tekst bij de onthulling korter wordt (of de
+  // koopknop verdwijnt). Een nieuwe beurt begint weer op zijn eigen hoogte.
+  const box = useRef(null);
+  const held = useRef({ key: null, h: 0 });
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    if (held.current.key !== holdKey) {
+      held.current = { key: holdKey, h: 0 };
+      el.style.minHeight = '';
+    }
+    const h = el.offsetHeight;
+    if (h >= held.current.h) held.current.h = h;
+    else el.style.minHeight = `${held.current.h}px`;
+  });
   const phase = view.phase;
   const activeName = nameOf(active?.id);
   const who = activeName[0].toUpperCase() + activeName.slice(1);
@@ -653,7 +778,7 @@ function Headline({ view, me, active, myTurn, nameOf, canBet, myBet, myPassed, s
     testid = 'turn-banner';
     Object.assign(attrs, { 'data-active': active?.id, 'data-mine': myTurn ? 'yes' : 'no' });
     title = myTurn ? 'Jij bent aan de beurt' : `${who} is aan de beurt`;
-    line = myTurn ? 'Tik op de plaats waar dit nummer hoort.' : 'Luister mee. Waar zou jij het leggen?';
+    line = myTurn ? 'Sleep de kaart naar de plaats waar dit nummer hoort.' : 'Luister mee. Waar zou jij het leggen?';
   } else if (phase === 'challenge') {
     testid = 'challenge-banner';
     const waiting = view.turn.waiting ?? [];
@@ -675,7 +800,7 @@ function Headline({ view, me, active, myTurn, nameOf, canBet, myBet, myPassed, s
       line = <>Je zet deze beurt geen token in en houdt je {count}. {later}</>;
     } else if (canBet) {
       title = `Ligt ${activeName} fout?`;
-      line = <>Tik een andere plaats aan om een token in te zetten. Je hebt {count}.</>;
+      line = <>Sleep je token naar een andere plaats om in te zetten. Je hebt {count}.</>;
     } else if (slotsFull) {
       title = 'Even wachten';
       line = <>Alle andere plaatsen zijn al bezet. Je houdt je {count}. {later}</>;
@@ -691,7 +816,7 @@ function Headline({ view, me, active, myTurn, nameOf, canBet, myBet, myPassed, s
     line = view.you === view.hostId ? 'Start onderaan een nieuw spel.' : 'De host kan een nieuw spel starten.';
   }
   return (
-    <section class={`headline${myTurn ? ' mine' : ''}`} data-testid={testid} data-phase={phase} {...attrs}>
+    <section class={`headline${myTurn ? ' mine' : ''}`} ref={box} data-testid={testid} data-phase={phase} {...attrs}>
       <h1 class="headline-title">{title}</h1>
       <p class="headline-line">{line}</p>
       {children}
@@ -834,6 +959,137 @@ function MusicWrong({ music }) {
         Start het juiste nummer
       </button>
     </div>
+  );
+}
+
+/**
+ * Knoppen om het stuk één plaats hoger of lager te leggen: voor wie niet kan
+ * of wil slepen, met toetsenbord of schermlezer. Hun naam zegt waar het stuk
+ * dan komt ("Eén plaats hoger: tussen 1984 en 1991").
+ */
+function MoveButtons({ move }) {
+  const up = move.upTo;
+  const down = move.downTo;
+  return (
+    <span class="mv">
+      <button
+        type="button"
+        class="mv-btn"
+        onClick={() => move.onStep('up')}
+        disabled={move.disabled || up === undefined}
+        aria-label={up === undefined ? 'Kan niet hoger' : `Eén plaats hoger: ${move.name(up)}`}
+        data-testid="move-up"
+      >
+        <Chevron dir="up" />
+      </button>
+      <button
+        type="button"
+        class="mv-btn"
+        onClick={() => move.onStep('down')}
+        disabled={move.disabled || down === undefined}
+        aria-label={down === undefined ? 'Kan niet lager' : down === null ? 'Terug naar de houder' : `Eén plaats lager: ${move.name(down)}`}
+        data-testid="move-down"
+      >
+        <Chevron dir="down" />
+      </button>
+    </span>
+  );
+}
+
+/** Pijltjestoetsen op het stuk zelf doen hetzelfde als de knoppen. */
+function onArrows(move) {
+  return (e) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    move.onStep(e.key === 'ArrowUp' ? 'up' : 'down');
+  };
+}
+
+/** De onbekende kaart van deze beurt: in de houder of op een plaats. */
+function DragCard({ index, name, where, onPointerDown, move }) {
+  const placed = index !== null;
+  return (
+    <div
+      class="tl-card mystery mine drag-handle"
+      tabIndex={0}
+      role="group"
+      aria-roledescription="kaart om te slepen"
+      aria-label={placed ? `Het nummer, ligt ${name(index)}` : 'Het nummer, ligt nog in de houder'}
+      onPointerDown={onPointerDown}
+      onKeyDown={onArrows(move)}
+      data-testid="drag-card"
+      data-index={placed ? index : ''}
+      data-where={where}
+    >
+      <span class="tl-year">?</span>
+      <span class="tl-text">
+        <span class="tl-title">{placed ? `Hier, ${name(index)}` : 'Het nummer'}</span>
+        <span class="tl-artist">{placed ? 'Sleep om te verplaatsen' : 'Sleep naar je tijdlijn'}</span>
+      </span>
+      <MoveButtons move={move} />
+    </div>
+  );
+}
+
+function Coin() {
+  return <span class="coin" aria-hidden="true" />;
+}
+
+/** Je token in de tussenfase: in de houder of op een vrije plaats. */
+function DragToken({ index, name, onPointerDown, move, sending }) {
+  const placed = index !== null;
+  return (
+    <div class={`drag-token${placed ? ' placed' : ''}`}>
+      <div
+        class="drag-handle token-handle"
+        tabIndex={0}
+        role="group"
+        aria-roledescription="token om te slepen"
+        aria-label={placed ? `Je token, ligt ${name(index)}, nog niet ingezet` : 'Je token, ligt nog in de houder'}
+        onPointerDown={sending ? undefined : onPointerDown}
+        onKeyDown={onArrows(move)}
+        data-testid="drag-token"
+        data-index={placed ? index : ''}
+      >
+        <Coin />
+        <span class="tl-text">
+          <span class="tl-title">{placed ? (sending ? 'Token wordt ingezet…' : `Nog niet ingezet: ${name(index)}`) : 'Je token'}</span>
+          <span class="tl-artist">{placed ? (sending ? 'Even geduld.' : 'Je token is pas ingezet als je op de knop tikt.') : 'Sleep het naar een vrije plaats'}</span>
+        </span>
+      </div>
+      <MoveButtons move={move} />
+    </div>
+  );
+}
+
+/**
+ * Een neergelegd token, nog niet ingezet: ziet er bewust anders uit dan de
+ * vastgelegde kaart, met de knop om te bevestigen er meteen bij.
+ */
+function BetPick({ index, name, betSend, onConfirm, children }) {
+  return (
+    <li class="tl-pick" data-testid="bet-pick" data-state={betSend ?? 'picked'} data-row data-pick data-slot={index}>
+      <div class="tl-pick-head" data-testid="pending-card">
+        {children}
+      </div>
+      {(betSend === 'offline' || betSend === 'slow') && (
+        <p class="notice error" role="alert" data-testid="bet-error">
+          {betSend === 'offline'
+            ? 'Geen verbinding: je token is nog niet ingezet. Tik opnieuw zodra je weer verbonden bent.'
+            : 'Je token is nog niet ingezet: de server gaf geen antwoord. Tik opnieuw.'}
+        </p>
+      )}
+      <button
+        type="button"
+        class="btn primary big"
+        onClick={onConfirm}
+        disabled={betSend === 'sending'}
+        aria-label={betSend === 'sending' ? undefined : `Zet token hier, ${name(index)}`}
+        data-testid="confirm-bet"
+      >
+        {betSend === 'sending' ? 'Even geduld…' : 'Zet token hier'}
+      </button>
+    </li>
   );
 }
 

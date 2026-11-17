@@ -11,8 +11,9 @@ export const YEAR = new Map(TRACKS.map((t) => [t.id, t.year]));
  * Opent een eigen browsercontext (= een eigen gsm) in testmodus. Met `name`
  * kent die gsm al een naam van een vorig spel, zoals na een eerdere spelavond.
  */
-export async function openPhone(browser, { hash = '', name = '' } = {}) {
-  const context = await browser.newContext();
+export async function openPhone(browser, { hash = '', name = '', viewport = null, touch = false } = {}) {
+  // `touch`: een gsm met aanraakscherm (om met de vinger te slepen).
+  const context = await browser.newContext({ ...(viewport ? { viewport } : {}), ...(touch ? { hasTouch: true } : {}) });
   if (name) {
     await context.addInitScript((n) => {
       try {
@@ -122,12 +123,36 @@ export async function hostAction(page, testid) {
   await page.getByTestId(testid).click();
 }
 
+/** Huidige plaats van het sleepbare stuk (`drag-card` of `drag-token`); null = in de houder. */
+export async function pieceIndex(page, testid) {
+  const raw = await page.getByTestId(testid).getAttribute('data-index');
+  return raw === '' ? null : Number(raw);
+}
+
+/**
+ * Brengt het sleepbare stuk naar plaats `index` (null = terug naar de houder)
+ * met de knoppen omhoog/omlaag: de weg die ook werkt zonder slepen. Het slepen
+ * zelf testen de specs in drag.spec.js.
+ */
+async function stepTo(page, testid, index) {
+  for (let k = 0; k < 40; k++) {
+    const now = await pieceIndex(page, testid);
+    if (now === index) return;
+    const up = index !== null && (now === null || now > index);
+    const button = page.getByTestId(up ? 'move-up' : 'move-down');
+    await expect(button, `${testid} kan niet naar plaats ${index}`).toBeEnabled();
+    await button.click();
+    await expect(page.getByTestId(testid)).not.toHaveAttribute('data-index', now === null ? '' : String(now));
+  }
+  throw new Error(`${testid} raakte niet op plaats ${index}`);
+}
+
 /**
  * Wie aan de beurt is, legt de kaart (voorlopig) op plaats `index` van zijn
  * tijdlijn. Elke spec legt via deze ene weg.
  */
 export async function placeCard(page, index) {
-  await page.getByTestId(`slot-${index}`).click();
+  await stepTo(page, 'drag-card', index);
   await expect(page.getByTestId('active-timeline').getByTestId('pending-card')).toBeVisible();
 }
 
@@ -136,17 +161,25 @@ export async function placeCard(page, index) {
  * `index` van de tijdlijn van de speler aan beurt.
  */
 export async function placeToken(page, index) {
-  await page.getByTestId(`slot-${index}`).click();
+  await stepTo(page, 'drag-token', index);
   await expect(page.getByTestId('bet-pick')).toBeVisible();
 }
 
 /**
  * Plaatsen op de tijdlijn van de speler aan beurt waar je token nog heen kan
- * (leeg als je niet kan inzetten).
+ * (leeg als je niet kan inzetten). Loopt ze allemaal af met de knoppen en legt
+ * het token daarna terug in de houder.
  */
 export async function tokenTargets(page) {
-  const ids = await page.getByTestId('active-timeline').locator('.slot-btn').evaluateAll((els) => els.map((el) => el.dataset.testid));
-  return ids.map((id) => Number(id.replace('slot-', '')));
+  if ((await page.getByTestId('drag-token').count()) === 0) return [];
+  await stepTo(page, 'drag-token', null);
+  const seen = [];
+  while (await page.getByTestId('move-up').isEnabled()) {
+    await page.getByTestId('move-up').click();
+    seen.push(await pieceIndex(page, 'drag-token'));
+  }
+  await stepTo(page, 'drag-token', null);
+  return seen.sort((a, b) => a - b);
 }
 
 export async function activeYears(page) {
@@ -249,6 +282,43 @@ export async function playTurn({ pages, hostPage, ids, want = 'correct', playsSo
   }
   expect(await playCount(hostPage), 'het nummer start niet opnieuw bij de onthulling').toBe(playsSoFar + 1);
   return { activeId, activePage, trackId, year, correct: expectCorrect, cardsBefore: years.length, challenge };
+}
+
+/**
+ * De host slaat beurten over tot `playerId` aan de beurt is. `plays` is het
+ * aantal nummers dat de host al startte; geeft het nieuwe aantal terug.
+ */
+export async function skipTo(host, playerId, plays) {
+  for (let i = 0; i < 12; i++) {
+    await expect.poll(() => playCount(host)).toBe(plays);
+    if ((await host.getByTestId('turn-banner').getAttribute('data-active')) === playerId) return plays;
+    await hostAction(host, 'skip-turn');
+    plays++;
+  }
+  throw new Error(`${playerId} raakte niet aan de beurt`);
+}
+
+/**
+ * `player` speelt `turns` beurten juist (wie moet kiezen, past telkens; de host
+ * slaat de andere beurten over): daarna heeft hij `turns` kaarten meer. Geeft
+ * het aantal gestarte nummers terug.
+ */
+export async function collectCards({ host, player, pages }, turns, plays) {
+  const id = await myId(player);
+  for (let k = 0; k < turns; k++) {
+    plays = await skipTo(host, id, plays);
+    const year = YEAR.get(await lastPlayed(host));
+    await placeCard(player, correctSlot(await activeYears(player), year));
+    await player.getByTestId('confirm-place').click();
+    if (await othersHaveTokens(host, id)) {
+      await passWaiting(pages, player);
+      await player.getByTestId('reveal-now').click();
+    }
+    await expect(player.getByTestId('reveal')).toHaveAttribute('data-correct', 'yes');
+    await player.getByTestId('next-turn').click();
+    plays++;
+  }
+  return plays;
 }
 
 /**

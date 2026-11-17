@@ -14,7 +14,7 @@ import {
   hostAction,
   placeCard,
   placeToken,
-  passWaiting,
+  collectCards,
 } from './helpers.js';
 
 // De hoofdknop van de beurt ("Leg het …", "Onthul", "Volgende beurt", en voor
@@ -189,37 +189,12 @@ test('hoofdknop: een melding verschijnt boven de balk en bedekt de knop niet', a
   for (const p of pages) await p.context().close();
 });
 
-/**
- * Bob speelt `turns` beurten juist (Hanne past telkens, de host slaat haar
- * eigen beurten over): daarna heeft hij `turns` kaarten meer. Geeft het aantal
- * gestarte nummers terug.
- */
-async function bobCollects({ host, bob, ids, pages }, turns, plays) {
-  for (let k = 0; k < turns; k++) {
-    for (let i = 0; i < 3; i++) {
-      await expect.poll(() => playCount(host)).toBe(plays);
-      if ((await host.getByTestId('turn-banner').getAttribute('data-active')) === ids[1]) break;
-      await hostAction(host, 'skip-turn');
-      plays++;
-    }
-    const year = YEAR.get(await lastPlayed(host));
-    await placeCard(bob, correctSlot(await activeYears(bob), year));
-    await bob.getByTestId('confirm-place').click();
-    await passWaiting(pages, bob);
-    await bob.getByTestId('reveal-now').click();
-    await expect(bob.getByTestId('reveal')).toHaveAttribute('data-correct', 'yes');
-    await bob.getByTestId('next-turn').click();
-    plays++;
-  }
-  return plays;
-}
-
 test('klein scherm (390×600) met 9 kaarten: elke verplichte knop staat in beeld, voor elke rol en fase', async ({ browser }) => {
   test.setTimeout(240_000);
   const size = { width: 390, height: 600 };
   const { pages, host, bob, ids } = await phonesWithBob(browser, ['Hanne', 'Bob'], size);
   // Bob verzamelt 9 kaarten (het doel is 10), daarna stapt Cas nog in.
-  let plays = await bobCollects({ host, bob, ids, pages }, 8, await playCount(host));
+  let plays = await collectCards({ host, player: bob, pages }, 8, await playCount(host));
   const cas = await openPhone(browser);
   await cas.setViewportSize(size);
   await cas.getByTestId('code-input').fill(await host.getByTestId('room-code').textContent());

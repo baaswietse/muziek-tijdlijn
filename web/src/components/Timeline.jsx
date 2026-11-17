@@ -1,5 +1,5 @@
-// Een tijdlijn: kaarten van oud (boven) naar nieuw (onder). Is het jouw beurt,
-// dan staan er tussen de kaarten plaatsen waar je het nummer kan leggen.
+// Een tijdlijn: kaarten van oud (boven) naar nieuw (onder). Er staan alleen
+// kaarten op; wie een kaart of token legt, sleept die erin (zie lib/drag.js).
 
 export function slotLabel(cards, i) {
   if (cards.length === 0) return 'hier';
@@ -8,9 +8,13 @@ export function slotLabel(cards, i) {
   return `tussen ${cards[i - 1].year} en ${cards[i].year}`;
 }
 
-function CardRow({ card, fresh }) {
+// Vanaf zoveel kaarten wordt alles compacter, zodat 9 à 10 kaarten zo goed als
+// op één scherm passen.
+const COMPACT_FROM = 6;
+
+function CardRow({ card, index, fresh }) {
   return (
-    <li class={`tl-card${fresh ? ' fresh' : ''}`} data-year={card.year} data-track={card.id}>
+    <li class={`tl-card${fresh ? ' fresh' : ''}`} data-row data-card={index} data-year={card.year} data-track={card.id}>
       <span class="tl-year">{card.year}</span>
       <span class="tl-text">
         <span class="tl-title">{card.title}</span>
@@ -20,32 +24,13 @@ function CardRow({ card, fresh }) {
   );
 }
 
-function Mystery({ own, text, testid = 'pending-card' }) {
+function Mystery({ text, testid = 'pending-card', slot }) {
   return (
-    <li class="tl-card mystery" data-testid={testid}>
+    <li class="tl-card mystery" data-testid={testid} data-row data-slot={slot}>
       <span class="tl-year">?</span>
       <span class="tl-text">
-        <span class="tl-title">{text ?? (own ? 'Hier leg je het nummer' : 'Hier komt het nummer…')}</span>
+        <span class="tl-title">{text}</span>
       </span>
-    </li>
-  );
-}
-
-/**
- * Een aangetikte plaats voor een token, nog niet ingezet: ziet er bewust anders
- * uit dan de vastgelegde kaart, met de knop om te bevestigen er meteen onder.
- */
-function BetPick({ pick }) {
-  return (
-    <li class="tl-pick" data-testid="bet-pick" data-state={pick.state}>
-      <span class="tl-pick-head" data-testid="pending-card">
-        <span class="tl-pick-mark" aria-hidden="true">?</span>
-        <span class="tl-text">
-          <span class="tl-title">{pick.title}</span>
-          <span class="tl-artist">{pick.hint}</span>
-        </span>
-      </span>
-      {pick.action}
     </li>
   );
 }
@@ -55,7 +40,7 @@ function BetMark({ mark }) {
   const verdict = mark.correct === undefined ? '' : mark.correct ? ' — juist' : ' — fout';
   const state = mark.correct === undefined ? '' : mark.correct ? ' good' : ' bad';
   return (
-    <li class={`tl-bet${state}`} data-testid="bet-mark" data-player={mark.playerId} data-index={mark.index}>
+    <li class={`tl-bet${state}`} data-testid="bet-mark" data-player={mark.playerId} data-index={mark.index} data-row data-slot={mark.index}>
       Token van {mark.name}
       {verdict}
     </li>
@@ -65,35 +50,35 @@ function BetMark({ mark }) {
 /**
  * @param {object} props
  * @param {Array} props.cards        kaarten, al gesorteerd op jaar
- * @param {number|null} props.pendingIndex  plaats die nu aangeduid is
- * @param {Function} [props.onPick]  aanwezig = plaatsen aanklikbaar (jouw beurt of een token inzetten)
+ * @param {string} [props.testid]
+ * @param {number|null} [props.pendingIndex]  waar de speler aan beurt twijfelt (bij de anderen)
+ * @param {string} [props.pendingText]
  * @param {object} [props.reveal]    net onthulde kaart { card, index, correct }
  * @param {number|null} [props.lockedIndex]  vastgelegde plaats van de speler aan beurt (tussenfase)
  * @param {Array} [props.marks]      ingezette tokens { playerId, index, name, correct? }
- * @param {Set} [props.blocked]      plaatsen die niet meer gekozen kunnen worden
  * @param {string} [props.freshId]   kaart die er net bij kwam (via een token)
- * @param {object} [props.betPick]   aangetikte plaats voor een token: { state, title, hint, action }
+ * @param {object} [props.place]     wie hier zelf iets legt: { index, row, listRef } — `row`
+ *                                   is de eigen keuze (een <li data-pick>) op plaats `index`
  */
 export function Timeline({
   cards,
-  pendingIndex = null,
-  onPick,
-  reveal,
   testid,
+  pendingIndex = null,
+  pendingText = 'Hier komt het nummer…',
+  reveal,
   lockedIndex = null,
   lockedText,
   marks = [],
-  blocked,
   freshId = null,
-  betPick,
+  place,
 }) {
   const rows = [];
   for (let i = 0; i <= cards.length; i++) {
-    if (lockedIndex === i) rows.push(<Mystery key={`l${i}`} text={lockedText} testid="placed-card" />);
+    if (lockedIndex === i) rows.push(<Mystery key={`l${i}`} text={lockedText} testid="placed-card" slot={i} />);
     for (const m of marks) if (m.index === i) rows.push(<BetMark key={`b${m.playerId}`} mark={m} />);
     if (reveal && !reveal.correct && reveal.index === i) {
       rows.push(
-        <li class="tl-card wrong" key="wrong" data-testid="wrong-card">
+        <li class="tl-card wrong" key="wrong" data-testid="wrong-card" data-row data-slot={i}>
           <span class="tl-year">{reveal.card.year}</span>
           <span class="tl-text">
             <span class="tl-title">{reveal.card.title}</span>
@@ -102,32 +87,20 @@ export function Timeline({
         </li>,
       );
     }
-    if (blocked?.has(i)) {
-      // Bezet: geen knop, de vastgelegde kaart of een naam staat er al.
-    } else if (onPick) {
-      rows.push(
-        pendingIndex === i ? (
-          betPick ? <BetPick key={`p${i}`} pick={betPick} /> : <Mystery key={`m${i}`} own />
-        ) : (
-          <li class="tl-slot" key={`s${i}`}>
-            <button type="button" class="slot-btn" data-testid={`slot-${i}`} onClick={() => onPick(i)}>
-              <span class="slot-plus" aria-hidden="true">+</span>
-              {slotLabel(cards, i)}
-            </button>
-          </li>
-        ),
-      );
-    } else if (pendingIndex === i) {
-      rows.push(<Mystery key={`m${i}`} />);
-    }
+    if (place && place.index === i) rows.push(place.row);
+    else if (!place && pendingIndex === i) rows.push(<Mystery key={`m${i}`} text={pendingText} slot={i} />);
     if (i < cards.length) {
       const card = cards[i];
-      rows.push(<CardRow key={card.id} card={card} fresh={Boolean((reveal?.correct && reveal.card.id === card.id) || freshId === card.id)} />);
+      rows.push(
+        <CardRow key={card.id} card={card} index={i} fresh={Boolean((reveal?.correct && reveal.card.id === card.id) || freshId === card.id)} />,
+      );
     }
   }
   return (
-    <ol class="timeline" data-testid={testid}>
+    <ol class={`timeline${cards.length >= COMPACT_FROM ? ' compact' : ''}`} data-testid={testid} ref={place?.listRef}>
       {rows}
+      {/* Tijdens het slepen: waar de kaart zou landen (plaats en grootte zet lib/drag.js). */}
+      {place && <li class="tl-drop" aria-hidden="true" />}
     </ol>
   );
 }

@@ -64,8 +64,16 @@ Details:
   krijgt. De tijdlijn eronder verspringt niet; de nieuwe kaart staat er gemarkeerd in. Veeg het paneel naar onder of
   tik op *Verberg* om de tijdlijnen te bekijken; de strook die overblijft opent het weer. Bij de volgende beurt
   verdwijnt het vanzelf.
-- Inzetten gaat in twee stappen: een plaats aantikken zet nog niets in (daar staat "Nog niet ingezet"), pas de knop
-  *Zet token …* bij die plaats doet het. Daarna zie je meteen hoeveel tokens je nog hebt. Lukt het versturen niet
+- Leggen gaat door te slepen: bij het begin van je beurt ligt de kaart met het vraagteken in een houder net boven de
+  zwevende balk. Sleep ze in je tijdlijn: de kaarten schuiven uit elkaar waar ze zou landen. Loslaten legt ze daar
+  als voorlopige keuze (pas dan gaat die naar de server, zodat de anderen zien waar je twijfelt); opnieuw slepen
+  verplaatst ze, terug naar de houder slepen maakt de keuze ongedaan, en *Leg het …* in de balk bevestigt. Sleep je
+  tot bij de boven- of onderrand, dan schuift de tijdlijn mee; bij veel kaarten worden ze compacter. Zonder slepen
+  kan het ook: de knoppen omhoog/omlaag op de kaart (of de pijltjestoetsen) schuiven ze één plaats op, en elke plaats
+  heeft een naam voor schermlezers ("tussen 1984 en 1991"). Een afgebroken gebaar (scherm gedraaid, verbinding weg,
+  beurt voorbij) legt de kaart terug waar ze lag.
+- Inzetten gaat in twee stappen: je token naar een vrije plaats slepen zet nog niets in (daar staat "Nog niet
+  ingezet"; een bezette plaats neemt het token niet aan), pas de knop *Zet token hier* bij het token doet het. Daarna zie je meteen hoeveel tokens je nog hebt. Lukt het versturen niet
   (geen verbinding, of geen antwoord binnen enkele seconden), dan blijft je keuze staan en zegt het scherm dat je token
   nog niet ingezet is. Wordt er onthuld voor je bevestigde, dan zegt je scherm dat je token niet ingezet is en dat je
   het nog hebt (dat kan alleen nog na de noodknop van de host, of als je verbinding wegviel).
@@ -435,11 +443,17 @@ Gedekt, automatisch:
 - Tokens met drie browsers: geven, verplaatsen, opeisen en terugnemen, wie de knoppen ziet, tellers over beurten heen
   en na herverbinden, 2 tokens bij de start en weer 2 bij een nieuw spel, en een token inzetten (gewonnen en verloren,
   alle plaatsen bezet, zonder lek van het antwoord), en meteen onthullen zodra de anderen hun tokens op hebben. Ook
-  dat een aangetikte maar niet bevestigde plaats niets kost en dat het scherm dat zegt, dat de bevestigknop op een
+  dat een gekozen maar niet bevestigde plaats niets kost en dat het scherm dat zegt, dat de bevestigknop op een
   kleine gsm (390×600) in beeld en niet bedekt is, en wat je ziet als bevestigen mislukt (geen verbinding, of een
   verbinding die niets doorlaat). En dat *Onthul* uit blijft tot iedereen met een token koos (passen of inzetten), dat
   wie wegvalt niets blokkeert maar na zijn terugkeer weer moet kiezen, en de noodknop van de host. En een kaart kopen:
   een derde token verdienen, kopen in twee stappen, wat iedereen dan ziet, en niet voor de laatste kaart.
+- Slepen, met de muis en met de vinger (touch): de kaart van de houder naar een plaats, verplaatsen, terug naar de
+  houder, de kaarten die plaats maken, automatisch meeschuiven op een lange tijdlijn, en afgebroken gebaren
+  (`pointercancel`, scherm gedraaid, verbinding weg, beurt voorbij); de knoppen omhoog/omlaag en de pijltjestoetsen
+  met hun namen; een token slepen (niet op een bezette plaats) en bevestigen; dat de keuze pas bij het loslaten
+  naar de server gaat. De onthulling als paneel (de tijdlijn verspringt niet, wegvegen en weer openen, weg bij de
+  volgende beurt) en de stand en het menu openen en sluiten.
 - De zwevende balk: *Leg het*, *Onthul* en *Volgende beurt* op exact dezelfde plek, een dubbele tik doet geen twee
   stappen, een melding bedekt de knop niet, en op een kleine gsm (390×600) met 9 kaarten staat elke verplichte knop
   voor elke rol en fase in beeld, net als de uitkomst na de onthulling.
@@ -481,5 +495,7 @@ Niet gedekt, alleen in het echt te testen:
 - Inloggen bij de echte Spotify en het echte afspelen op een toestel; hoe snel een echte box of tv na een
   startcommando overschakelt en wat ze dan meldt (de controle wacht tot ongeveer 5 s per poging).
 - De echte Spotify-speler in de browser (*Dit toestel*), zeker op een gsm.
+- Slepen op een echte gsm: de tests slepen met een nagebootste muis en vinger in Chromium. Hoe het aanvoelt (vlot,
+  of het scrollen ernaast goed blijft werken) en het gedrag van Safari op iPhone zijn alleen in het echt te zien.
 - Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.
 - De app echt installeren op Android en iPhone, en inloggen bij Spotify vanuit de geïnstalleerde app.

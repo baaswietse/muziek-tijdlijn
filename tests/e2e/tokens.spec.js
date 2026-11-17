@@ -336,7 +336,7 @@ test('token inzetten: gewonnen bij een foute speler, verloren bij een juiste, al
   // De vastgelegde plaats kan je niet kiezen; de andere wel.
   expect(await tokenTargets(betterPage)).toEqual([0, 1].filter((i) => i !== wrong));
 
-  // Tweestaps: aantikken kost nog niets, pas bevestigen zet het token in.
+  // Tweestaps: het token neerleggen kost nog niets, pas bevestigen zet het in.
   const right = rightSlot(t1.years, t1.year);
   await placeToken(betterPage, right);
   await expect(betterPage.getByTestId('pending-card')).toBeVisible();
@@ -471,7 +471,7 @@ test('zonder tokens bij de anderen: meteen onthullen, ook al heeft de speler aan
 
 // ---- Inzetten moet ondubbelzinnig zijn ----
 // Een speler mag nooit denken dat hij een token inzette terwijl dat niet zo is:
-// aantikken alleen zet niets in, een mislukte bevestiging zegt dat, en na de
+// neerleggen alleen zet niets in, een mislukte bevestiging zegt dat, en na de
 // onthulling hoort hij dat hij zijn token nog heeft.
 
 /** Ligt de knop zelf bovenaan op zijn middelpunt (geen balk of melding erover)? */
@@ -514,13 +514,13 @@ async function hanneBetsOnBob(browser, { beforeChallenge } = {}) {
   return { host, bob, pages, ids, hanne, bobId, counts, turn, wrong };
 }
 
-test('token inzetten: aangetikt is nog niet ingezet, de knop staat bij de plaats en na de onthulling hoor je dat je token er nog is', async ({ browser }) => {
+test('token inzetten: neergelegd is nog niet ingezet, de knop staat bij de plaats en na de onthulling hoor je dat je token er nog is', async ({ browser }) => {
   const { host, bob, pages, counts, turn, wrong } = await hanneBetsOnBob(browser);
   // Een kleine gsm: ook dan staat de bevestigknop in beeld.
   await host.setViewportSize({ width: 390, height: 600 });
   await placeToken(host, wrong);
 
-  // De aangetikte plaats zegt dat er nog niets ingezet is en ziet er anders
+  // Het neergelegde token zegt dat er nog niets ingezet is en ziet er anders
   // uit dan de kaart die Bob vastlegde.
   const pick = host.getByTestId('bet-pick');
   await expect(pick).toContainText('Nog niet ingezet');
@@ -530,7 +530,8 @@ test('token inzetten: aangetikt is nog niet ingezet, de knop staat bij de plaats
   const button = pick.getByTestId('confirm-bet');
   await expect(button).toBeInViewport({ ratio: 1 });
   expect(await onTop(button)).toBe(true);
-  await expect(button).toHaveText(/^Zet token (vóór|na) \d{4}$/);
+  await expect(button).toHaveText('Zet token hier');
+  await expect(pick).toContainText(/Nog niet ingezet: (vóór|na) \d{4}/);
   // Aantikken kost niets.
   await expectTokens(pages, counts);
   await expect(host.getByTestId('my-tokens')).toHaveText('2 tokens');
@@ -709,7 +710,7 @@ test('kiezen: Onthul blijft uit tot iedereen koos; passen en inzetten tellen all
   await expect(bob.getByTestId('waiting-for')).toHaveText(/^Nog wachten op (Hanne en Cas|Cas en Hanne)\.$/);
   await expect(bob.getByTestId('challenge-banner')).toContainText('Onthullen kan zodra iedereen koos');
   await expect(cas.getByTestId('waiting-for')).toHaveText(/^Nog wachten op (Hanne en jou|jou en Hanne)\.$/);
-  // Wie moet kiezen, heeft de twee mogelijkheden: een plaats aantikken of passen.
+  // Wie moet kiezen, heeft de twee mogelijkheden: een plaats kiezen of passen.
   for (const p of [host, cas]) {
     await expect(p.getByTestId('challenge-banner')).toHaveAttribute('data-must-choose', 'yes');
     await expect(p.getByTestId('pass-bet')).toBeVisible();

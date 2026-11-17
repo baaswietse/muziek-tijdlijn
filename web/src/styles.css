@@ -317,7 +317,7 @@ h2 {
   line-height: 1;
 }
 
-:is(.btn, .tab, .slot-btn, .device, .board-head, .guess-btn, .input, summary, a):focus-visible {
+:is(.btn, .tab, .device, .board-head, .guess-btn, .input, summary, a):focus-visible {
   outline: 3px solid var(--amber);
   outline-offset: 2px;
 }
@@ -1086,10 +1086,6 @@ details ul {
   }
 }
 
-.tl-slot {
-  display: flex;
-}
-
 /* Een gekozen plaats voor een token, nog niet bevestigd: in de kleur van de
    keuzes (niet amber zoals de vastgelegde kaart), met de knop erbij. */
 .tl-pick {
@@ -1164,35 +1160,214 @@ details ul {
   color: var(--bad);
 }
 
-.slot-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 8px 12px;
-  border: 2px dashed var(--accent);
-  border-radius: 12px;
-  background: transparent;
+/* ---------- slepen ---------- */
+
+/* Het stuk dat je sleept (je kaart, je token): de vinger schuift hier de pagina
+   niet, overal elders wel. */
+.drag-handle {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  cursor: grab;
+}
+
+html.dragging,
+html.dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Je eigen kaart: in de kleur van de keuzes, niet amber zoals bij de anderen. */
+.tl-card.mine {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+  padding-right: 6px;
+}
+
+.tl-card.mine .tl-year {
   color: var(--accent);
-  font-weight: 700;
+}
+
+.tl-pick-row {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Omhoog/omlaag: voor wie niet sleept (toetsenbord, schermlezer, of het lukt niet). */
+.mv {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.mv-btn {
+  appearance: none;
+  width: 40px;
+  height: 40px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
   cursor: pointer;
   touch-action: manipulation;
 }
 
-.slot-btn:active {
-  background: var(--accent-soft);
+.mv-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
-.slot-plus {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
+.compact .mv-btn {
+  width: 38px;
+  height: 36px;
+}
+
+/* De houder boven de knop in de zwevende balk. */
+.holder {
+  --row-h: 56px;
+  margin-bottom: 10px;
+}
+
+.holder .tl-card::before {
+  display: none;
+}
+
+.holder-empty {
+  height: var(--row-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.holder.target .holder-empty,
+.holder.target > .drag-token,
+.holder.target > .tl-card {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.holder .lifted {
+  opacity: 0.35;
+}
+
+/* Je token. */
+.drag-token {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  padding: 0 6px 0 12px;
+  border: 2px solid var(--amber);
+  border-radius: 12px;
+  background: var(--amber-soft);
+  color: var(--ink);
+}
+
+.drag-token.placed {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.token-handle {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.token-handle .tl-title,
+.token-handle .tl-artist {
+  white-space: normal;
+}
+
+.coin {
+  flex: none;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-ink);
-  line-height: 1;
+  background: var(--amber);
+  box-shadow: inset 0 0 0 3px rgb(0 0 0 / 14%), inset 0 0 0 7px var(--amber), inset 0 0 0 8px rgb(0 0 0 / 14%);
+}
+
+/* De kopie die de vinger volgt. */
+.drag-ghost {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 22%);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.drag-ghost .tl-year {
+  color: var(--accent);
+}
+
+.drag-ghost.token {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  gap: 10px;
+}
+
+/* Tijdens het slepen schuiven de kaarten uit elkaar (alleen transform). */
+.timeline.is-dragging > [data-row] {
+  transition: transform 0.15s ease;
+}
+
+.tl-pick-row.lifted,
+.tl-pick.lifted {
+  visibility: hidden;
+}
+
+.tl-drop {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  color: var(--accent);
+  font-size: 0.875rem;
+  font-weight: 700;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tl-drop.on {
+  opacity: 1;
+}
+
+.is-dragging .tl-drop {
+  transition: transform 0.15s ease, opacity 0.1s ease;
 }
 
 .confirm-bar {
