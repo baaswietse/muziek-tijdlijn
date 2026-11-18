@@ -107,7 +107,8 @@ test('gedeelde jaartallen: een tweede host zoekt niets opnieuw op en krijgt de v
   await a.page.getByTestId(`doubt-${id('G1')}`).blur();
   await expect.poll(() => a.years.writes.length).toBe(2);
   expect(a.years.writes[1].status).toBe(200);
-  expect(a.years.writes[1].body.entries).toEqual([{ id: id('G1'), y: 1983, s: 'handmatig', d: [] }]);
+  // Met titel en artiest (om de lijst te kunnen nakijken).
+  expect(a.years.writes[1].body.entries).toEqual([{ id: id('G1'), y: 1983, s: 'handmatig', d: [], title: 'Gedeeld Een', artist: 'Band G' }]);
 
   // --- host B: ander toestel, ander spel, dezelfde playlist ---
   const b = await newHost(browser, items);
@@ -115,8 +116,9 @@ test('gedeelde jaartallen: een tweede host zoekt niets opnieuw op en krijgt de v
   await choosePlaylist(b.page);
   expect(b.mb.queries, 'host B doet geen enkel verzoek naar MusicBrainz').toHaveLength(0);
   expect(yearsOf(b.decks[0])).toEqual({ ...yearsA, [id('G1')]: 1983 });
-  // De verbetering staat apart gemarkeerd op de server.
-  expect(b.years.lookups[0].response.years[id('G1')]).toEqual({ y: 1983, s: 'handmatig', d: [] });
+  // De verbetering staat apart gemarkeerd op de server (met wat de bronnen toen zeiden;
+  // Wikidata is hier niet bereikbaar).
+  expect(b.years.lookups[0].response.years[id('G1')]).toEqual({ y: 1983, s: 'handmatig', d: [], b: { sp: 1990, mb: 1984 }, named: true });
   // De twijfel bij het niet gevonden nummer komt mee van de server en wordt getoond.
   const doubtsB = b.page.getByTestId('deck-doubts');
   await expect(doubtsB).toContainText('1 jaartal om na te kijken');
@@ -163,7 +165,7 @@ test('gedeelde jaartallen: een tweede host zoekt niets opnieuw op en krijgt de v
   const check = await postFrom(a.page, `${base}/api/rooms/${a.code}/years/lookup`, { token: hostToken, ids });
   expect(check.status).toBe(200);
   expect(check.body.years[id('G2')]).toMatchObject({ y: 2003, s: 'spotify' });
-  expect(check.body.years[id('G1')]).toEqual({ y: 1983, s: 'handmatig', d: [] });
+  expect(check.body.years[id('G1')]).toEqual({ y: 1983, s: 'handmatig', d: [], b: { sp: 1990, mb: 1984 }, named: true });
 
   // Ongeldige inhoud van de host zelf wordt geweigerd of overgeslagen.
   const bad = await postFrom(a.page, `${base}/api/rooms/${a.code}/years`, {

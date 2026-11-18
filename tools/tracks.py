@@ -7,7 +7,10 @@ Wat het doet:
   2. Zoekt per nummer het jaar van de EERSTE release op bij MusicBrainz.
      Spotify geeft alleen de datum van het album, en dat is vaak een remaster
      of een compilatie.
-  3. Schrijft web/public/tracks.json (track-ID, artiest, titel, jaar, bron) en
+  3. Vraagt Wikidata als derde bron (in blokken van 25 titels). Twee bronnen
+     die het eens zijn, winnen van de derde; dezelfde regels als de site
+     (web/src/lib/years.js en wikidata.js).
+  4. Schrijft web/public/tracks.json (track-ID, artiest, titel, jaar, bron) en
      tools/tracks-nakijken.md met de twijfelgevallen.
 
 Gebruik (Windows, Python 3.9 of nieuwer, geen extra pakketten nodig):
@@ -23,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import gzip
 import hashlib
 import http.server
 import json
@@ -43,6 +47,7 @@ TOOLS = ROOT / "tools"
 TRACKS_JSON = ROOT / "web" / "public" / "tracks.json"
 PLAYLIST_JSON = TOOLS / "playlist.json"
 CACHE_JSON = TOOLS / "musicbrainz-cache.json"
+WD_CACHE_JSON = TOOLS / "wikidata-cache.json"
 CORRECTIONS_JSON = TOOLS / "correcties.json"
 REVIEW_MD = TOOLS / "tracks-nakijken.md"
 CONFIG_JS = ROOT / "web" / "src" / "config.js"
@@ -264,10 +269,14 @@ def http_json(url: str, headers: dict | None = None, data: bytes | None = None, 
     """
     wait = 2.0
     for attempt in range(1, tries + 1):
-        req = urllib.request.Request(url, data=data, headers={"User-Agent": USER_AGENT, **(headers or {})})
+        # Gecomprimeerd vragen, zoals Wikimedia vraagt van scripts.
+        req = urllib.request.Request(url, data=data, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip", **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=30) as res:
-                return json.loads(res.read().decode("utf-8"))
+                body = res.read()
+                if (res.headers.get("Content-Encoding") or "").lower() == "gzip":
+                    body = gzip.decompress(body)
+                return json.loads(body.decode("utf-8"))
         except urllib.error.HTTPError as err:
             if err.code in (429, 500, 502, 503, 504) and attempt < tries:
                 retry_after = err.headers.get("Retry-After")
@@ -306,15 +315,23 @@ def lucene_phrase(text: str) -> str:
 
 # Uitgaven die niets zeggen over wanneer een nummer uitkwam.
 _SKIP_TYPES = {"live", "demo", "interview", "audiobook", "audio drama", "dj-mix", "mixtape/street", "spokenword"}
+# Een opname met een van deze woorden in de titel of de toelichting is een
+# andere versie dan het gewone nummer (tenzij de titel van Spotify ze ook heeft).
+_OTHER_VERSION_RE = re.compile(r"\b(?:instrumental|karaoke|a ?cappella|acapella|demo)\b", re.IGNORECASE)
+# In de toelichting niet "demo": die staat er soms ook bij de echte single (Enter Sandman).
+_NOTE_VERSION_RE = re.compile(r"\b(?:instrumental|karaoke|a ?cappella|acapella)\b", re.IGNORECASE)
+_PARENS_RE = re.compile(r"[\(\[][^\)\]]*[\)\]]")
+# Een losse vroegste uitgave mag hoogstens zoveel jaar vóór een jaar met meer uitgaven liggen (zie pick_year).
+LONE_WINDOW = 3
 
 
-def official_date(recording: dict) -> str | None:
-    """Vroegste datum van een officiële studio-uitgave met deze opname.
+def _studio_releases(recording: dict) -> list[dict]:
+    """Officiële studio-uitgaven met een datum van deze opname.
 
     Bootlegs, promo's, live-albums en demo's tellen niet mee: die zijn in
     MusicBrainz vaak fout of veel te vroeg gedateerd.
     """
-    best = None
+    out = []
     for release in recording.get("releases") or []:
         if str(release.get("status") or "").casefold() != "official":
             continue
@@ -323,47 +340,100 @@ def official_date(recording: dict) -> str | None:
         if types & _SKIP_TYPES:
             continue
         d = release.get("date")
-        if year_of(d) is None:
-            continue
-        if best is None or str(d) < best:
-            best = str(d)
-    return best
-
-
-def pick_year(recordings: list[dict], title: str, artists: list[str]) -> dict | None:
-    """Kiest uit zoekresultaten het jaar van de opname die echt past.
-
-    Een officiële studio-uitgave gaat altijd voor; pas als die er niet is,
-    telt de vroegste datum van eender welke uitgave ('official': False).
-    """
-    best = None
-    count = 0
-    for rec in recordings:
-        if not title_matches(rec.get("title", ""), title) or not artist_matches(rec, artists):
-            continue
-        official = official_date(rec)
-        d = official or rec.get("first-release-date")
         y = year_of(d)
         if y is None:
             continue
-        count += 1
-        candidate = (0 if official else 1, y)
-        if best is None or candidate < best["_rank"]:
-            credit = "".join(
-                c.get("name", "") + (c.get("joinphrase") or "") for c in rec.get("artist-credit") or []
-            )
-            best = {
-                "_rank": candidate,
-                "year": y,
-                "date": d,
-                "official": bool(official),
-                "mbid": rec.get("id"),
-                "title": rec.get("title"),
-                "artist": credit,
-            }
-    if best:
-        best["matches"] = count
-    return best
+        rid = release.get("id") or f"{recording.get('id')}|{d}|{release.get('title') or ''}"
+        out.append({"date": str(d), "year": y, "id": rid, "group": group.get("id") or release.get("title") or rid,
+                    "compilation": "compilation" in types})
+    return out
+
+
+def official_date(recording: dict) -> str | None:
+    """Vroegste datum van een officiële studio-uitgave met deze opname."""
+    dates = [r["date"] for r in _studio_releases(recording)]
+    return min(dates) if dates else None
+
+
+def other_version(recording: dict, wanted: str, live: bool = False) -> bool:
+    """Is deze opname een andere versie dan wat gezocht wordt? Een remix, live-
+    opname, instrumentale versie, karaoke of demo telt niet voor het gewone
+    nummer (zie otherVersion in years.js)."""
+    title = str(recording.get("title") or "")
+    note = str(recording.get("disambiguation") or "")
+    if not remix_key(wanted) and remix_key(title):
+        return True
+    if not live and (is_live(title) or re.search(r"\blive\b", note, re.IGNORECASE)):
+        return True
+    extra = title[len(_strip_versions(title)):] + " " + " ".join(_PARENS_RE.findall(title))
+    return bool(_OTHER_VERSION_RE.search(extra) or _NOTE_VERSION_RE.search(note)) and not _OTHER_VERSION_RE.search(wanted)
+
+
+def pick_year(recordings: list[dict], title: str, artists: list[str], live: bool = False) -> dict | None:
+    """Kiest uit zoekresultaten het jaar van de eerste release (zie pickYear in years.js).
+
+    Alle passende opnames samen. Alleen officiële studio-uitgaven tellen; zijn
+    er geen, dan de vroegste datum van eender welke uitgave ('official': False).
+    Een jaar met alleen verzamelaars telt pas vanaf twee verschillende
+    verzamelaars (een enkele verzamelaar is vaak fout gedateerd). 'raw': het
+    vroegste jaar zonder die regel; 'next': een later jaar met meer uitgaven als
+    het gekozen jaar maar één uitgave heeft; 'count': zoveel uitgaven in het
+    gekozen jaar.
+    """
+    releases = []
+    matches = 0
+    fallback = None
+    seen = set()
+    for rec in recordings or []:
+        if not title_matches(rec.get("title", ""), title) or not artist_matches(rec, artists):
+            continue
+        if other_version(rec, title, live):
+            continue
+        rid = rec.get("id")
+        if rid and rid in seen:
+            continue
+        if rid:
+            seen.add(rid)
+        studio = _studio_releases(rec)
+        credit = "".join(c.get("name", "") + (c.get("joinphrase") or "") for c in rec.get("artist-credit") or [])
+        if studio:
+            matches += 1
+            for r in studio:
+                releases.append({**r, "mbid": rid, "title": rec.get("title"), "artist": credit})
+            continue
+        d = rec.get("first-release-date")
+        y = year_of(d)
+        if y is None:
+            continue
+        matches += 1
+        if fallback is None or y < fallback["year"]:
+            fallback = {"year": y, "date": d, "mbid": rid, "title": rec.get("title"), "artist": credit}
+    if not releases:
+        if not fallback:
+            return None
+        return {**fallback, "official": False, "matches": matches, "raw": fallback["year"], "count": 0}
+    years: dict = {}
+    for r in releases:
+        y = years.setdefault(r["year"], {"ids": set(), "groups": set(), "other": False, "first": r})
+        y["ids"].add(r["id"])
+        if r["compilation"]:
+            y["groups"].add(r["group"])
+        else:
+            y["other"] = True
+        if r["date"] < y["first"]["date"]:
+            y["first"] = r
+    ordered = sorted(years)
+    raw = ordered[0]
+    year = next((y for y in ordered if years[y]["other"] or len(years[y]["groups"]) >= 2), raw)
+    count = len(years[year]["ids"])
+    first = years[year]["first"]
+    found = {"year": year, "date": first["date"], "official": True, "mbid": first["mbid"], "title": first["title"],
+             "artist": first["artist"], "matches": matches, "raw": raw, "count": count}
+    if count == 1:
+        later = next((y for y in ordered if year < y <= year + LONE_WINDOW and len(years[y]["ids"]) >= 2), None)
+        if later:
+            found["next"] = later
+    return found
 
 
 def lookup(title: str, artists: list[str], search=mb_search) -> dict:
@@ -389,9 +459,17 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
         if loose and norm(loose) != norm(wanted):
             queries.append(("zonder haakjes", f"recording:{lucene_phrase(loose)} AND artist:{lucene_phrase(primary)}"))
         queries.append(("ruim", f"recording:({_words(wanted)}) AND artist:({_words(primary)})"))
+    live = is_live(title)
     for method, query in queries:
+        # Alle opnames van deze zoekopdracht, over alle pagina's heen.
+        pool: list = []
+
+        def pick(recs):
+            pool.extend(recs or [])
+            return pick_year(pool, wanted, artists, live)
+
         recordings, total = search(query)
-        found = pick_year(recordings, wanted, artists)
+        found = pick(recordings)
         if total > len(recordings):
             # Bekende nummers hebben honderden opnames (live, bootlegs); de eerste
             # honderd zijn niet noodzakelijk de oudste en de studio-opname zit er
@@ -400,7 +478,7 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
             if not (found and found["official"]):
                 # Geen officiële studio-uitgave op de eerste pagina: vraag er
                 # gericht naar. Dat zijn er hooguit enkele tientallen.
-                found = _better(found, pick_year(search(studio)[0], wanted, artists))
+                found = pick(search(studio)[0])
             # Een opname met een vroegere officiële uitgave heeft ook een vroegere
             # 'eerste release'. Kijk dus of er vóór het gevonden jaar nog iets zit.
             # `seen`: alle opnames met een eerste release vóór dat jaar zijn al
@@ -414,19 +492,19 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
                     break
                 before = f" AND firstreleasedate:[1900-01-01 TO {found['year'] - 1}-12-31]"
                 older, older_total = search(f"({query}){before}")
-                improved = _better(found, pick_year(older, wanted, artists))
+                improved = pick(older)
                 if older_total > len(older):
                     # Nog altijd te veel om te overzien: opnieuw alleen studio-uitgaven.
-                    improved = _better(improved, pick_year(search(studio + before)[0], wanted, artists))
+                    improved = pick(search(studio + before)[0])
                 else:
                     seen = found["year"]
-                if improved is found:
-                    break
+                same = improved["year"] == found["year"] and improved["official"] == found["official"]
                 found = improved
+                if same:
+                    break
         if not found:
             continue
         found["method"] = method
-        del found["_rank"]
         return found
     return {"year": None, "method": "niets gevonden"}
 
@@ -434,19 +512,153 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
 _STUDIO_FILTER = " AND status:official AND NOT secondarytype:live AND NOT secondarytype:demo"
 
 
-def _better(current: dict | None, other: dict | None) -> dict | None:
-    """De beste van twee kandidaten: officieel voor onofficieel, dan het vroegste jaar."""
-    if current is None:
-        return other
-    if other and other["_rank"] < current["_rank"]:
-        other["matches"] = max(current.get("matches", 0), other.get("matches", 0))
-        return other
-    return current
-
-
 def _words(text: str) -> str:
     words = re.findall(r"[^\W_]+", str(text), flags=re.UNICODE)
     return " AND ".join(words) if words else '""'
+
+
+# ---------------------------------------------------------------- Wikidata
+
+# Wikidata als derde bron (zie web/src/lib/wikidata.js): vrije gegevens (CC0),
+# zonder account. Eén verzoek zoekt tot 25 titels tegelijk.
+WD_URL = "https://query.wikidata.org/sparql"
+WD_BATCH = 25
+WD_MIN_INTERVAL = 1.1
+# Soorten items die een album, video of film zijn, niet het nummer zelf.
+_WD_NOT_SONG = {"Q482994", "Q208569", "Q222910", "Q209939", "Q169930", "Q193977", "Q4176708", "Q24672043",
+                "Q1056693", "Q10590726", "Q11424", "Q5398426"}
+# Lied, single, muziekwerk: een item dat ook zo'n soort heeft, telt wel.
+_WD_SONG = {"Q7366", "Q134556", "Q105543609"}
+_WD_SEP = "\u001f"
+_last_wd_call = 0.0
+
+
+def wd_useful(title: str) -> bool:
+    """Moet Wikidata voor dit nummer gevraagd worden? Niet voor remixes, live-opnames en heropnames."""
+    return not is_remix(title) and not is_live(title) and not is_rerecording(title)
+
+
+def wd_title(title: str) -> str:
+    """De titel zoals Wikidata hem gezocht wordt: zonder versie-aanduidingen, in kleine letters."""
+    parts = remix_parts(title)
+    t = parts[0] if parts else clean_title(title)
+    return re.sub(r"\s+", " ", t.lower().replace("\u2019", "'")).strip()
+
+
+def wd_searches(title: str) -> list[str]:
+    """Wat er voor een titel gezocht wordt: de titel, en zonder haakjes als die er zijn."""
+    q = wd_title(title)
+    if not q:
+        return []
+    loose = re.sub(r"\s+", " ", re.sub(r"\s*[\(\[][^\)\]]*[\)\]]\s*", " ", q)).strip()
+    return [q, loose] if loose and loose != q else [q]
+
+
+def _wd_literal(text: str) -> str:
+    return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"'
+
+
+def wd_query(titles: list[str]) -> str:
+    """De SPARQL-vraag voor een lijst titels (dezelfde als wdQuery in wikidata.js)."""
+    values = " ".join(_wd_literal(t) for t in titles)
+    return f"""SELECT ?q ?item
+  (GROUP_CONCAT(DISTINCT ?lab; separator="\\u001f") AS ?labels)
+  (GROUP_CONCAT(DISTINCT ?pl; separator="\\u001f") AS ?performers)
+  (GROUP_CONCAT(DISTINCT STR(?d); separator=" ") AS ?dates)
+  (GROUP_CONCAT(DISTINCT STRAFTER(STR(?ty), "entity/"); separator=" ") AS ?types)
+WHERE {{
+  VALUES ?q {{ {values} }}
+  SERVICE wikibase:mwapi {{
+    bd:serviceParam wikibase:api "EntitySearch" ; wikibase:endpoint "www.wikidata.org" ;
+                    mwapi:search ?q ; mwapi:language "en" ; mwapi:limit "20" .
+    ?item wikibase:apiOutputItem mwapi:item .
+  }}
+  ?item wdt:P175 ?p .
+  ?p rdfs:label ?pl . FILTER(LANG(?pl) IN ("en", "mul"))
+  ?item rdfs:label ?lab . FILTER(LANG(?lab) IN ("en", "mul", "nl"))
+  OPTIONAL {{ ?item wdt:P577 ?d }}
+  OPTIONAL {{ ?item wdt:P31 ?ty }}
+}} GROUP BY ?q ?item"""
+
+
+def wd_search(titles: list[str]) -> list[dict]:
+    """Eén verzoek naar Wikidata: [{q, item, labels, performers, dates, types}]."""
+    global _last_wd_call
+    pause = WD_MIN_INTERVAL - (time.monotonic() - _last_wd_call)
+    if pause > 0:
+        time.sleep(pause)
+    body = urllib.parse.urlencode({"query": wd_query(titles), "format": "json"}).encode()
+    try:
+        data = http_json(WD_URL, {"Accept": "application/sparql-results+json",
+                                  "Content-Type": "application/x-www-form-urlencoded"}, data=body, tries=3) or {}
+    finally:
+        _last_wd_call = time.monotonic()
+    return [{k: (v or {}).get("value", "") for k, v in b.items()} for b in (data.get("results") or {}).get("bindings") or []]
+
+
+def wd_pick(track: dict, rows: list[dict]) -> dict:
+    """Het jaar volgens Wikidata voor één nummer (zie wdPick in wikidata.js): {'year', 'items'}."""
+    title = track.get("title", "")
+    searched = set(wd_searches(title))
+    parts = remix_parts(title)
+    base = parts[0] if parts else clean_title(title)
+    want, loose = norm(base), norm_loose(base)
+    artists = {norm(a) for a in track.get("artists") or [] if a}
+    year, items = None, 0
+    for r in rows:
+        if r.get("q") not in searched:
+            continue
+        labels = str(r.get("labels") or "").split(_WD_SEP)
+        # Zonder haakjes vergelijken mag, maar niet als het label een live- of remixversie is.
+        if not any(norm(lab) == want or (loose and norm_loose(lab) == loose and not is_live(lab) and not is_remix(lab))
+                   for lab in labels):
+            continue
+        performers = {norm(p) for p in str(r.get("performers") or "").split(_WD_SEP)}
+        if not (performers & artists):
+            continue
+        types = set(str(r.get("types") or "").split())
+        if types & _WD_NOT_SONG and not types & _WD_SONG:
+            continue
+        items += 1
+        for d in str(r.get("dates") or "").split():
+            y = year_of(d)
+            if y is not None and (year is None or y < year):
+                year = y
+    return {"year": year, "items": items}
+
+
+def wd_lookup(tracks: list[dict], search=wd_search) -> dict:
+    """Wikidata-jaar per track-ID, in blokken van WD_BATCH zoektermen (zie
+    wdLookup in wikidata.js). Faalt een blok, dan stopt het: wat al binnen is
+    blijft (dan zonder Wikidata)."""
+    titles: list[str] = []
+    index: dict[str, int] = {}
+    todo = []
+    for t in tracks:
+        if not wd_useful(t.get("title", "")):
+            continue
+        qs = wd_searches(t.get("title", ""))
+        if not qs:
+            continue
+        for q in qs:
+            if q not in index:
+                index[q] = len(titles)
+                titles.append(q)
+        todo.append([t, max(index[q] for q in qs), False])
+    rows: list[dict] = []
+    out = {}
+    for i in range(0, len(titles), WD_BATCH):
+        try:
+            rows += search(titles[i:i + WD_BATCH])
+        except Exception as err:  # niet bereikbaar of te druk: verder zonder Wikidata
+            say(f"  Wikidata gaf geen antwoord ({err}); verder zonder.")
+            break
+        for item in todo:
+            if item[2] or item[1] >= i + WD_BATCH:
+                continue
+            item[2] = True
+            out[item[0]["id"]] = wd_pick(item[0], rows)
+    return out
 
 
 # ---------------------------------------------------------------- Spotify
@@ -609,49 +821,102 @@ def fetch_playlist(pid: str, token: str) -> list[dict]:
 # ---------------------------------------------------------------- beslissen
 
 
-def decide(track: dict, mb: dict | None, correction: dict | None) -> dict:
-    """Kiest het jaar voor één nummer en zegt of het nagekeken moet worden."""
-    sp_year = year_of(track.get("spotify_date"))
-    mb_year = (mb or {}).get("year")
-    reasons = []
-    if correction and correction.get("year"):
-        year, source = int(correction["year"]), "handmatig"
-    elif mb_year and sp_year:
-        # Het vroegste van de twee: een album kan niet voor de eerste release liggen.
-        year, source = (mb_year, "musicbrainz") if mb_year <= sp_year else (sp_year, "spotify")
-        if abs(mb_year - sp_year) > 1:
-            reasons.append(f"Spotify ({sp_year}) en MusicBrainz ({mb_year}) verschillen meer dan een jaar")
-    elif mb_year:
-        year, source = mb_year, "musicbrainz"
-    elif sp_year:
-        # Ook bij een remix: nooit het jaar van het origineel, dat hoort niet bij wat de spelers horen.
-        year, source = sp_year, "spotify"
-        if is_remix(track.get("title", "")):
-            reasons.append("remix die MusicBrainz niet kent; jaar van het Spotify-album gebruikt")
+def _near(a, b) -> bool:
+    return a is not None and b is not None and abs(a - b) <= 1
+
+
+def is_rerecording(title: str) -> bool:
+    """Een heropname van de artiest zelf, zoals "Love Story (Taylor's Version)"."""
+    return bool(re.search(r"\b(?:taylor['’]s version|re-?record(?:ed|ing)?)\b", str(title), re.IGNORECASE))
+
+
+def decide(track: dict, mb: dict | None, correction: dict | None, wd: dict | None = None) -> dict:
+    """Kiest het jaar voor één nummer en zegt of het nagekeken moet worden.
+
+    Dezelfde regels als decide() in web/src/lib/years.js: twee bronnen die het
+    eens zijn (hoogstens een jaar verschil) winnen van de derde; alleen zonder
+    overeenstemming blijft er twijfel. `wd`: het resultaat van Wikidata
+    ({'year': ...}), of None als Wikidata niet gevraagd is of niet antwoordde.
+    """
+    title = track.get("title", "")
+    s = year_of(track.get("spotify_date"))
+    remix = is_remix(title)
+    own = not remix and not is_live(title) and not is_rerecording(title)
+    asked = own and wd is not None
+    w = (wd or {}).get("year") if asked else None
+    mb = mb or {}
+    m = mb.get("year")
+    if m is not None and s is not None and mb.get("next") and w is not None and w >= mb["next"]:
+        m = mb["next"]
+    raw = mb.get("raw")
+    if m is not None and s is not None and raw and raw == s and raw < m:
+        m = raw
+    strong = m == mb.get("year") and (mb.get("count") or 0) >= 2
+
+    year, doubt = None, ""
+    if m is not None and s is not None:
+        if _near(m, s):
+            year = m if (w == m and s != m) else min(m, s)
+        elif _near(w, m) and not _near(w, s):
+            year = m
+        elif _near(w, s) and not _near(w, m):
+            year = s
         else:
-            reasons.append("MusicBrainz vond niets; jaar van het Spotify-album gebruikt")
+            both = f"Spotify ({s}) en MusicBrainz ({m}) verschillen meer dan een jaar"
+            if asked:
+                both += f"; Wikidata {w if w is not None else 'kent het niet'}"
+            if w is not None and w < min(m, s) - 1:
+                year, doubt = w, both
+            elif strong and m < s and (w is None or w > m):
+                year = m
+            else:
+                year, doubt = min(m, s), both
+    elif m is not None:
+        if w is not None and not _near(w, m):
+            year, doubt = min(m, w), f"MusicBrainz ({m}) en Wikidata ({w}) verschillen meer dan een jaar"
+        else:
+            year = m
+    elif s is not None:
+        # Ook bij een remix: nooit het jaar van het origineel, dat hoort niet bij wat de spelers horen.
+        why = ("remix die MusicBrainz niet kent; jaar van het Spotify-album gebruikt" if remix
+               else "MusicBrainz vond niets; jaar van het Spotify-album gebruikt")
+        if _near(w, s):
+            year = min(s, w)
+        elif w is not None:
+            year, doubt = min(s, w), f"MusicBrainz vond niets; Spotify zegt {s}, Wikidata {w}"
+        else:
+            year, doubt = s, why
+    elif w is not None:
+        year, doubt = w, "alleen Wikidata kent een jaar"
     else:
-        year, source = None, "onbekend"
-        reasons.append("geen jaar gevonden; vul het aan in correcties.json")
-    if source != "handmatig":
-        if mb_year and (mb or {}).get("method") == "ruim":
+        doubt = "geen jaar gevonden; vul het aan in correcties.json"
+
+    source = "onbekend" if year is None else "musicbrainz" if year == m else "spotify" if year == s else "wikidata"
+    reasons = [doubt] if doubt else []
+    if doubt:
+        # Wat de twijfel groter maakt; zonder twijfel doet het er niet toe.
+        if m is not None and mb.get("method") == "ruim":
             reasons.append("alleen via een ruime zoekopdracht gevonden")
-        if mb_year and (mb or {}).get("official") is False:
+        if m is not None and mb.get("official") is False:
             reasons.append("MusicBrainz kent alleen live-, demo- of onofficiële uitgaven")
-        if is_live(track.get("title", "")):
+        if is_live(title):
             reasons.append("live-opname: het jaar is dat van de eerste release van het nummer")
+    if correction and correction.get("year"):
+        year, source, reasons = int(correction["year"]), "handmatig", []
     return {
         "id": track["id"],
         "artist": ", ".join(track.get("artists") or []),
-        "title": clean_title(track.get("title", "")),
+        "title": clean_title(title),
         "year": year,
         "source": source,
-        "spotify_year": sp_year,
-        "mb_year": mb_year,
-        "mbid": (mb or {}).get("mbid"),
-        "reasons": [] if source == "handmatig" else reasons,
+        "spotify_year": s,
+        "mb_year": m,
+        "wd_year": w,
+        "wd_asked": asked,
+        "mbid": mb.get("mbid"),
+        "reasons": reasons,
         "note": (correction or {}).get("note", ""),
-        "original_title": track.get("title", ""),
+        "original_title": title,
     }
 
 
@@ -682,19 +947,20 @@ def write_review(rows: list[dict], path: Path, have_spotify_years: bool) -> None
     lines += ["## Na te kijken", ""]
     if flagged:
         lines += [
-            "| Artiest | Titel | Gekozen | Bron | Spotify | MusicBrainz | Waarom | Track-ID |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| Artiest | Titel | Gekozen | Bron | Spotify | MusicBrainz | Wikidata | Waarom | Track-ID |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
         for r in flagged:
             mb = f"[{r['mb_year']}](https://musicbrainz.org/recording/{r['mbid']})" if r["mb_year"] and r["mbid"] else (r["mb_year"] or "–")
             lines.append(
-                "| {artist} | {title} | {year} | {source} | {sp} | {mb} | {why} | `{id}` |".format(
+                "| {artist} | {title} | {year} | {source} | {sp} | {mb} | {wd} | {why} | `{id}` |".format(
                     artist=_cell(r["artist"]),
                     title=_cell(r["title"]),
                     year=r["year"] or "**?**",
                     source=r["source"],
                     sp=r["spotify_year"] or "–",
                     mb=mb,
+                    wd=(r["wd_year"] or "niets") if r.get("wd_asked") else "–",
                     why=_cell("; ".join(r["reasons"])),
                     id=r["id"],
                 )
@@ -736,7 +1002,8 @@ def main(argv=None) -> int:
     ap.add_argument("--client-id", default="", help="Client ID van je Spotify-app (standaard uit web/src/config.js)")
     ap.add_argument("--poort", type=int, default=DEFAULT_PORT, help=f"poort voor de Spotify-login (standaard {DEFAULT_PORT})")
     ap.add_argument("--invoer", default="", help="sla Spotify over en lees de nummers uit dit JSON-bestand")
-    ap.add_argument("--opnieuw", action="store_true", help="negeer de MusicBrainz-cache en zoek alles opnieuw op")
+    ap.add_argument("--opnieuw", action="store_true", help="negeer de caches en zoek alles opnieuw op")
+    ap.add_argument("--zonder-wikidata", action="store_true", help="vraag Wikidata niet (alleen Spotify en MusicBrainz)")
     args = ap.parse_args(argv)
 
     # 1. De nummers
@@ -783,9 +1050,22 @@ def main(argv=None) -> int:
     cache = {t["id"]: cache[t["id"]] for t in tracks if t["id"] in cache}
     write_json(CACHE_JSON, cache)
 
-    # 3. Samenvoegen
+    # 3. Wikidata: de derde bron, in blokken van 25 titels (een handvol verzoeken).
+    wd_cache = {} if args.opnieuw else read_json(WD_CACHE_JSON, {})
+    if not args.zonder_wikidata:
+        wd_todo = [t for t in tracks if wd_useful(t.get("title", "")) and wd_title(t.get("title", "")) != (wd_cache.get(t["id"]) or {}).get("key")]
+        if wd_todo:
+            say(f"Wikidata: {len(wd_todo)} nummers opzoeken…")
+            for tid, found in wd_lookup(wd_todo).items():
+                wd_cache[tid] = {**found, "key": wd_title(next(t["title"] for t in wd_todo if t["id"] == tid))}
+        wd_cache = {t["id"]: wd_cache[t["id"]] for t in tracks if t["id"] in wd_cache}
+        write_json(WD_CACHE_JSON, wd_cache)
+    else:
+        wd_cache = {}
+
+    # 4. Samenvoegen
     corrections = read_json(CORRECTIONS_JSON, {})
-    rows = [decide(t, cache.get(t["id"]), corrections.get(t["id"])) for t in tracks]
+    rows = [decide(t, cache.get(t["id"]), corrections.get(t["id"]), wd_cache.get(t["id"])) for t in tracks]
     # Hetzelfde nummer twee keer (bv. album- en singleversie) geeft twee dezelfde kaarten.
     first_seen: dict[str, str] = {}
     for t, r in zip(tracks, rows):
@@ -818,12 +1098,12 @@ def main(argv=None) -> int:
 
 
 def _cache_key(track: dict) -> str:
-    # "v4": verhoog dit als de zoekmethode verandert, dan wordt alles opnieuw opgezocht.
+    # "v5": verhoog dit als de zoekmethode verandert, dan wordt alles opnieuw opgezocht.
     # Remixes krijgen er de regelversie voor remixes bij: zo wordt een remix die
     # nog met de oude regels (jaar van het origineel) bewaard is, opnieuw opgezocht,
     # zonder de rest van de cache weg te gooien.
     title = track.get("title", "")
-    prefix = f"v4-remix{REMIX_RULES}|" if is_remix(title) else "v4|"
+    prefix = f"v5-remix{REMIX_RULES}|" if is_remix(title) else "v5|"
     return prefix + norm(clean_title(title)) + "|" + norm((track.get("artists") or [""])[0])
 
 

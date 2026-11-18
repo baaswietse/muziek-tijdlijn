@@ -129,6 +129,83 @@ test('pickYear: bootlegs, live-albums en demo\'s tellen niet', () => {
   assert.equal(Y.pickYear([comp], 'Lied', ['Band']).year, 1980);
 });
 
+// ---------------------------------------------------------------- te vroege jaren
+// Echte gevallen uit een playlist (november 2026), vereenvoudigd tot de uitgaven
+// die ertoe doen. Zie tools/test_tracks.py voor dezelfde gevallen in Python.
+
+/** Een uitgave met titel (en dus een eigen release group) en id. */
+function relx(date, title, secondary = [], status = 'Official') {
+  return { id: `${title}|${date}`, title, date, status, 'release-group': { id: `rg-${title}`, 'primary-type': 'Album', 'secondary-types': secondary } };
+}
+
+test('pickYear: een enkele fout gedateerde verzamelaar telt niet (Radar Love, Weekend!, I\'m Alive)', () => {
+  // Radar Love: "The Best of Golden Earring" (1971) met de single van 1973 erop.
+  const radar = rec('Radar Love', 'Golden Earring', '1971', 'radar', {
+    releases: [relx('1971', 'The Best of Golden Earring', ['Compilation']), relx('1973', 'Radar Love'), relx('1973-06', 'Radar Love / The Song Is Over'), relx('1976', 'Golden Earring', ['Compilation'])],
+  });
+  let found = Y.pickYear([radar], 'Radar Love', ['Golden Earring']);
+  assert.deepEqual([found.year, found.raw, found.official], [1973, 1971, true]);
+
+  // Weekend!: twee jaren na elkaar met elk één verzamelaar, de single in 2003.
+  const weekend = rec('Weekend (radio edit)', 'Scooter', '2001', 'wk', {
+    releases: [relx('2001', 'Mädchen Soft+Crazy', ['Compilation']), relx('2002-08-08', 'Pepsi: More Music 2', ['Compilation']), relx('2003', 'Weekend!'), relx('2003', 'NOW 8', ['Compilation'])],
+  });
+  assert.equal(Y.pickYear([weekend], 'Weekend!', ['Scooter']).year, 2003);
+
+  // I'm Alive: een opname staat alleen op "2000 Collection"; de andere opnames zijn van 2002.
+  const alive = [
+    rec("I'm Alive", 'Céline Dion', '2000', 'c2000', { releases: [relx('2000', '2000 Collection', ['Compilation'])] }),
+    rec('I’m Alive', 'Céline Dion', '2002', 'single', { releases: [relx('2002', "I'm Alive")] }),
+  ];
+  found = Y.pickYear(alive, "I'm Alive", ['Céline Dion']);
+  assert.deepEqual([found.year, found.mbid], [2002, 'single']);
+});
+
+test('pickYear: twee verschillende verzamelaars in hetzelfde jaar tellen wel (singles die MusicBrainz mist)', () => {
+  // Pommelien Thijs – Ongewoon: single 2022 (niet bij MusicBrainz), album 2023.
+  const ongewoon = rec('Ongewoon', 'Pommelien Thijs', '2022-06-10', 'o', {
+    releases: [relx('2022-06-10', 'MNM Big Hits Summer 2022', ['Compilation']), relx('2022-08-26', 'Tien om te zien 2022', ['Compilation']), relx('2023-06-23', 'Per ongeluk')],
+  });
+  assert.equal(Y.pickYear([ongewoon], 'Ongewoon', ['Pommelien Thijs']).year, 2022);
+});
+
+test('pickYear: een remix, live-, instrumentale of karaokeversie telt niet voor het gewone nummer', () => {
+  // Shape of You: "(DJ Inko remix)" op een uitgave "van 2015"; het nummer is van 2017.
+  const recs = [
+    rec('Shape of You (DJ Inko remix)', 'Ed Sheeran', '2015-01-30', 'inko', { releases: [relx('2015-01-30', 'Various Tracks')] }),
+    rec('Shape of You (live at Taratata)', 'Ed Sheeran', '2016', 'live', { releases: [relx('2016', 'Divide Collector')] }),
+    rec('Shape of You (instrumental)', 'Ed Sheeran', '2016', 'instr', { releases: [relx('2016', 'Shape of You instr')] }),
+    { ...rec('Shape of You', 'Ed Sheeran', '2016', 'karaoke', { releases: [relx('2016', 'Karaoke Hits')] }), disambiguation: 'karaoke version' },
+    rec('Shape of You', 'Ed Sheeran', '2017-01-06', 'orig', { releases: [relx('2017-01-06', 'Shape of You'), relx('2017-03-03', '÷')] }),
+  ];
+  const found = Y.pickYear(recs, 'Shape of You', ['Ed Sheeran']);
+  assert.deepEqual([found.year, found.mbid], [2017, 'orig']);
+  assert.equal(Y.otherVersion(recs[0], 'Shape of You'), true);
+  assert.equal(Y.otherVersion(recs[4], 'Shape of You'), false);
+  // Een live-opname zoeken: dan telt live wel, en de instrumentale versie nog altijd niet.
+  const live = Y.pickYear(recs, 'Shape of You', ['Ed Sheeran'], { live: true });
+  assert.deepEqual([live.year, live.mbid], [2016, 'live']);
+});
+
+test('pickYear: een losse vroegste uitgave met kort daarna meer uitgaven geeft een kandidaat (next)', () => {
+  // The Real Slim Shady: één single "1999-12-31", het jaar daarna tientallen uitgaven.
+  const slim = rec('The Real Slim Shady', 'Eminem', '1999-12-31', 's', {
+    releases: [relx('1999-12-31', 'The Way I Am'), relx('2000', 'The Marshall Mathers LP'), relx('2000', 'The Real Slim Shady'), relx('2000-05', 'VIVA Summer Hits', ['Compilation'])],
+  });
+  const found = Y.pickYear([slim], 'The Real Slim Shady', ['Eminem']);
+  assert.deepEqual([found.year, found.count, found.next], [1999, 1, 2000]);
+  // Met meer dan één uitgave in het vroegste jaar: geen kandidaat.
+  const hey = rec('Hey Jude', 'The Beatles', '1968', 'h', { releases: [relx('1968', 'Hey Jude'), relx('1968-08-26', 'Hey Jude US'), relx('1970', 'Hey Jude LP')] });
+  assert.equal(Y.pickYear([hey], 'Hey Jude', ['The Beatles']).next, undefined);
+});
+
+test('decide: Spotify zegt precies het vroegste jaar van MusicBrainz (een nieuw nummer op een eigen best-of)', () => {
+  // Krezip – Sweet Goodbyes: alleen op "Best Of" (2008), daarna verzamelaars uit 2009.
+  const mb = { year: 2009, raw: 2008, count: 4, official: true, method: 'exact' };
+  const r = Y.decide({ title: 'Sweet Goodbyes', spotifyYear: 2008 }, mb);
+  assert.deepEqual([r.year, r.source, r.doubts], [2008, 'musicbrainz', []]);
+});
+
 /**
  * Een nagebootste MusicBrainz die zich gedraagt als de echte: de filters op
  * eerste release en studio-uitgave werken, en er komt hoogstens `limit`
@@ -163,7 +240,7 @@ test('lookup: zoekt gericht naar oudere opnames', async () => {
   const orig = rec('Whole Lotta Love', 'Led Zeppelin', '1969-10-22', 'orig', { releases: [rel('1969-10-22'), rel('1975', 'Official', ['Compilation', 'Live'])] });
   const search = index([rec('Whole Lotta Love', 'Led Zeppelin', '1970', 'p1'), ...lives('Whole Lotta Love', 'Led Zeppelin', 150, 1971, 2010), orig], { calls });
   const found = await Y.lookup('Whole Lotta Love - 1990 Remaster', ['Led Zeppelin'], search);
-  assert.deepEqual(found, { year: 1969, official: true, method: 'exact', mbid: 'orig' });
+  assert.deepEqual(found, { year: 1969, official: true, method: 'exact', mbid: 'orig', raw: 1969, count: 1 });
   // Al een officiële uitgave op de eerste pagina (1970): meteen de oudere opnames
   // vragen. Die pagina is volledig, dus vroeger dan 1969 kan er niets meer zijn.
   assert.equal(calls.length, 2);
@@ -288,10 +365,16 @@ test('decide: vroegste van Spotify en MusicBrainz, met twijfels', () => {
   r = Y.decide({ title: 'X', spotifyYear: null }, null);
   assert.deepEqual([r.year, r.source], [null, 'onbekend']);
 
+  // Een ruime zoekopdracht, alleen onofficiële uitgaven of een live-opname zijn
+  // alleen nog een reden om na te kijken als de bronnen het oneens zijn.
   r = Y.decide({ ...t, spotifyYear: 1975 }, { year: 1975, official: false, method: 'ruim' });
-  assert.equal(r.doubts.length, 2);
+  assert.deepEqual(r.doubts, []);
+  r = Y.decide({ ...t, spotifyYear: 1990 }, { year: 1975, official: false, method: 'ruim', count: 0 });
+  assert.equal(r.doubts.length, 3);
   r = Y.decide({ title: 'Enter Sandman - Live', spotifyYear: 1991 }, { year: 1991, official: true, method: 'exact' });
-  assert.deepEqual(r.doubts, ['live-opname']);
+  assert.deepEqual(r.doubts, []);
+  r = Y.decide({ title: 'Enter Sandman - Live', spotifyYear: 1999 }, { year: 1991, official: true, method: 'exact' });
+  assert.deepEqual(r.doubts, ['Spotify zegt 1999, MusicBrainz 1991', 'live-opname']);
 });
 
 // ---------------------------------------------------------------- remixes
@@ -404,7 +487,7 @@ test('lookup: een remix zoekt de remix, niet het oudere origineel', async () => 
     };
   };
   const found = await Y.lookup('A Little Less Conversation - JXL Radio Edit Remix', ['Elvis Presley', 'JXL'], search);
-  assert.deepEqual(found, { year: 2002, official: true, method: 'exact', mbid: 'remix' });
+  assert.deepEqual(found, { year: 2002, official: true, method: 'exact', mbid: 'remix', raw: 2002, count: 1 });
   assert.equal(calls.length, 1);
   assert.equal(calls[0], 'recording:"A Little Less Conversation" AND recording:(jxl AND remix) AND artist:"Elvis Presley"');
 });

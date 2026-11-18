@@ -1,7 +1,7 @@
 // De lijst met nummers voor het spel. Standaard speelt de server met de
 // nagekeken lijst van de site (tracks.json). De host kan ook een eigen
 // Spotify-playlist kiezen: dan leest zijn browser de nummers, zoekt de
-// jaartallen op bij MusicBrainz en stuurt de lijst naar de server.
+// jaartallen op bij MusicBrainz en Wikidata en stuurt de lijst naar de server.
 //
 // Wat al gekend is (een eigen verbetering, tracks.json, de gedeelde lijst op
 // de server, de lokale cache) is er meteen. De rest wordt op de achtergrond
@@ -22,7 +22,8 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { player } from '../spotify/index.js';
 import { post } from './net.js';
 import { storage } from './session.js';
-import { REMIX_RULES, cleanTitle, decide, isRemix, lookup, mbSearch, yearOf } from './years.js';
+import { REMIX_RULES, RULES, cleanTitle, decide, isRemix, lookup, mbSearch, yearOf } from './years.js';
+import { wdLookup, wdTitle, wdUseful } from './wikidata.js';
 import {
   MIN_DECK,
   canSendDeck,
@@ -38,8 +39,10 @@ import {
   withoutDoubles,
 } from './deckplan.js';
 
-// { [trackId]: { y: jaar, s: bron, d: [twijfels], r: regelversie voor remixes } }
-// Oudere items hebben geen r; voor gewone nummers maakt dat niet uit.
+// { [trackId]: { y: jaar, s: bron, d: [twijfels], r: regelversie (RULES), b: { sp, mb, wd } } }
+// b: wat elke bron zei (Spotify-album, MusicBrainz, Wikidata; wd ontbreekt als
+// Wikidata niet meetelde). Oudere items hebben geen b, en geen of een lagere r
+// (tot 2 ging r alleen over remixes). Zie `current` in start().
 const CACHE = 'mt.years.v1';
 const LAST = 'mt.lastPlaylist'; // { id, name }
 // Een opzoeking die nog bezig is, om na een herlaad verder te gaan:
@@ -54,6 +57,7 @@ const JOB = 'mt.deckJob';
 const SECONDS_PER_LOOKUP = 2; // schatting tot er in deze opzoeking een paar gemeten zijn
 const SHARED_IDS = 500; // zoveel nummers mag één leesverzoek vragen (server/src/yearlist.js)
 const SHARED_WRITE = 200; // en zoveel per schrijfverzoek: ruim onder de grootte van een verzoek
+const WD_WAIT = 20_000; // zo lang wacht een nummer hoogstens op zijn Wikidata-antwoord
 const SHARE_EVERY = 20; // tussentijds delen met de server, per zoveel opgezochte nummers
 const UPLOAD_FIRST = 5000; // de lijst gaat ten vroegste zo lang na het begin naar de server
 const UPLOAD_EVERY = 20_000; // en daarna hoogstens om de zoveel ms, tot alles opgezocht is
@@ -62,20 +66,24 @@ const MANUAL = 'handmatig';
 let builtin = null;
 
 /**
- * Vraagt de gedeelde lijst op voor deze nummers: { id: { y, s, d, r } }.
+ * Vraagt de gedeelde lijst op voor deze nummers: { id: { y, s, d, r, b, named } }.
  * null als de server ze niet kan geven; dan gaat alles verder zonder.
+ * `years.names` (niet opsombaar): de server bewaart ook titel en artiest.
  */
 async function sharedLookup(code, token, ids) {
   const years = {};
+  let withNames = ids.length > 0;
   try {
     for (let i = 0; i < ids.length; i += SHARED_IDS) {
       const res = await post(`/api/rooms/${code}/years/lookup`, { token, ids: ids.slice(i, i + SHARED_IDS) });
       if (!res || typeof res.years !== 'object' || res.years === null) return null;
       Object.assign(years, res.years);
+      withNames = withNames && res.names === true;
     }
   } catch {
     return null; // oudere server (404), onbereikbaar of geen host meer: zonder verder
   }
+  Object.defineProperty(years, 'names', { value: withNames });
   return years;
 }
 
@@ -90,11 +98,33 @@ async function sharedSave(code, token, entries) {
   }
 }
 
-/** Een item voor de gedeelde lijst: alleen track-ID, jaar, bron, twijfels en regelversie. */
-function shareable(id, e) {
+/**
+ * Een item voor de gedeelde lijst: track-ID, jaar, bron, twijfels, regelversie,
+ * de jaren per bron, en titel en artiest zoals Spotify ze geeft (om de lijst
+ * te kunnen nakijken; een oudere server laat ze weg).
+ */
+function shareable(id, e, track) {
   const out = { id, y: e.y ?? null, s: e.s, d: e.s === MANUAL ? [] : e.d || [] };
   if (e.r !== undefined) out.r = e.r;
+  if (e.b && e.s !== MANUAL) out.b = e.b;
+  if (track) Object.assign(out, names(track));
   return out;
+}
+
+/** Titel en artiest van een nummer voor de gedeelde lijst. */
+function names(t) {
+  return { title: String(t.title ?? '').slice(0, 120), artist: (t.artists || []).join(', ').slice(0, 120) };
+}
+
+/** Het jaar dat MusicBrainz volgens een oud item zei (uit de twijfel), of undefined als het niet te zeggen is. */
+function priorMb(e) {
+  if (e.b && 'mb' in e.b) return e.b.mb;
+  const text = (e.d || []).join(' ');
+  const m = /MusicBrainz (\d{4})/.exec(text);
+  if (m) return Number(m[1]);
+  if (/niet gevonden bij MusicBrainz/.test(text)) return null;
+  if (e.s === 'musicbrainz') return e.y;
+  return undefined;
 }
 
 /** Jaartallen van de nagekeken standaardlijst: die hoeven niet opnieuw opgezocht. */
@@ -124,7 +154,9 @@ const rowOf = (t, entry, known = false) => ({
   year: entry.y,
   source: entry.s,
   doubts: entry.d || [],
+  sources: entry.s === MANUAL ? null : entry.b || null,
   known,
+  track: t,
 });
 
 export function useDeck({ code, token, phase, players = 1, target = 10 }) {
@@ -277,19 +309,26 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
         shared = ask.length ? await sharedLookup(code, token, ask) : {};
         if (signal.aborted) throw signal.reason;
         const cache = storage.read(CACHE) || {};
-        // Remixes kregen vroeger meestal het jaar van het origineel. Wat zonder
-        // de huidige regelversie (r) onthouden is (lokaal of op de server),
-        // wordt één keer opnieuw opgezocht; gewone nummers blijven onthouden
-        // zoals ze zijn, en een handmatige verbetering ook.
-        const upToDate = (e, title) => e && (e.s === MANUAL || !isRemix(title) || e.r === REMIX_RULES);
+        // Wat met de huidige regels (r) onthouden is (lokaal of op de server),
+        // blijft. Van oudere regels blijft wat geen twijfel had; een handmatige
+        // verbetering blijft altijd. Remixes van vóór REMIX_RULES kregen meestal
+        // het jaar van het origineel: die worden opnieuw opgezocht. De rest met
+        // een twijfel wordt opnieuw beoordeeld (zie `stale` hieronder).
+        const rules = (e) => e?.r ?? 0;
+        const fresh = (e, title) =>
+          Boolean(e) && (e.s === MANUAL || rules(e) >= RULES || (!e.d?.length && (!isRemix(title) || rules(e) >= REMIX_RULES)));
         // `from` zegt waar het jaar vandaan kwam: dat bepaalt wat nog naar de server moet.
         const stored = ({ id, title }) => {
           if (cache[id]?.s === MANUAL) return { ...cache[id], from: 'eigen' }; // eigen verbetering gaat altijd voor
           if (known.has(id)) return { y: known.get(id), s: 'lijst', d: [], from: 'lijst' };
-          if (upToDate(shared?.[id], title)) return { ...shared[id], from: 'server' };
-          if (upToDate(cache[id], title)) return { ...cache[id], from: 'cache' };
+          if (fresh(shared?.[id], title)) return { ...shared[id], from: 'server' };
+          if (fresh(cache[id], title)) return { ...cache[id], from: 'cache' };
           return null;
         };
+        // Een oud item (oudere regels, met twijfel): het wordt opnieuw beoordeeld,
+        // en wat MusicBrainz toen zei, kan een nieuw verzoek uitsparen.
+        const old = ({ id }) => shared?.[id] ?? cache[id] ?? null;
+        const staleOf = new Map();
         // Eerst wat gekend is, dan de onbekende nummers in willekeurige volgorde.
         // Bij verdergaan na een herlaad ligt die volgorde al vast.
         if (!resume) tracks = lookupOrder(tracks, (t) => Boolean(stored(t)));
@@ -308,19 +347,33 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
           const entry = stored(t);
           if (!atStart.has(t.id)) todoAtStart++;
           if (!entry) {
-            if (!nothingLeft) todo.push(t);
+            const before = old(t);
+            if (nothingLeft) {
+              if (before) rows.push(rowOf(t, before)); // het oude jaar, tot de volgende keuze van de playlist
+              continue;
+            }
+            if (before?.d?.length && !(isRemix(t.title) && rules(before) < REMIX_RULES)) staleOf.set(t.id, { entry: before, mb: priorMb(before) });
+            todo.push(t);
             continue;
           }
           if (entry.from === 'cache') {
             // Eerder in deze browser opgezocht, maar (nog) niet op de server:
             // zo gaat het werk van vroeger niet verloren.
-            share.push(shareable(t.id, entry));
+            share.push(shareable(t.id, entry, t));
           } else if (entry.from === 'eigen' && shared?.[t.id]?.s !== MANUAL) {
             // Een eigen verbetering van vroeger. Een verbetering die al op de
             // server staat, kan nieuwer zijn (van een andere host): die blijft.
-            share.push(shareable(t.id, entry));
+            share.push(shareable(t.id, entry, t));
           }
           rows.push(rowOf(t, entry, atStart.has(t.id)));
+        }
+        // Titel en artiest aanvullen voor nummers die al in de gedeelde lijst
+        // staan maar zonder (alleen als de server ze bewaart), behalve wat
+        // hoe dan ook opnieuw gedeeld wordt. Op de achtergrond: de host wacht er niet op.
+        if (shared?.names && !nothingLeft) {
+          const again = new Set([...todo.map((t) => t.id), ...share.map((e) => e.id)]);
+          const fills = tracks.filter((t) => shared[t.id] && !shared[t.id].named && !again.has(t.id)).map((t) => ({ id: t.id, ...names(t) }));
+          if (fills.length) sharedSave(code, token, fills);
         }
         const job = { code, id: spec.id, name: spec.name, tracks, sampled, total, known: knownIds };
         if (todo.length) storage.write(JOB, job);
@@ -355,26 +408,72 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
         refresh(data);
         if (todo.length) schedule(data);
 
+        // Wikidata, naast MusicBrainz: in blokken van 25 titels, in dezelfde
+        // volgorde, en dus meestal ruim voor MusicBrainz aan een nummer toe is.
+        // Antwoordt Wikidata niet (of te traag), dan zoals met twee bronnen.
+        const wdFound = new Map();
+        let wdOver = todo.length === 0;
+        const waiting = new Set();
+        const wake = () => {
+          for (const resolve of waiting) resolve();
+          waiting.clear();
+        };
+        if (!wdOver) {
+          wdLookup(todo, { signal, onResult: (id, found) => (wdFound.set(id, found), wake()) })
+            .catch(() => {})
+            .finally(() => {
+              wdOver = true;
+              wake();
+            });
+        }
+        const wdFor = async (t) => {
+          if (!wdUseful(t.title) || !wdTitle(t.title)) return undefined;
+          const until = Date.now() + WD_WAIT;
+          while (!wdFound.has(t.id) && !wdOver && Date.now() < until) {
+            await new Promise((resolve) => {
+              waiting.add(resolve);
+              setTimeout(resolve, 500);
+            });
+            if (signal.aborted) throw signal.reason;
+          }
+          return wdFound.get(t.id);
+        };
+
         let failures = 0; // opeenvolgende mislukte opzoekingen
         let unreachable = 0;
         for (const [i, t] of todo.entries()) {
           if (signal.aborted) throw signal.reason;
           const spotifyYear = yearOf(t.spotifyDate);
-          let mb = null;
-          let failed = failures >= 2; // MusicBrainz ligt plat: niet bij elk nummer een minuut wachten
-          if (!failed) {
-            try {
-              mb = await lookup(t.title, t.artists, (query) => mbSearch(query, { signal }));
-              failures = 0;
-            } catch (err) {
-              if (signal.aborted) throw signal.reason;
-              failures++;
-              failed = true;
-            }
+          const wd = await wdFor(t);
+          const stale = staleOf.get(t.id);
+          let d = null;
+          if (stale && stale.mb !== undefined) {
+            // Opnieuw beoordelen met wat MusicBrainz toen zei: lukt dat zonder
+            // twijfel, dan is er geen nieuw verzoek naar MusicBrainz nodig.
+            const before = stale.mb === null ? { year: null, method: 'niets gevonden' } : { year: stale.mb, official: true, method: 'exact' };
+            const quick = decide({ title: t.title, spotifyYear }, before, wd);
+            if (!quick.doubts.length) d = quick;
           }
-          const d = decide({ title: t.title, spotifyYear }, mb);
-          const entry = { y: d.year, s: d.source, d: d.doubts, r: REMIX_RULES };
-          if (failed) {
+          let failed = false;
+          if (!d) {
+            let mb = null;
+            failed = failures >= 2; // MusicBrainz ligt plat: niet bij elk nummer een minuut wachten
+            if (!failed) {
+              try {
+                mb = await lookup(t.title, t.artists, (query) => mbSearch(query, { signal }));
+                failures = 0;
+              } catch (err) {
+                if (signal.aborted) throw signal.reason;
+                failures++;
+                failed = true;
+              }
+            }
+            d = decide({ title: t.title, spotifyYear }, mb, wd);
+          }
+          let entry = { y: d.year, s: d.source, d: d.doubts, r: RULES, b: d.b };
+          if (failed && stale) {
+            entry = stale.entry; // het oude jaar blijft, tot MusicBrainz weer antwoordt
+          } else if (failed) {
             unreachable++;
             entry.d = ['MusicBrainz was niet bereikbaar; jaar van het Spotify-album', ...entry.d];
           } else {
@@ -384,7 +483,7 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
             if (latest[t.id]?.s !== MANUAL) {
               latest[t.id] = entry;
               storage.write(CACHE, latest);
-              share.push(shareable(t.id, entry));
+              share.push(shareable(t.id, entry, t));
             }
           }
           rows.push(rowOf(t, entry));
@@ -516,7 +615,7 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
       storage.write(CACHE, cache);
       refresh(data);
       // Faalt de server hier, dan gaat de verbetering mee bij een volgende keuze van de playlist.
-      const sharing = sharedSave(code, token, [shareable(id, cache[id])]);
+      const sharing = sharedSave(code, token, [shareable(id, cache[id], row.track)]);
       clearTimeout(data.timer);
       data.timer = null;
       try {

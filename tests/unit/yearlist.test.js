@@ -10,9 +10,9 @@ const NOW = Date.UTC(2026, 5, 1);
 const ID = '4uLU6hMCjMI75M1A2tKUQC';
 const ID2 = '7ouMYWpwJ422jRcDASZB7P';
 
-test('normaliseEntry houdt alleen id, jaar, bron, twijfels en regelversie over', () => {
+test('normaliseEntry houdt alleen id, jaar, bron, twijfels, regelversie, jaren per bron, titel en artiest over', () => {
   const e = L.normaliseEntry(
-    { id: ID, y: 1987, s: 'musicbrainz', d: ['Spotify zegt 2010, MusicBrainz 1987'], r: 2, extra: 'weg', title: 'geheim' },
+    { id: ID, y: 1987, s: 'musicbrainz', d: ['Spotify zegt 2010, MusicBrainz 1987'], r: 2, extra: 'weg', name: 'weg', at: 5 },
     NOW,
   );
   assert.deepEqual(e, { id: ID, y: 1987, s: 'musicbrainz', d: ['Spotify zegt 2010, MusicBrainz 1987'], r: 2 });
@@ -172,6 +172,99 @@ test('mergeEntries geeft alleen wat verandert en respecteert de bovengrens', () 
 test('publicEntry geeft alleen jaar, bron, twijfels en regelversie terug', () => {
   assert.deepEqual(L.publicEntry({ id: ID, y: 1980, s: 'spotify', d: ['x'], r: 2, t: 123 }), { y: 1980, s: 'spotify', d: ['x'], r: 2 });
   assert.deepEqual(L.publicEntry({ id: ID, y: 1980, s: 'spotify', d: [] }), { y: 1980, s: 'spotify', d: [] });
+  // Jaren per bron gaan mee; titel en artiest niet, alleen of ze er zijn.
+  assert.deepEqual(L.publicEntry({ id: ID, y: 1980, s: 'musicbrainz', d: [], r: 3, b: { sp: 2001, mb: 1980, wd: 1980 }, title: 'Lied', artist: 'Band', at: 5 }), {
+    y: 1980,
+    s: 'musicbrainz',
+    d: [],
+    r: 3,
+    b: { sp: 2001, mb: 1980, wd: 1980 },
+    named: true,
+  });
+  assert.equal('named' in L.publicEntry({ id: ID, y: 1980, s: 'spotify', d: [], title: 'Lied' }), false);
+});
+
+test('normaliseEntry: jaren per bron, Wikidata als bron, titel en artiest streng nagekeken', () => {
+  const e = L.normaliseEntry(
+    {
+      id: ID,
+      y: 1973,
+      s: 'wikidata',
+      d: [],
+      r: 3,
+      b: { sp: 1999, mb: null, wd: 1973, xx: 1950, extra: 'weg' },
+      title: '  Sebastian\u0000 \n (Remastered)\u202e ',
+      artist: 'Steve Harley & Cockney Rebel',
+    },
+    NOW,
+  );
+  assert.deepEqual(e, { id: ID, y: 1973, s: 'wikidata', d: [], r: 3, b: { sp: 1999, mb: null, wd: 1973 }, title: 'Sebastian (Remastered)', artist: 'Steve Harley & Cockney Rebel' });
+  // Ongeldige jaren per bron vallen weg; niets over: geen b.
+  const bad = L.normaliseEntry({ id: ID, y: 1990, s: 'spotify', b: { sp: '1990', mb: 1800, wd: 2030, b: 1990 } }, NOW);
+  assert.equal('b' in bad, false);
+  for (const b of ['x', [1990], null, 5]) assert.equal('b' in L.normaliseEntry({ id: ID, y: 1990, s: 'spotify', b }, NOW), false);
+  // Titel en artiest: platte tekst, hoogstens 120 tekens, geen andere soorten.
+  const long = L.normaliseEntry({ id: ID, y: 1990, s: 'spotify', title: 'x'.repeat(500), artist: 7 }, NOW);
+  assert.equal(long.title.length, L.MAX_TEXT);
+  assert.equal('artist' in long, false);
+  assert.equal('title' in L.normaliseEntry({ id: ID, y: 1990, s: 'spotify', title: ' \u0007 ' }, NOW), false);
+});
+
+test('parseEntries: een item zonder bron vult alleen titel en artiest aan', () => {
+  const { entries, skipped } = L.parseEntries({
+    entries: [
+      { id: ID, title: 'Lied', artist: 'Band' },
+      { id: ID2, title: '', artist: '' }, // niets aan te vullen
+      { id: 'fout!', title: 'Lied', artist: 'Band' },
+      { id: ID2, y: 1990, title: 'Lied' }, // met jaar maar zonder bron: ongeldig
+    ],
+  }, NOW);
+  assert.deepEqual(entries, [{ id: ID, title: 'Lied', artist: 'Band', fill: true }]);
+  assert.equal(skipped, 3);
+});
+
+test('samenvoegen: titel aanvullen raakt het jaar niet, een oudere site wist geen titels', () => {
+  const named = { ...auto(1980), r: 3, b: { sp: 1990, mb: 1980 }, title: 'Lied', artist: 'Band' };
+  const fill = { id: ID, title: 'Lied', artist: 'Band', fill: true };
+  // Aanvullen: alleen titel en artiest komen erbij, jaar, bron en twijfels blijven.
+  assert.deepEqual(L.mergeEntry(auto(1980, { d: ['twijfel'] }), fill), { ...auto(1980, { d: ['twijfel'] }), title: 'Lied', artist: 'Band' });
+  assert.deepEqual(L.mergeEntry(manual(1979), fill), { ...manual(1979), title: 'Lied', artist: 'Band' });
+  // Wat er al staat, wordt niet overschreven; een onbekend nummer komt er niet bij.
+  assert.equal(L.mergeEntry(named, { ...fill, title: 'Andere titel' }), null);
+  assert.deepEqual(L.mergeEntry({ ...auto(1980), title: 'Lied' }, fill), { ...auto(1980), title: 'Lied', artist: 'Band' });
+  assert.equal(L.mergeEntry(null, fill), null);
+  assert.deepEqual(L.mergeEntries(new Map(), [fill]), []);
+  // Een oudere site stuurt een item zonder titel, artiest en jaren per bron: die blijven.
+  const older = { id: ID, y: 1981, s: 'musicbrainz', d: [], r: 3 };
+  assert.deepEqual(L.mergeEntry(named, older), { ...older, b: named.b, title: 'Lied', artist: 'Band' });
+  // Een handmatige verbetering houdt ze ook.
+  assert.deepEqual(L.mergeEntry(named, manual(1978)), { ...manual(1978), b: named.b, title: 'Lied', artist: 'Band' });
+  // Met oudere regels (r 2) dan wat er staat (r 3): niets.
+  assert.equal(L.mergeEntry(named, auto(1975)), null);
+  // Een nieuw resultaat met nieuwe jaren per bron vervangt die.
+  assert.deepEqual(L.mergeEntry(named, { ...named, b: { sp: 1990, mb: 1980, wd: 1980 } }).b, { sp: 1990, mb: 1980, wd: 1980 });
+});
+
+test('export: alles wat bewaard is, in pagina\'s op track-ID', () => {
+  assert.deepEqual(L.parseExport({}), { after: '', limit: L.EXPORT_PAGE });
+  assert.deepEqual(L.parseExport({ after: ID, limit: 2 }), { after: ID, limit: 2 });
+  for (const body of [{ after: 'fout!' }, { after: 5 }, { after: 'a'.repeat(65) }, { limit: 0 }, { limit: 501 }, { limit: '2' }, { limit: 1.5 }]) {
+    assert.throws(() => L.parseExport(body), (err) => err.code === 'BAD_REQUEST');
+  }
+  const row = (i) => ({ id: `id${String(i).padStart(4, '0')}`, y: 1990, s: 'musicbrainz', d: [], r: 3, b: { sp: 1991, mb: 1990 }, title: 'T', artist: 'A', at: 1000 + i });
+  const all = Array.from({ length: L.EXPORT_PAGE + 1 }, (_, i) => row(i));
+  const first = L.exportPage(all);
+  assert.equal(first.entries.length, L.EXPORT_PAGE);
+  assert.equal(first.next, all[L.EXPORT_PAGE - 1].id);
+  assert.deepEqual(first.entries[0], { id: 'id0000', y: 1990, s: 'musicbrainz', d: [], r: 3, b: { sp: 1991, mb: 1990 }, title: 'T', artist: 'A', at: 1000 });
+  const last = L.exportPage(all.slice(L.EXPORT_PAGE));
+  assert.deepEqual([last.entries.length, last.next], [1, null]);
+  // Een oud item zonder de nieuwe velden.
+  assert.deepEqual(L.exportPage([{ id: ID, y: 1975, s: 'spotify', d: [] }]), { entries: [{ id: ID, y: 1975, s: 'spotify', d: [], at: null }], next: null });
+  assert.deepEqual(L.exportPage([]), { entries: [], next: null });
+  // Kleinere pagina's.
+  assert.deepEqual(L.exportPage(all.slice(0, 3), 2).next, 'id0001');
+  assert.deepEqual(L.exportPage(all.slice(0, 2), 2).next, null);
 });
 
 test('authenticateHost: alleen de host van het spel', () => {

@@ -165,6 +165,185 @@ def lives(title, artist, n, first, last):
     return out
 
 
+def relx(date, title, secondary=(), status="Official"):
+    """Een uitgave met titel (en dus een eigen release group) en id."""
+    return {"id": f"{title}|{date}", "title": title, "date": date, "status": status,
+            "release-group": {"id": f"rg-{title}", "primary-type": "Album", "secondary-types": list(secondary)}}
+
+
+class TooEarly(unittest.TestCase):
+    """Echte gevallen uit een playlist (november 2026); dezelfde als in tests/unit/years.test.js."""
+
+    def test_a_single_misdated_compilation_does_not_count(self):
+        radar = rec("Radar Love", "Golden Earring", "1971", "radar", releases=[
+            relx("1971", "The Best of Golden Earring", ["Compilation"]), relx("1973", "Radar Love"),
+            relx("1973-06", "Radar Love / The Song Is Over"), relx("1976", "Golden Earring", ["Compilation"])])
+        found = T.pick_year([radar], "Radar Love", ["Golden Earring"])
+        self.assertEqual((found["year"], found["raw"], found["official"]), (1973, 1971, True))
+        weekend = rec("Weekend (radio edit)", "Scooter", "2001", "wk", releases=[
+            relx("2001", "Mädchen Soft+Crazy", ["Compilation"]), relx("2002-08-08", "Pepsi: More Music 2", ["Compilation"]),
+            relx("2003", "Weekend!"), relx("2003", "NOW 8", ["Compilation"])])
+        self.assertEqual(T.pick_year([weekend], "Weekend!", ["Scooter"])["year"], 2003)
+        alive = [
+            rec("I'm Alive", "Céline Dion", "2000", "c2000", releases=[relx("2000", "2000 Collection", ["Compilation"])]),
+            rec("I’m Alive", "Céline Dion", "2002", "single", releases=[relx("2002", "I'm Alive")]),
+        ]
+        found = T.pick_year(alive, "I'm Alive", ["Céline Dion"])
+        self.assertEqual((found["year"], found["mbid"]), (2002, "single"))
+
+    def test_two_different_compilations_in_one_year_do_count(self):
+        ongewoon = rec("Ongewoon", "Pommelien Thijs", "2022-06-10", "o", releases=[
+            relx("2022-06-10", "MNM Big Hits Summer 2022", ["Compilation"]), relx("2022-08-26", "Tien om te zien 2022", ["Compilation"]),
+            relx("2023-06-23", "Per ongeluk")])
+        self.assertEqual(T.pick_year([ongewoon], "Ongewoon", ["Pommelien Thijs"])["year"], 2022)
+
+    def test_remix_live_instrumental_and_karaoke_versions_do_not_count(self):
+        karaoke = rec("Shape of You", "Ed Sheeran", "2016", "karaoke", releases=[relx("2016", "Karaoke Hits")])
+        karaoke["disambiguation"] = "karaoke version"
+        recs = [
+            rec("Shape of You (DJ Inko remix)", "Ed Sheeran", "2015-01-30", "inko", releases=[relx("2015-01-30", "Various Tracks")]),
+            rec("Shape of You (live at Taratata)", "Ed Sheeran", "2016", "live", releases=[relx("2016", "Divide Collector")]),
+            rec("Shape of You (instrumental)", "Ed Sheeran", "2016", "instr", releases=[relx("2016", "Shape of You instr")]),
+            karaoke,
+            rec("Shape of You", "Ed Sheeran", "2017-01-06", "orig", releases=[relx("2017-01-06", "Shape of You"), relx("2017-03-03", "÷")]),
+        ]
+        found = T.pick_year(recs, "Shape of You", ["Ed Sheeran"])
+        self.assertEqual((found["year"], found["mbid"]), (2017, "orig"))
+        self.assertTrue(T.other_version(recs[0], "Shape of You"))
+        self.assertFalse(T.other_version(recs[4], "Shape of You"))
+        live = T.pick_year(recs, "Shape of You", ["Ed Sheeran"], live=True)
+        self.assertEqual((live["year"], live["mbid"]), (2016, "live"))
+
+    def test_a_lone_earliest_release_gives_a_candidate(self):
+        slim = rec("The Real Slim Shady", "Eminem", "1999-12-31", "s", releases=[
+            relx("1999-12-31", "The Way I Am"), relx("2000", "The Marshall Mathers LP"), relx("2000", "The Real Slim Shady"),
+            relx("2000-05", "VIVA Summer Hits", ["Compilation"])])
+        found = T.pick_year([slim], "The Real Slim Shady", ["Eminem"])
+        self.assertEqual((found["year"], found["count"], found["next"]), (1999, 1, 2000))
+        hey = rec("Hey Jude", "The Beatles", "1968", "h", releases=[relx("1968", "Hey Jude"), relx("1968-08-26", "Hey Jude US"), relx("1970", "Hey Jude LP")])
+        self.assertNotIn("next", T.pick_year([hey], "Hey Jude", ["The Beatles"]))
+
+    def test_spotify_equal_to_the_raw_earliest_year(self):
+        mb = {"year": 2009, "raw": 2008, "count": 4, "official": True, "method": "exact"}
+        r = T.decide({"id": "x", "title": "Sweet Goodbyes", "spotify_date": "2008-11-06"}, mb, None)
+        self.assertEqual((r["year"], r["source"], r["reasons"]), (2008, "musicbrainz", []))
+
+
+def wdrow(q, labels, performers, dates, types="Q134556"):
+    """Een rij zoals de zoekdienst van Wikidata ze teruggeeft (na wd_search)."""
+    labels = labels if isinstance(labels, list) else [labels]
+    performers = performers if isinstance(performers, list) else [performers]
+    dates = dates if isinstance(dates, list) else [dates]
+    return {"q": q, "item": "x", "labels": "\u001f".join(labels), "performers": "\u001f".join(performers),
+            "dates": " ".join(f"{d}-01-01T00:00:00Z" for d in dates if d), "types": types}
+
+
+class Wikidata(unittest.TestCase):
+    """Dezelfde gevallen als tests/unit/wikidata.test.js."""
+
+    def test_title_and_useful(self):
+        self.assertEqual(T.wd_title("Hips Don’t Lie (feat. Wyclef Jean)"), "hips don't lie")
+        self.assertEqual(T.wd_title("Roses - Imanbek Remix"), "roses")
+        self.assertTrue(T.wd_useful("Hotel California - 2013 Remaster"))
+        for title in ["Roses - Imanbek Remix", "Pump It - Live 2022", "Love Story (Taylor’s Version)"]:
+            self.assertFalse(T.wd_useful(title), title)
+
+    def test_searches_also_without_parentheses(self):
+        self.assertEqual(T.wd_searches("Heaven Must Be Missing an Angel (Pt. 1)"),
+                         ["heaven must be missing an angel (pt. 1)", "heaven must be missing an angel"])
+        self.assertEqual(T.wd_searches("Radar Love"), ["radar love"])
+        rows = [wdrow("heaven must be missing an angel", "Heaven Must Be Missing an Angel", "Tavares", ["1976-05", "1986-02"])]
+        self.assertEqual(T.wd_pick({"title": "Heaven Must Be Missing an Angel (Pt. 1)", "artists": ["Tavares"]}, rows)["year"], 1976)
+
+    def test_query(self):
+        q = T.wd_query(["radar love", 'een "lied" \\ met tekens'])
+        self.assertIn('VALUES ?q { "radar love" "een \\"lied\\" \\\\ met tekens" }', q)
+        self.assertIn("wdt:P577", q)
+
+    def test_pick(self):
+        rows = [
+            wdrow("radar love", "Radar Love", "Golden Earring", ["1973-07", "1974"]),
+            wdrow("radar love", "Radar Love", "Golden Earring", "1971", "Q482994"),
+            wdrow("radar love", "Radar Love", "Golden Earring", "1970", "Q193977"),
+            wdrow("radar love", "Radar Love", "White Lion", "1989"),
+            wdrow("radar love", "Radar Love (Live)", "Golden Earring", "1960"),
+            wdrow("radar love", "Radar Love", "Golden Earring", "1972", "Q482994 Q134556"),
+            wdrow("iets anders", "Radar Love", "Golden Earring", "1950"),
+        ]
+        self.assertEqual(T.wd_pick({"title": "Radar Love", "artists": ["Golden Earring"]}, rows), {"year": 1972, "items": 2})
+        self.assertEqual(T.wd_pick({"title": "Radar Love", "artists": ["Iemand"]}, rows), {"year": None, "items": 0})
+        ch = [wdrow("cowboy", "Cowboy", ["Ch!pz", "Chipz"], "2003")]
+        self.assertEqual(T.wd_pick({"title": "Cowboy - Single Version", "artists": ["Gast", "Chipz"]}, ch)["year"], 2003)
+
+    def test_lookup_in_batches_and_stops_on_failure(self):
+        tracks = [{"id": f"t{i}", "title": f"Lied {i}", "artists": ["Band"]} for i in range(30)]
+        tracks += [{"id": "remix", "title": "Lied 1 - X Remix", "artists": ["Band"]}]
+        asked = []
+
+        def search(titles):
+            asked.append(titles)
+            return [wdrow(t, t, "Band", "1990") for t in titles]
+
+        out = T.wd_lookup(tracks, search=search)
+        self.assertEqual([len(a) for a in asked], [25, 5])
+        self.assertEqual(out["t0"]["year"], 1990)
+        self.assertNotIn("remix", out)
+
+        calls = []
+
+        def flaky(titles):
+            calls.append(titles)
+            if len(calls) > 1:
+                raise RuntimeError("weg")
+            return search(titles)
+
+        self.assertEqual(len(T.wd_lookup(tracks, search=flaky)), 25)
+
+
+class DecideThreeSources(unittest.TestCase):
+    """Beslissen met drie bronnen; dezelfde gevallen als tests/unit/wikidata.test.js."""
+
+    @staticmethod
+    def pick(title, s, mb, w="geen"):
+        track = {"id": "x", "title": title, "spotify_date": str(s) if s else None}
+        r = T.decide(track, mb, None, None if w == "geen" else {"year": w})
+        return r["year"], r["source"], len(r["reasons"])
+
+    @staticmethod
+    def mb(year, **extra):
+        return {"year": year, "official": True, "method": "exact", "raw": year, "count": 5, **extra}
+
+    def test_two_sources_agree_and_wikidata_breaks_ties(self):
+        mb = self.mb
+        self.assertEqual(self.pick("Paint It, Black", 1966, mb(1964, count=1, next=1966), 1966), (1966, "musicbrainz", 0))
+        self.assertEqual(self.pick("Radar Love", 1973, mb(1971, count=1), 1973), (1973, "spotify", 0))
+        self.assertEqual(self.pick("Smoke on the Water", 1998, mb(1972), 1973), (1972, "musicbrainz", 0))
+        self.assertEqual(self.pick("Sebastian", 1999, mb(1987, count=3), 1973), (1973, "wikidata", 1))
+        self.assertEqual(self.pick("Tim", 1998, mb(1975, count=1), None), (1975, "musicbrainz", 1))
+        self.assertEqual(self.pick("Insomnia", 2014, mb(1995, count=6), 2005), (1995, "musicbrainz", 0))
+        self.assertEqual(self.pick("Insomnia", 2014, mb(1995, count=6)), (1995, "musicbrainz", 0))
+
+    def test_one_year_apart_is_not_automatically_agreement(self):
+        mb = self.mb
+        self.assertEqual(self.pick("I Gotta Feeling", 2009, mb(2008, count=1, next=2009), 2009), (2009, "musicbrainz", 0))
+        self.assertEqual(self.pick("The Real Slim Shady", 2000, mb(1999, count=1, next=2000), 2000), (2000, "musicbrainz", 0))
+        self.assertEqual(self.pick("Go Your Own Way", 1977, mb(1976, count=1, next=1977), 1976), (1976, "musicbrainz", 0))
+        self.assertEqual(self.pick("Jolene", 1974, mb(1973, count=1, next=1974)), (1973, "musicbrainz", 0))
+        self.assertEqual(self.pick("Beat It", 1982, mb(1982, count=12), 1983), (1982, "musicbrainz", 0))
+        self.assertEqual(self.pick("Lied", 2008, mb(2009), 2009), (2009, "musicbrainz", 0))
+
+    def test_remix_live_and_rerecording_ignore_wikidata(self):
+        r = T.decide({"id": "x", "title": "Roses - Imanbek Remix", "spotify_date": "2019"}, {"year": None}, None, {"year": 2016})
+        self.assertEqual((r["year"], r["source"], r["wd_asked"]), (2019, "spotify", False))
+        self.assertEqual(self.pick("Pump It - Live 2022", 2023, self.mb(2023), 2021), (2023, "musicbrainz", 0))
+
+    def test_musicbrainz_found_nothing(self):
+        self.assertEqual(self.pick("Cowboy - Single Version", 2005, {"year": None}, 2003), (2003, "wikidata", 1))
+        self.assertEqual(self.pick("Lied", 2004, {"year": None}, 2004), (2004, "spotify", 0))
+        self.assertEqual(self.pick("Lied", None, {"year": None}, 2004), (2004, "wikidata", 1))
+        self.assertEqual(self.pick("Aerials", None, self.mb(2001, count=1, next=2002), 2002), (2001, "musicbrainz", 0))
+
+
 class Lookup(unittest.TestCase):
     def test_descends_to_older_recordings(self):
         calls = []
@@ -334,10 +513,15 @@ class Decide(unittest.TestCase):
         self.assertIsNone(r["year"])
         self.assertEqual(r["source"], "onbekend")
 
-    def test_unofficial_basis_is_flagged(self):
+    def test_unofficial_basis_is_flagged_only_with_a_real_doubt(self):
+        # Alleen onofficiële uitgaven of een ruime zoekopdracht zijn alleen nog een
+        # reden om na te kijken als de bronnen het oneens zijn.
         t = dict(self.track, spotify_date="1975")
-        r = T.decide(t, {"year": 1975, "method": "exact", "official": False}, None)
+        self.assertEqual(T.decide(t, {"year": 1975, "method": "ruim", "official": False}, None)["reasons"], [])
+        r = T.decide(dict(self.track, spotify_date="1990"), {"year": 1975, "method": "exact", "official": False}, None)
         self.assertTrue(any("onofficiële" in x for x in r["reasons"]))
+        live = dict(self.track, title="Enter Sandman - Live", spotify_date="1991")
+        self.assertEqual(T.decide(live, {"year": 1991, "method": "exact"}, None)["reasons"], [])
 
     def test_correction_wins_and_clears_reasons(self):
         r = T.decide(self.track, {"year": 1980, "method": "ruim"}, {"year": 1975, "note": "single"})
@@ -473,10 +657,10 @@ class Remix(unittest.TestCase):
     def test_cache_key_only_changes_for_remixes(self):
         # Gewone nummers houden hun sleutel, zodat de cache niet weggegooid wordt;
         # remixes krijgen een nieuwe en worden dus opnieuw opgezocht.
-        self.assertEqual(T._cache_key({"title": "Bohemian Rhapsody - Remastered 2011", "artists": ["Queen"]}), "v4|bohemian rhapsody|queen")
-        self.assertEqual(T._cache_key({"title": "Smalltown Boy - Extended Mix", "artists": ["Bronski Beat"]}), "v4|smalltown boy|bronski beat")
+        self.assertEqual(T._cache_key({"title": "Bohemian Rhapsody - Remastered 2011", "artists": ["Queen"]}), "v5|bohemian rhapsody|queen")
+        self.assertEqual(T._cache_key({"title": "Smalltown Boy - Extended Mix", "artists": ["Bronski Beat"]}), "v5|smalltown boy|bronski beat")
         key = T._cache_key({"title": "Roses - Imanbek Remix", "artists": ["SAINt JHN"]})
-        self.assertEqual(key, f"v4-remix{T.REMIX_RULES}|roses imanbek remix|saint jhn")
+        self.assertEqual(key, f"v5-remix{T.REMIX_RULES}|roses imanbek remix|saint jhn")
 
 
 class Misc(unittest.TestCase):
