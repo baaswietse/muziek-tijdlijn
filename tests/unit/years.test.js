@@ -220,6 +220,36 @@ test('decide: een eigen best-of telt niet als Wikidata het latere MusicBrainz-ja
   assert.equal(Y.decide(t, mb, { year: 2008 }).year, 2008);
 });
 
+// Zelfde gevallen als DecideThreeSources in tools/test_tracks.py.
+const mbOf = (year, extra = {}) => ({ year, official: true, method: 'exact', raw: year, count: 5, ...extra });
+const decided = (title, s, mb, w) => {
+  const r = Y.decide({ title, spotifyYear: s }, mb, w === undefined ? undefined : { year: w });
+  return [r.year, r.source, r.doubts];
+};
+
+test('decide: zegt Spotify precies de vroege uitgave (mb.next), dan heeft Wikidata een latere single', () => {
+  // Clouseau – Daar gaat ze: album 1989 (Spotify en MusicBrainz), single 1990 (Wikidata en meer uitgaven).
+  assert.deepEqual(decided('Daar Gaat Ze', 1989, mbOf(1989, { count: 1, next: 1990 }), 1990), [1989, 'musicbrainz', []]);
+  // Simon & Garfunkel – The Sound of Silence (akoestisch): 1964; Wikidata heeft de single van 1965.
+  assert.deepEqual(decided('The Sound of Silence - Acoustic Version', 1964, mbOf(1964, { count: 1, next: 1965 }), 1965), [1964, 'musicbrainz', []]);
+  // Zegt Spotify later, dan blijft het een fout gedateerd album (Because of You, Can't Stop Loving You).
+  assert.deepEqual(decided('Because of You', 2004, mbOf(2003, { count: 1, next: 2004 }), 2004), [2004, 'musicbrainz', []]);
+  assert.deepEqual(decided("Can't Stop Loving You", 2002, mbOf(2001, { count: 1, next: 2002 }), 2002), [2002, 'musicbrainz', []]);
+});
+
+test('decide: zegt Wikidata precies het vroegste jaar van MusicBrainz (raw), dan telt die vroege uitgave', () => {
+  // Fall Out Boy – Centuries: single 2014 (bij MusicBrainz maar één verzamelaar), album 2015.
+  assert.deepEqual(decided('Centuries', 2015, mbOf(2015, { raw: 2014, count: 16 }), 2014), [2014, 'musicbrainz', []]);
+  // Dropkick Murphys – Rose Tattoo: 2012; het album is van 2013.
+  assert.deepEqual(decided('Rose Tattoo', 2013, mbOf(2013, { raw: 2012, count: 8 }), 2012), [2012, 'musicbrainz', []]);
+  // Willy Sommers – Laat de zon in je hart: 2006; MusicBrainz 2007, Spotify een verzamelaar van 2015.
+  assert.deepEqual(decided('Laat De Zon In Je Hart', 2015, mbOf(2007, { raw: 2006, count: 2 }), 2006), [2006, 'musicbrainz', []]);
+  // Zonder Wikidata, of als Wikidata het latere jaar zegt, blijft de losse verzamelaar fout gedateerd
+  // (Radar Love op "The Best of Golden Earring, 1971").
+  assert.deepEqual(decided('Centuries', 2015, mbOf(2015, { raw: 2014, count: 16 }), undefined), [2015, 'musicbrainz', []]);
+  assert.deepEqual(decided('Radar Love', 1973, mbOf(1973, { raw: 1971, count: 3 }), 1973), [1973, 'musicbrainz', []]);
+});
+
 /**
  * Een nagebootste MusicBrainz die zich gedraagt als de echte: de filters op
  * eerste release en studio-uitgave werken, en er komt hoogstens `limit`
