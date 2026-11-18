@@ -74,14 +74,14 @@ class Pick(unittest.TestCase):
         self.assertTrue(D.artist_ok("David Guetta", ["David Guetta", "Sia"]))
         self.assertFalse(D.artist_ok("Sia", ["David Guetta", "Sia"]))
         self.assertFalse(D.artist_ok("Freshman", ["*NSYNC"]))
+        self.assertTrue(D.artist_ok("Machine Gun Kelly", ["mgk", "Kid Rock"]))
 
     def test_queries_from_targeted_to_broad(self):
         q = D.queries("System Of A Down", "Chop Suey!")
-        self.assertEqual(q[0], 'artist:"System Of A Down" track:"Chop Suey!"')
-        self.assertIn('artist:"System Of A Down" track:"Chop Suey"', q)
-        self.assertNotIn('track:"Chop Suey!"', q)  # zonder artist: zoekt Deezer niet op de titel
+        self.assertEqual(q, ["System Of A Down Chop Suey!", "Chop Suey!", "System Of A Down Chop Suey", "Chop Suey"])
         q = D.queries("Rudimental, John Newman", "Feel The Love (feat. John Newman)")
-        self.assertEqual(q[0], 'artist:"Rudimental" track:"Feel The Love"')
+        self.assertEqual(q[0], "Rudimental Feel The Love")
+        self.assertIn("Black Eyed Peas Pump It live", D.queries("Black Eyed Peas", "Pump It - Live 2022"))
 
 
 class Find(unittest.TestCase):
@@ -113,11 +113,11 @@ class Find(unittest.TestCase):
         self.assertEqual(D.find(dz, "*NSYNC", "Bye Bye Bye")["id"], 42)
         self.assertEqual(len(calls), n)
 
-    def test_stops_after_the_first_two_queries_when_found(self):
+    def test_stops_after_the_first_query_that_finds_it(self):
         raw = {"id": 7, "title": "Wuthering Heights", "artist": {"name": "Kate Bush"}, "album": {"id": 3}, "rank": 10, "preview": "https://p"}
         dz, calls = self.deezer({"search?": {"data": [raw]}})
         self.assertEqual(D.find(dz, "Kate Bush", "Wuthering Heights")["id"], 7)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 1)
 
 
 class BuildLists(unittest.TestCase):

@@ -274,7 +274,7 @@ test('server: een lijst met fragmenten heet zo in de stand, een playlist niet; d
   const deck = Array.from({ length: 20 }, (_, i) => ({ id: `dz-${100 + i}`, artist: `A${i}`, title: `T${i}`, year: 1960 + i }));
   rules.setDeck(state, 'p0', { name: 'Rock', tracks: normaliseTracks(deck) });
   assert.deepEqual(rules.viewFor(state, 'p0').playlist, { name: 'Rock', count: 20, source: 'fragment' });
-  rules.startGame(state, 'p0', [], seeded(9));
+  rules.startGame(state, 'p0', state.custom.tracks, seeded(9));
   const host = rules.viewFor(state, 'p0');
   const guest = rules.viewFor(state, 'p1');
   // Alleen de host krijgt het ID van het lopende fragment, zoals bij Spotify.

@@ -2,7 +2,7 @@
 
 Muziekspel voor een groep vrienden: er speelt een nummer, niemand ziet titel of artiest, en wie aan de beurt is legt het op
 de juiste plaats op zijn tijdlijn. Iedereen speelt op zijn eigen gsm in de browser; de muziek komt uit één box, via de
-Spotify van de host.
+Spotify van de host, of zonder enig account met fragmenten van 30 seconden van Deezer.
 
 - Site: <https://baaswietse.github.io/muziek-tijdlijn/>
 - Privéspel voor eigen gebruik, niet commercieel. Eigen naam en eigen vormgeving.
@@ -35,7 +35,8 @@ Details:
 - Later instappen kan: je krijgt een startkaart en sluit achteraan aan.
 - De host kan een ander nummer vragen (als er een niet afspeelt), een beurt overslaan en een speler verwijderen.
 - Een tweede spel in dezelfde kamer herhaalt geen nummers zolang er genoeg ongespeelde zijn.
-- De host kiest de nummers: de standaardlijst van het spel of een van zijn eigen Spotify-playlists.
+- De host kiest de nummers: met Spotify de standaardlijst van het spel of een van zijn eigen Spotify-playlists; met
+  fragmenten een van de lijsten van het spel (zie *Spelen met fragmenten*).
 - Tokens: hoogstens één per beurt, ook nog bij de kaart die het spel beslist. De host en de speler aan beurt kunnen
   het aan eender wie geven, verplaatsen of terugnemen; een andere speler kan het alleen voor zichzelf opeisen zolang
   niemand het heeft, en het weer teruggeven. Iedereen ziet de tellers op het bord en op het eindscherm. Elk spel
@@ -100,7 +101,8 @@ gsm speler ─┐                         ┌─ tracks.json (op de site)
 gsm speler ─┼── WebSocket ── spelserver ┘
 gsm host  ──┘        │
    │                 └─ beslist alles: stapel schudden, beurt, juist/fout
-   └── Spotify Web API ──> Spotify-toestel van de host ──> box
+   ├── Spotify Web API ──> Spotify-toestel van de host ──> box
+   └── of: Deezer-API (adres van het fragment) ──> <audio> in de browser van de host ──> box
 ```
 
 | Map | Wat |
@@ -109,7 +111,7 @@ gsm host  ──┘        │
 | `server/src/` | De spelregels, los van hoe de server draait. |
 | `server/cloudflare/` | De server als Cloudflare Worker met een Durable Object per spel. |
 | `server/node/` | Dezelfde server als gewoon Node-programma (eigen server, lokaal testen). |
-| `tools/` | Het Python-script dat `tracks.json` maakt, met cache en correcties. |
+| `tools/` | Het Python-script dat `tracks.json` maakt, met cache en correcties, en `deezer.py` voor de fragmenten. |
 | `tests/` | Unit-tests en het spelverloop met meerdere browsers (Playwright). |
 
 - **De server is de baas.** De gsm's sturen alleen acties («ik leg het hier») en krijgen bij elke wijziging de volledige
@@ -117,7 +119,8 @@ gsm host  ──┘        │
   meteen weer. Je plaats in het spel zit in een token in de browser, dus ook herladen kan.
 - **Het antwoord lekt niet.** Titel, artiest, jaar en track-ID van het lopende nummer gaan pas bij de onthulling naar de
   spelers. Alleen de gsm van de host krijgt het track-ID eerder, omdat die Spotify moet aansturen. Voor de host is het
-  dus te vinden voor wie echt wil zoeken; dat kan niet anders zolang zijn gsm de muziek start.
+  dus te vinden voor wie echt wil zoeken; dat kan niet anders zolang zijn gsm de muziek start. Met fragmenten is dat
+  net zo: zie *Fragmenten van Deezer* hieronder.
 - **Acties.** Een gsm stuurt `{ t: 'hello', token }` om zich aan te melden en daarna een van deze acties: `start`,
   `settings`, `clearDeck`, `select`, `place`, `challenge` (met `index`: een token inzetten), `pass` (deze beurt geen
   token inzetten), `reveal` (einde van het inzetten, pas als iedereen koos; de host kan met `force: true` toch
@@ -154,6 +157,43 @@ gsm host  ──┘        │
   - Een beurt kost zo 4 verzoeken naar Spotify: starten, één controle, herhalen aan en een nacontrole na 8 s (voor een
     commando dat Spotify pas laat uitvoert). Bij *Dit toestel* 2 (de controles vraagt het aan de speler zelf). Gaat er
     iets mis, dan hoogstens een tiental. Ruim onder wat Spotify toelaat.
+- **Fragmenten van Deezer.** De tweede muziekbron, zonder login, toestel of Premium (`web/src/fragment/`,
+  `web/src/lib/fragments.js`):
+  - Een fragment heeft als track-ID `dz-` en het Deezer-ID (`dz-3135556`). Dat past in de bestaande controle van de
+    server (`TRACK_ID` in `server/src/tracks.js`: letters, cijfers, `_` en `-`), dus de stapel, de beurten, *Ander
+    nummer* en "geen nummers herhalen" werken ongewijzigd, in beide servervarianten. Een Spotify-ID heeft nooit een
+    streepje, dus de twee lopen nooit door elkaar. De server kijkt alleen na dat er na `dz-` cijfers staan, en noemt
+    een lijst met alleen fragmenten in de stand `source: 'fragment'` (zodat de wachtkamer weet dat ze bij fragmenten
+    past). Verder weet de server niets van Deezer.
+  - Kiest de host een lijst, dan haalt zijn browser `fragmenten.json` van de site, neemt de nummers van die lijst
+    (meer dan 500: een willekeurige greep van 500, zoals bij een grote playlist) en stuurt ze met de bestaande route
+    `POST /api/rooms/:code/deck` naar de server, net als een eigen playlist. De lijst blijft op de server; de andere
+    spelers zien alleen de naam en het aantal.
+  - Elke beurt krijgt de gsm van de host, zoals bij Spotify, alleen het ID van het nummer. Vlak voor het afspelen
+    vraagt zijn browser `https://api.deezer.com/track/<id>` op, met JSONP (een `<script>`; de API stuurt geen
+    CORS-kop). Het adres van de mp3 (`cdnt-preview.dzcdn.net`) draagt een handtekening die na enkele uren verloopt,
+    dus het wordt nooit vooraf bewaard. Eén `<audio>`-element speelt het fragment, herhalend (`loop`) tot er iets
+    anders moet spelen, ook tijdens de onthulling, zoals Spotify. Speelt het adres niet, dan vraagt het spel één keer
+    een nieuw (verlopen handtekening); lukt dat ook niet, of bestaat het nummer niet (meer), dan krijgt de host een
+    melding met *Ander nummer*. Eén verzoek naar Deezer per beurt (Deezer laat er 50 per 5 seconden toe), plus één per
+    *Opnieuw afspelen*.
+  - Een browser speelt geen geluid zonder aanraking: de host tikt één keer op *Zet het geluid aan*. Na een herlaad
+    (of als de browser het geluid toch weigert) verschijnt die knop op het spelscherm en begint het fragment van de
+    beurt opnieuw.
+  - Het ophalen en afspelen (`web/src/fragment/`) weet niet wie host is, zodat later ook een andere gsm geluid kan
+    maken.
+- **Wat de browsers zien.**
+  - Een gast krijgt van de server tot de onthulling niets van het lopende nummer: geen ID (ook geen Deezer-ID),
+    titel, artiest of jaar, bij Spotify en bij fragmenten. Zijn browser spreekt Deezer en Spotify niet aan en haalt
+    geen lijst met nummers op.
+  - De host ziet op zijn scherm tot de onthulling geen titel, artiest of jaar. Zijn browser krijgt wel het ID van het
+    lopende nummer. Met Spotify vraagt zijn browser daarmee bij Spotify wat er speelt (met titel en artiest in het
+    antwoord); met fragmenten vraagt hij het adres bij Deezer, en ook dat antwoord bevat titel, artiest, album en
+    datum (het spel gooit alles behalve het adres meteen weg). Wie de ontwikkelaarstools opent, vindt het dus, net
+    als bij Spotify. Het adres van de mp3 zelf bevat geen titel. De mediabediening van de gsm (meldingen,
+    vergrendelscherm) krijgt alleen «Muziek-tijdlijn». Bij fragmenten haalt de browser van de host ook
+    `fragmenten.json` op, met alle nummers van alle lijsten (niet welk nummer nu speelt); bij Spotify haalt hij voor
+    de geluidstest en een eigen playlist net zo de standaardlijst `tracks.json` op.
 - **Eigen playlist.** Kiest de host een eigen playlist, dan leest zijn browser de nummers bij Spotify, zoekt de
   jaartallen op bij MusicBrainz en Wikidata en stuurt de lijst naar de server. Die lijst blijft op de server; de
   andere spelers zien alleen de naam en het aantal nummers.

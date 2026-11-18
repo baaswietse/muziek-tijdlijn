@@ -16,11 +16,12 @@ Gebruik (Python 3.9 of nieuwer, geen extra pakketten):
 andere velden blijven staan), of een tekstbestand met per regel
 "Artiest - Titel". Het schrijft dezelfde lijst terug met `deezer` (het ID, of
 null), `deezer_titel`, `deezer_artiest`, `rank` (hoe bekend het nummer is bij
-Deezer), `album` en `genres` (de genres van het album bij Deezer). Wat niet
+Deezer), `album` en `album_genres` (de genres van het album bij Deezer). Wat niet
 gevonden is, staat onderaan in de uitvoer van het script.
 
 `lijsten` maakt daaruit het bronbestand web/public/fragmenten.json met de
-lijsten die uit jaar en genre volgen (zie LIJSTEN hieronder). Lijsten die je
+lijsten die uit jaar en genre volgen (zie LIJSTEN hieronder). Als genre telt
+`genres` uit de invoer, of anders `album_genres`. Lijsten die je
 zelf vult (Nederlandstalig, Rustige pop en ballads) blijven daarbij staan,
 per Deezer-ID. Daarna pas je fragmenten.json gewoon zelf aan.
 
@@ -111,9 +112,14 @@ def artists_of(artist: str) -> list[str]:
     return [a.strip() for a in re.split(r",\s*", str(artist)) if a.strip()]
 
 
+# Dezelfde artiest onder een andere naam bij Deezer.
+ALIASES = {"mgk": "machine gun kelly"}
+
+
 def artist_ok(candidate: str, wanted: list[str]) -> bool:
     """De eerste gevraagde artiest moet in de artiest van Deezer zitten (of omgekeerd), als hele woorden."""
     c = T.norm(candidate)
+    wanted = [ALIASES.get(T.norm(a), a) for a in wanted]
     if not c or not wanted:
         return False
     for i, a in enumerate(wanted):
@@ -189,17 +195,16 @@ def queries(artist: str, title: str) -> list[str]:
     base = base_title(title)
     plain = re.sub(r"[^\w\s']+", " ", base, flags=re.UNICODE)
     plain = re.sub(r"\s+", " ", plain).strip()
-    # Let op: `track:"..."` zonder `artist:` zoekt bij Deezer niet op de titel.
-    out = [
-        f'artist:"{main}" track:"{base}"',
-        f"{main} {base}",
-        base,
-    ]
+    # De geavanceerde zoekvorm (`artist:"..." track:"..."`) geeft bij de API van
+    # Deezer (november 2026) niets terug; gewone woorden wel.
+    out = [f"{main} {base}", base]
     if plain and plain != base:
-        out += [f'artist:"{main}" track:"{plain}"', f"{main} {plain}", plain]
+        out += [f"{main} {plain}", plain]
     # Een remix of live-versie: ook met de volledige titel zoeken.
-    if T.is_remix(title) or T.is_live(title):
+    if T.is_remix(title):
         out.insert(1, f"{main} {T.clean_title(title)}")
+    elif T.is_live(title):
+        out.insert(1, f"{main} {base} live")
     seen, uniq = set(), []
     for q in out:
         if q not in seen:
@@ -324,12 +329,12 @@ def find(dz: Deezer, artist: str, title: str) -> dict | None:
     """Het beste Deezer-nummer voor artiest en titel, of None."""
     base = base_title(title)
     best = None
-    for i, q in enumerate(queries(artist, title)):
+    for q in queries(artist, title):
         hit = pick(dz.search(q, base), artist, title)
         if hit and (best is None or (version_tier(hit["title"], title, artists_of(artist)), -hit["rank"]) < (version_tier(best["title"], title, artists_of(artist)), -best["rank"])):
             best = hit
-        # De gerichte en de gewone zoekopdracht altijd; de ruimere alleen als nog niets paste.
-        if best and i >= 1:
+        # Ruimer zoeken alleen als nog niets paste.
+        if best:
             break
     if best is None:
         # Laatste kans: de bekendste nummers van de artiest zelf. Sommige
@@ -339,6 +344,14 @@ def find(dz: Deezer, artist: str, title: str) -> dict | None:
 
 
 # ---------------------------------------------------------------- lijsten
+
+
+def display_title(title: str) -> str:
+    """Wat de spelers bij de onthulling zien: zonder "- Remastered 2011", maar een remix of live-opname blijft herkenbaar."""
+    if T.is_remix(title):
+        return T.clean_title(title)
+    clean = T._strip_versions(title)
+    return f"{clean} (live)" if T.is_live(title) else clean
 
 
 def build_lists(rows: list[dict], previous: dict | None = None) -> dict:
@@ -366,10 +379,11 @@ def build_lists(rows: list[dict], previous: dict | None = None) -> dict:
         tracks.append({
             "deezer": int(dz_id),
             "artist": r["artist"],
-            "title": T._strip_versions(r["title"]) if not T.is_remix(r["title"]) else r["title"],
+            "title": display_title(r["title"]),
             "year": int(r["year"]),
             "lists": [],
-            "_genres": set(r.get("genres") or []),
+            # Genres die al in de invoer staan, gaan voor op die van het album bij Deezer.
+            "_genres": set(r.get("genres") or r.get("album_genres") or []),
             "_rank": int(r.get("rank") or 0),
         })
     for t in tracks:
@@ -437,7 +451,7 @@ def cmd_zoek(args) -> int:
                     "deezer_artiest": hit["artist"],
                     "rank": hit["rank"],
                     "album": hit["album"],
-                    "genres": info.get("genres") or [],
+                    "album_genres": info.get("genres") or [],
                 })
             else:
                 r.update({"deezer": None, "deezer_titel": None, "deezer_artiest": None, "rank": 0, "album": None})
