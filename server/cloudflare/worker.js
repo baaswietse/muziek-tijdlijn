@@ -351,7 +351,34 @@ export class YearStore extends DurableObject {
          t INTEGER NOT NULL
        )`,
     );
+    // Kolommen die er later bij kwamen (jaren per bron als JSON). Een
+    // bestaande tabel krijgt ze hier; oude rijen hebben ze leeg.
+    const have = new Set([...this.sql.exec('PRAGMA table_info(years)')].map((c) => c.name));
+    for (const col of ['b']) {
+      if (!have.has(col)) this.sql.exec(`ALTER TABLE years ADD COLUMN ${col} TEXT`);
+    }
     this.count = null; // aantal rijen, pas geteld bij het eerste schrijfverzoek
+  }
+
+  /** Een rij uit de tabel als item (zie yearlist.normaliseEntry). */
+  static entry(row) {
+    let d = [];
+    try {
+      d = JSON.parse(row.d);
+    } catch {
+      // kapotte rij: zonder twijfels
+    }
+    const entry = { id: row.id, y: row.y, s: row.s, d: Array.isArray(d) ? d : [] };
+    if (row.r !== null) entry.r = row.r;
+    if (row.b) {
+      try {
+        const b = JSON.parse(row.b);
+        if (b && typeof b === 'object' && !Array.isArray(b)) entry.b = b;
+      } catch {
+        // kapot: zonder jaren per bron
+      }
+    }
+    return entry;
   }
 
   /** Map id -> item voor de gevraagde nummers die al gekend zijn. */
@@ -360,24 +387,14 @@ export class YearStore extends DurableObject {
     if (ids.length === 0) return found;
     // Eén parameter in plaats van honderden: SQLite pakt de lijst zelf uit.
     const rows = this.sql.exec(
-      'SELECT id, y, s, d, r FROM years WHERE id IN (SELECT value FROM json_each(?))',
+      'SELECT id, y, s, d, r, b FROM years WHERE id IN (SELECT value FROM json_each(?))',
       JSON.stringify(ids),
     );
-    for (const row of rows) {
-      let d = [];
-      try {
-        d = JSON.parse(row.d);
-      } catch {
-        // kapotte rij: zonder twijfels
-      }
-      const entry = { id: row.id, y: row.y, s: row.s, d: Array.isArray(d) ? d : [] };
-      if (row.r !== null) entry.r = row.r;
-      found.set(row.id, entry);
-    }
+    for (const row of rows) found.set(row.id, YearStore.entry(row));
     return found;
   }
 
-  /** { years: { id: { y, s, d, r? } } } */
+  /** { years: { id: { y, s, d, r?, b? } } } */
   lookup(ids) {
     const years = {};
     for (const [id, entry] of this.read(ids)) years[id] = yearlist.publicEntry(entry);
@@ -393,12 +410,13 @@ export class YearStore extends DurableObject {
     this.ctx.storage.transactionSync(() => {
       for (const e of changed) {
         this.sql.exec(
-          'INSERT OR REPLACE INTO years (id, y, s, d, r, t) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO years (id, y, s, d, r, b, t) VALUES (?, ?, ?, ?, ?, ?, ?)',
           e.id,
           e.y,
           e.s,
           JSON.stringify(e.d),
           e.r ?? null,
+          e.b ? JSON.stringify(e.b) : null,
           now,
         );
       }

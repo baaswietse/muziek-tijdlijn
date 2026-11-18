@@ -1,5 +1,8 @@
-// Nagebootste Spotify (inloggen, Web API, Web Playback SDK) en MusicBrainz op
-// netwerkniveau, voor de tests met de echte Spotify-laag van de site.
+// Nagebootste Spotify (inloggen, Web API, Web Playback SDK), MusicBrainz en
+// Wikidata op netwerkniveau, voor de tests met de echte Spotify-laag van de site.
+// Het echte MusicBrainz en Wikidata worden nooit aangesproken, ook niet tegen
+// de echte site (MT_LIVE=1): fakeSpotify blokkeert ze, fakeMusicBrainz en
+// fakeWikidata antwoorden in hun plaats.
 
 import { expect } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
@@ -91,6 +94,12 @@ export async function fakeSpotify(context) {
       report: null, // meld altijd dit track-ID, wat er ook gevraagd werd (toestel hangt vast)
     },
   };
+
+  // Nooit naar het echte MusicBrainz of Wikidata. Een nagebootste versie
+  // (fakeMusicBrainz, fakeWikidata) komt later en gaat dus voor.
+  for (const host of ['https://musicbrainz.org/**', 'https://query.wikidata.org/**', 'https://www.wikidata.org/**']) {
+    await context.route(host, (route) => route.abort('blockedbyclient'));
+  }
 
   const now = () => Date.now();
   const playing = () => spotify.player;
@@ -297,6 +306,43 @@ export async function fakeMusicBrainz(context, answers, { delay = 0 } = {}) {
     await route.fulfill({ headers: CORS, json: { count: recordings.length, recordings } }).catch(() => {});
   });
   return mb;
+}
+
+/**
+ * Nagebootste Wikidata (de zoekdienst query.wikidata.org). `answers`: titel in
+ * kleine letters -> { artist, date } of een lijst daarvan; andere titels kent
+ * ze niet. `mode`: 'ok', 'down' (onbereikbaar) of 'busy' (429, veel te lang
+ * wachten). Geeft { queries: [[titels per verzoek]], mode } terug.
+ */
+export async function fakeWikidata(context, answers, { mode = 'ok' } = {}) {
+  const wd = { queries: [], mode };
+  await context.route('https://query.wikidata.org/**', async (route) => {
+    const req = route.request();
+    const query = new URLSearchParams(req.postData() || '').get('query') || '';
+    const values = /VALUES \?q \{([^}]*)\}/.exec(query)?.[1] || '';
+    const titles = [...values.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1].replace(/\\(.)/g, '$1'));
+    wd.queries.push(titles);
+    if (wd.mode === 'down') return route.abort('connectionrefused').catch(() => {});
+    if (wd.mode === 'busy') {
+      return route.fulfill({ status: 429, headers: { ...CORS, 'retry-after': '3600' }, body: 'Too Many Requests' }).catch(() => {});
+    }
+    const bindings = [];
+    for (const q of titles) {
+      for (const hit of [answers[q] || []].flat()) {
+        bindings.push({
+          q: { type: 'literal', value: q },
+          item: { type: 'uri', value: `http://www.wikidata.org/entity/Q${9000 + bindings.length}` },
+          labels: { type: 'literal', value: hit.title || q },
+          performers: { type: 'literal', value: hit.artist },
+          dates: { type: 'literal', value: hit.date ? `${hit.date}-01-01T00:00:00Z` : '' },
+          types: { type: 'literal', value: hit.types || 'Q134556' },
+        });
+      }
+    }
+    const json = { head: { vars: ['q', 'item', 'labels', 'performers', 'dates', 'types'] }, results: { bindings } };
+    await route.fulfill({ headers: { ...CORS, 'content-type': 'application/sparql-results+json' }, json }).catch(() => {});
+  });
+  return wd;
 }
 
 /** Een nummer in een playlist zoals de Web API van Spotify het geeft. */

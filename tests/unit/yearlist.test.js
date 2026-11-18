@@ -10,9 +10,9 @@ const NOW = Date.UTC(2026, 5, 1);
 const ID = '4uLU6hMCjMI75M1A2tKUQC';
 const ID2 = '7ouMYWpwJ422jRcDASZB7P';
 
-test('normaliseEntry houdt alleen id, jaar, bron, twijfels en regelversie over', () => {
+test('normaliseEntry houdt alleen id, jaar, bron, twijfels, regelversie en jaren per bron over', () => {
   const e = L.normaliseEntry(
-    { id: ID, y: 1987, s: 'musicbrainz', d: ['Spotify zegt 2010, MusicBrainz 1987'], r: 2, extra: 'weg', title: 'geheim' },
+    { id: ID, y: 1987, s: 'musicbrainz', d: ['Spotify zegt 2010, MusicBrainz 1987'], r: 2, extra: 'weg', name: 'weg', at: 5 },
     NOW,
   );
   assert.deepEqual(e, { id: ID, y: 1987, s: 'musicbrainz', d: ['Spotify zegt 2010, MusicBrainz 1987'], r: 2 });
@@ -172,7 +172,44 @@ test('mergeEntries geeft alleen wat verandert en respecteert de bovengrens', () 
 test('publicEntry geeft alleen jaar, bron, twijfels en regelversie terug', () => {
   assert.deepEqual(L.publicEntry({ id: ID, y: 1980, s: 'spotify', d: ['x'], r: 2, t: 123 }), { y: 1980, s: 'spotify', d: ['x'], r: 2 });
   assert.deepEqual(L.publicEntry({ id: ID, y: 1980, s: 'spotify', d: [] }), { y: 1980, s: 'spotify', d: [] });
+  // Jaren per bron gaan mee.
+  assert.deepEqual(L.publicEntry({ id: ID, y: 1980, s: 'musicbrainz', d: [], r: 3, b: { sp: 2001, mb: 1980, wd: 1980 }, title: 'Lied', artist: 'Band', at: 5 }), {
+    y: 1980,
+    s: 'musicbrainz',
+    d: [],
+    r: 3,
+    b: { sp: 2001, mb: 1980, wd: 1980 },
+  });
 });
+
+test('normaliseEntry: jaren per bron en Wikidata als bron', () => {
+  const e = L.normaliseEntry(
+    {
+      id: ID,
+      y: 1973,
+      s: 'wikidata',
+      d: [],
+      r: 3,
+      b: { sp: 1999, mb: null, wd: 1973, xx: 1950, extra: 'weg' },
+    },
+    NOW,
+  );
+  assert.deepEqual(e, { id: ID, y: 1973, s: 'wikidata', d: [], r: 3, b: { sp: 1999, mb: null, wd: 1973 } });
+  // Ongeldige jaren per bron vallen weg; niets over: geen b.
+  const bad = L.normaliseEntry({ id: ID, y: 1990, s: 'spotify', b: { sp: '1990', mb: 1800, wd: 2030, b: 1990 } }, NOW);
+  assert.equal('b' in bad, false);
+  for (const b of ['x', [1990], null, 5]) assert.equal('b' in L.normaliseEntry({ id: ID, y: 1990, s: 'spotify', b }, NOW), false);
+});
+
+test('samenvoegen: een oudere site wist de jaren per bron niet', () => {
+  const named = { ...auto(1980), r: 3, b: { sp: 1990, mb: 1980 } };
+  const older = { id: ID, y: 1981, s: 'musicbrainz', d: [], r: 3 };
+  assert.deepEqual(L.mergeEntry(named, older), { ...older, b: named.b });
+  assert.deepEqual(L.mergeEntry(named, manual(1978)), { ...manual(1978), b: named.b });
+  assert.equal(L.mergeEntry(named, auto(1975)), null);
+  assert.deepEqual(L.mergeEntry(named, { ...named, b: { sp: 1990, mb: 1980, wd: 1980 } }).b, { sp: 1990, mb: 1980, wd: 1980 });
+});
+
 
 test('authenticateHost: alleen de host van het spel', () => {
   const state = room.createRoomState('ABCD');

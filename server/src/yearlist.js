@@ -1,6 +1,6 @@
 // De gedeelde lijst met jaartallen: per Spotify-nummer het jaar dat de browser
 // van een host opzocht (of zelf verbeterde), zodat een andere host op een ander
-// toestel niet alles opnieuw bij MusicBrainz moet opzoeken.
+// toestel niet alles opnieuw bij MusicBrainz moet opzoeken. Met wat elke bron zei.
 //
 // Het adres van de server is publiek, dus alles wat binnenkomt wordt hier
 // streng nagekeken en ingekort. Wie mag lezen en schrijven (alleen de host van
@@ -26,8 +26,10 @@ export const MAX_ROWS = 200_000;
  * De bronnen die web/src/lib/deck.js kent. 'lijst' (de nagekeken lijst van
  * de site) hoort er niet bij: die jaartallen staan al in tracks.json.
  */
-export const SOURCES = ['musicbrainz', 'spotify', 'onbekend', 'handmatig'];
+export const SOURCES = ['musicbrainz', 'spotify', 'wikidata', 'onbekend', 'handmatig'];
 export const MANUAL = 'handmatig';
+/** De losse jaren per bron (veld b): Spotify-album, MusicBrainz, Wikidata. */
+const SOURCE_YEARS = ['sp', 'mb', 'wd'];
 
 // Zo begint de twijfel die deck.js toevoegt als MusicBrainz niet bereikbaar
 // was. Zo'n jaar is alleen een noodoplossing: deck.js onthoudt het zelf ook
@@ -41,9 +43,28 @@ function maxYear(now) {
   return new Date(now).getFullYear() + 1;
 }
 
+/** Platte tekst: zonder stuurtekens, witruimte samengevoegd, ingekort. '' als er niets overblijft. */
+function cleanText(text, max) {
+  if (typeof text !== 'string') return '';
+  return text.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
+}
+
+/** De losse jaren per bron: { sp?, mb?, wd? }, elk een jaar of null. Ongeldig valt weg. */
+function sourceYears(raw, now) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  for (const key of SOURCE_YEARS) {
+    if (!(key in raw)) continue;
+    const y = raw[key];
+    if (y === null) out[key] = null;
+    else if (Number.isInteger(y) && y >= 1900 && y <= maxYear(now)) out[key] = y;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /**
- * Eén item zoals het opgeslagen wordt: { id, y, s, d, r? }, of null als het
- * niet bruikbaar is. Alle andere velden vallen weg.
+ * Eén item zoals het opgeslagen wordt: { id, y, s, d, r?, b? },
+ * of null als het niet bruikbaar is. Alle andere velden vallen weg.
  */
 export function normaliseEntry(raw, now = Date.now()) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -67,15 +88,17 @@ export function normaliseEntry(raw, now = Date.now()) {
     for (const text of raw.d) {
       if (typeof text !== 'string') continue;
       if (UNREACHABLE.test(text.trim())) return null;
-      const clean = text.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_DOUBT);
+      const clean = cleanText(text, MAX_DOUBT);
       if (clean && d.length < MAX_DOUBTS) d.push(clean);
     }
   }
 
   const entry = { id, y, s, d };
-  // Regelversie voor remixes (REMIX_RULES in web/src/lib/years.js). Oudere
-  // items hebben er geen; dat is voor gewone nummers geen probleem.
+  // Regelversie (RULES in web/src/lib/years.js; tot 2 alleen voor remixes).
+  // Oudere items hebben er geen.
   if (Number.isInteger(raw.r) && raw.r >= 1 && raw.r <= 1000) entry.r = raw.r;
+  const b = sourceYears(raw.b, now);
+  if (b) entry.b = b;
   return entry;
 }
 
@@ -122,20 +145,25 @@ export function parseEntries(body, now = Date.now()) {
  *    van een oudere handmatige verbetering.
  *  - Een automatisch resultaat overschrijft nooit een handmatige verbetering.
  *  - Een nieuwer automatisch resultaat vervangt een ouder, behalve als het met
- *    oudere regels voor remixes gemaakt is (lagere r) dan wat er al staat:
- *    een oudere app mag het werk van een nieuwere niet terugdraaien.
+ *    oudere regels gemaakt is (lagere r) dan wat er al staat: een oudere app
+ *    mag het werk van een nieuwere niet terugdraaien.
+ *  - De jaren per bron blijven staan als het nieuwe item ze niet heeft (een
+ *    oudere site stuurt ze niet mee).
  *  - Niets veranderd: null, zodat er niets geschreven hoeft te worden.
  */
 export function mergeEntry(old, incoming) {
   if (!incoming) return null;
+  let next = incoming;
   if (old) {
     if (incoming.s !== MANUAL) {
       if (old.s === MANUAL) return null;
       if ((incoming.r ?? 0) < (old.r ?? 0)) return null;
     }
-    if (same(old, incoming)) return null;
+    next = { ...incoming };
+    if (next.b === undefined && old.b !== undefined) next.b = old.b;
+    if (same(old, next)) return null;
   }
-  return incoming;
+  return next;
 }
 
 function same(a, b) {
@@ -144,7 +172,8 @@ function same(a, b) {
     a.s === b.s &&
     (a.r ?? null) === (b.r ?? null) &&
     a.d.length === b.d.length &&
-    a.d.every((t, i) => t === b.d[i])
+    a.d.every((t, i) => t === b.d[i]) &&
+    JSON.stringify(a.b ?? null) === JSON.stringify(b.b ?? null)
   );
 }
 
@@ -171,5 +200,7 @@ export function mergeEntries(existing, entries, free = Infinity) {
 export function publicEntry(entry) {
   const out = { y: entry.y, s: entry.s, d: entry.d };
   if (entry.r !== undefined && entry.r !== null) out.r = entry.r;
+  if (entry.b) out.b = entry.b;
   return out;
 }
+

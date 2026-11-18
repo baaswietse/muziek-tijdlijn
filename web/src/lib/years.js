@@ -126,6 +126,11 @@ export function cleanTitle(title) {
   return stripVersions(title);
 }
 
+/** Een heropname van de artiest zelf, zoals "Love Story (Taylor's Version)". */
+export function isRerecording(title) {
+  return /\b(?:taylor['’]s version|re-?record(?:ed|ing)?)\b/i.test(String(title ?? ''));
+}
+
 export function isLive(title) {
   const raw = String(title ?? '').trim();
   const clean = stripVersions(raw);
@@ -398,41 +403,88 @@ export async function lookup(title, artists, search) {
   return { year: null, method: 'niets gevonden' };
 }
 
+const near = (a, b) => a !== null && b !== null && Math.abs(a - b) <= 1;
+
 /**
- * Kiest het jaar voor één nummer uit wat Spotify en MusicBrainz zeggen.
- * `doubts` somt op waarom het jaar best nagekeken wordt.
+ * Kiest het jaar voor één nummer uit wat Spotify (het jaar van het album),
+ * MusicBrainz (lookup) en Wikidata (wdPick in wikidata.js) zeggen.
+ * `wd`: undefined als Wikidata niet gevraagd is of niet antwoordde (dan zoals
+ * met twee bronnen), { year: null } als Wikidata niets kent.
+ *
+ * Twee bronnen die het eens zijn (hoogstens een jaar verschil) winnen van de
+ * derde. Alleen als er geen overeenstemming is, blijft er twijfel (`doubts`).
+ * In detail, afgeleid uit 287 nagekeken nummers:
+ *  - MusicBrainz en Spotify eens: het vroegste van de twee, want een album
+ *    kan niet voor de eerste release liggen. Zegt Wikidata precies hetzelfde
+ *    jaar als MusicBrainz, dan dat jaar (Spotify een jaar te vroeg).
+ *  - Oneens: Wikidata beslist als het bij precies een van de twee past.
+ *    Ligt Wikidata nog vroeger dan beide, dan Wikidata, met twijfel.
+ *    Zonder beslissing: heeft MusicBrainz meerdere uitgaven in zijn jaar en
+ *    ligt dat vóór Spotify (een remaster of verzamelaar), dan MusicBrainz;
+ *    anders het vroegste, met twijfel.
+ *  - Een losse vroegste uitgave bij MusicBrainz met kort daarna meer
+ *    uitgaven (mb.next): zegt Wikidata dat latere jaar (of later), dan is de
+ *    vroege uitgave fout gedateerd (een album "van 2003" dat in 2004 uitkwam).
+ *    Een echte vroege single heeft in Wikidata haar eigen, vroege datum.
+ *    Alleen met een Spotify-jaar erbij (dat kan de vroege uitgave nog
+ *    bevestigen): Wikidata heeft vaak de datum van een latere single.
+ *  - Zegt Spotify precies het vroegste jaar dat MusicBrainz kent (ook een
+ *    jaar met maar één verzamelaar), dan telt dat: een nieuw nummer op een
+ *    eigen best-of.
+ *  - Remixes, live-opnames en heropnames: Wikidata beschrijft meestal het
+ *    origineel en telt dan niet mee. Een remix krijgt nooit het jaar van het
+ *    origineel.
+ * `b`: wat elke bron zei ({ sp, mb, wd }; wd ontbreekt als Wikidata niet meetelde).
  */
-export function decide({ title, spotifyYear }, mb) {
-  let mbYear = mb?.year ?? null;
-  // Zegt Spotify precies het vroegste jaar dat MusicBrainz kent (ook een jaar
-  // met maar één verzamelaar), dan zijn twee bronnen het eens: bv. een nieuw
-  // nummer op een eigen best-of.
-  if (mbYear && spotifyYear && mb.raw && mb.raw === spotifyYear && mb.raw < mbYear) mbYear = mb.raw;
-  const doubts = [];
-  let year;
-  let source;
-  if (mbYear && spotifyYear) {
-    // Het vroegste van de twee: een album kan niet voor de eerste release liggen.
-    [year, source] = mbYear <= spotifyYear ? [mbYear, 'musicbrainz'] : [spotifyYear, 'spotify'];
-    if (Math.abs(mbYear - spotifyYear) > 1) doubts.push(`Spotify zegt ${spotifyYear}, MusicBrainz ${mbYear}`);
-  } else if (mbYear) {
-    [year, source] = [mbYear, 'musicbrainz'];
-  } else if (spotifyYear) {
+export function decide({ title, spotifyYear }, mb, wd) {
+  const s = spotifyYear ?? null;
+  const remix = isRemix(title);
+  const own = !remix && !isLive(title) && !isRerecording(title); // Wikidata telt mee
+  const asked = own && wd !== undefined && wd !== null;
+  const w = asked ? (wd.year ?? null) : null;
+  let m = mb?.year ?? null;
+  if (m !== null && s !== null && mb.next && w !== null && w >= mb.next) m = mb.next;
+  if (m !== null && s !== null && mb.raw && mb.raw === s && mb.raw < m) m = mb.raw;
+  const strong = m === (mb?.year ?? null) && (mb?.count ?? 0) >= 2;
+
+  let year = null;
+  let doubt = '';
+  if (m !== null && s !== null) {
+    if (near(m, s)) year = w === m && s !== m ? m : Math.min(m, s);
+    else if (near(w, m) && !near(w, s)) year = m;
+    else if (near(w, s) && !near(w, m)) year = s;
+    else {
+      const both = `Spotify zegt ${s}, MusicBrainz ${m}${asked ? `, Wikidata ${w ?? 'niets'}` : ''}`;
+      if (w !== null && w < Math.min(m, s) - 1) [year, doubt] = [w, both];
+      else if (strong && m < s && (w === null || w > m)) year = m;
+      else [year, doubt] = [Math.min(m, s), both];
+    }
+  } else if (m !== null) {
+    if (w !== null && !near(w, m)) [year, doubt] = [Math.min(m, w), `MusicBrainz zegt ${m}, Wikidata ${w}`];
+    else year = m;
+  } else if (s !== null) {
     // Ook bij een remix: nooit het jaar van het origineel, dat hoort niet bij wat de spelers horen.
-    [year, source] = [spotifyYear, 'spotify'];
-    doubts.push(
-      isRemix(title)
-        ? 'remix niet gevonden bij MusicBrainz; jaar van het Spotify-album'
-        : 'niet gevonden bij MusicBrainz; jaar van het Spotify-album',
-    );
+    const why = remix ? 'remix niet gevonden bij MusicBrainz; jaar van het Spotify-album' : 'niet gevonden bij MusicBrainz; jaar van het Spotify-album';
+    if (near(w, s)) year = Math.min(s, w);
+    else if (w !== null) [year, doubt] = [Math.min(s, w), `niet gevonden bij MusicBrainz; Spotify zegt ${s}, Wikidata ${w}`];
+    else [year, doubt] = [s, why];
+  } else if (w !== null) {
+    [year, doubt] = [w, 'alleen Wikidata kent een jaar'];
   } else {
-    [year, source] = [null, 'onbekend'];
-    doubts.push('geen jaar gevonden');
+    doubt = 'geen jaar gevonden';
   }
-  if (mbYear && mb.method === 'ruim') doubts.push('alleen via een ruime zoekopdracht gevonden');
-  if (mbYear && mb.official === false) doubts.push('alleen live-, demo- of onofficiële uitgaven gevonden');
-  if (isLive(title)) doubts.push('live-opname');
-  return { year, source, spotifyYear: spotifyYear ?? null, mbYear, doubts };
+
+  const source = year === null ? 'onbekend' : year === m ? 'musicbrainz' : year === s ? 'spotify' : 'wikidata';
+  const doubts = doubt ? [doubt] : [];
+  if (doubt) {
+    // Wat de twijfel groter maakt; zonder twijfel doet het er niet toe.
+    if (m !== null && mb.method === 'ruim') doubts.push('alleen via een ruime zoekopdracht gevonden');
+    if (m !== null && mb.official === false) doubts.push('alleen live-, demo- of onofficiële uitgaven gevonden');
+    if (isLive(title)) doubts.push('live-opname');
+  }
+  const b = { sp: s, mb: m };
+  if (asked) b.wd = w;
+  return { year, source, spotifyYear: s, mbYear: m, wdYear: w, doubts, b };
 }
 
 // ---------------------------------------------------------------- MusicBrainz

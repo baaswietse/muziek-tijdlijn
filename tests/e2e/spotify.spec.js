@@ -336,7 +336,8 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   const doubts = page.getByTestId('deck-doubts');
   await expect(doubts).toContainText('4 jaartallen om na te kijken');
   await doubts.locator('summary').click();
-  await expect(doubts).toContainText('Spotify zegt 2010, MusicBrainz 1987');
+  // Per nummer kort wat elke bron zegt (Wikidata is hier niet bereikbaar).
+  await expect(page.getByTestId(`doubt-why-${id('A')}`)).toHaveText(' — Spotify 2010 · MusicBrainz 1987');
   await expect(doubts).toContainText('niet gevonden bij MusicBrainz');
   await expect(doubts).toContainText('geen jaar gevonden'); // de host kan het jaar zelf invullen
   await page.getByTestId(`doubt-${id('C')}`).fill('1998');

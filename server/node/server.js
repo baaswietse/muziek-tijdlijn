@@ -37,7 +37,7 @@ const MAX_BODY = 2048;
 /** code -> { state, sockets:Set<WebSocket> } */
 const rooms = new Map();
 
-/** De gedeelde lijst met jaartallen (zie ../src/yearlist.js): id -> { id, y, s, d, r? } */
+/** De gedeelde lijst met jaartallen (zie ../src/yearlist.js): id -> { id, y, s, d, r?, b? } */
 const years = new Map();
 
 // ---------- nummers ----------

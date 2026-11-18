@@ -365,10 +365,16 @@ test('decide: vroegste van Spotify en MusicBrainz, met twijfels', () => {
   r = Y.decide({ title: 'X', spotifyYear: null }, null);
   assert.deepEqual([r.year, r.source], [null, 'onbekend']);
 
+  // Een ruime zoekopdracht, alleen onofficiële uitgaven of een live-opname zijn
+  // alleen nog een reden om na te kijken als de bronnen het oneens zijn.
   r = Y.decide({ ...t, spotifyYear: 1975 }, { year: 1975, official: false, method: 'ruim' });
-  assert.equal(r.doubts.length, 2);
+  assert.deepEqual(r.doubts, []);
+  r = Y.decide({ ...t, spotifyYear: 1990 }, { year: 1975, official: false, method: 'ruim', count: 0 });
+  assert.equal(r.doubts.length, 3);
   r = Y.decide({ title: 'Enter Sandman - Live', spotifyYear: 1991 }, { year: 1991, official: true, method: 'exact' });
-  assert.deepEqual(r.doubts, ['live-opname']);
+  assert.deepEqual(r.doubts, []);
+  r = Y.decide({ title: 'Enter Sandman - Live', spotifyYear: 1999 }, { year: 1991, official: true, method: 'exact' });
+  assert.deepEqual(r.doubts, ['Spotify zegt 1999, MusicBrainz 1991', 'live-opname']);
 });
 
 // ---------------------------------------------------------------- remixes

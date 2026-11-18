@@ -155,20 +155,23 @@ gsm host  ──┘        │
     commando dat Spotify pas laat uitvoert). Bij *Dit toestel* 2 (de controles vraagt het aan de speler zelf). Gaat er
     iets mis, dan hoogstens een tiental. Ruim onder wat Spotify toelaat.
 - **Eigen playlist.** Kiest de host een eigen playlist, dan leest zijn browser de nummers bij Spotify, zoekt de
-  jaartallen op bij MusicBrainz en stuurt de lijst naar de server. Die lijst blijft op de server; de andere spelers
-  zien alleen de naam en het aantal nummers.
+  jaartallen op bij MusicBrainz en Wikidata en stuurt de lijst naar de server. Die lijst blijft op de server; de
+  andere spelers zien alleen de naam en het aantal nummers.
 - **Gedeelde jaartallen.** Wat een host opzocht, bewaart de server in één gedeelde lijst voor alle spellen: per
-  Spotify-track-ID het jaar, de bron (`musicbrainz`, `spotify`, `onbekend` of `handmatig`), eventuele twijfels en de
-  regelversie voor remixes. Geen titels, geen namen, geen persoonsgegevens. Alleen de host van een bestaand spel kan
-  erin lezen of schrijven (met de geheime sleutel van zijn plaats in dat spel); gasten niet, want de lijst verklapt
-  antwoorden. Een handmatige verbetering gaat voor op een opgezocht jaar en wordt daar nooit door overschreven; een
-  nieuwere verbetering vervangt een oudere. Op Cloudflare staat de lijst in een tweede Durable Object (`YearStore`,
-  één exemplaar, SQLite); de Node-server houdt ze in het geheugen en in `DATA_FILE` als dat ingesteld is.
+  Spotify-track-ID het jaar, de bron (`musicbrainz`, `spotify`, `wikidata`, `onbekend` of `handmatig`), eventuele
+  twijfels, de regelversie (`r`) en wat elke bron zei (`b`: `{ sp, mb, wd }`, het jaar van het Spotify-album, van
+  MusicBrainz en van Wikidata). Geen titels, geen namen, geen persoonsgegevens. Alleen de host van een bestaand spel
+  kan erin lezen of schrijven (met de geheime sleutel van zijn plaats in dat spel); gasten niet, want de lijst
+  verklapt antwoorden. Een handmatige verbetering gaat voor op een opgezocht jaar en wordt daar nooit door
+  overschreven; een nieuwere verbetering vervangt een oudere; een resultaat van oudere regels (lagere `r`) vervangt
+  nooit een nieuwer. Stuurt een oudere site een item zonder `b`, dan blijft dat staan. Op Cloudflare staat de lijst
+  in een tweede Durable Object (`YearStore`, één exemplaar, SQLite; de kolom `b` komt er bij de eerste start vanzelf
+  bij); de Node-server houdt ze in het geheugen en in `DATA_FILE` als dat ingesteld is.
 - **Routes.** `POST /api/rooms` (spel maken), `POST /api/rooms/:code/join`, `POST /api/rooms/:code/deck` (eigen
   lijst van de host), de WebSocket `/api/rooms/:code/ws`, en voor de gedeelde jaartallen
   `POST /api/rooms/:code/years/lookup` met `{ token, ids }` (hoogstens 500 track-ID's; antwoord `{ years: { id: { y,
-  s, d, r } } }` met alleen wat gekend is) en `POST /api/rooms/:code/years` met `{ token, entries: [{ id, y, s, d, r
-  }] }` (hoogstens 500; antwoord `{ ok, saved, skipped }`). Ongeldige items worden overgeslagen; zie
+  s, d, r, b } } }` met alleen wat gekend is) en `POST /api/rooms/:code/years` met `{ token, entries: [{ id, y, s, d, r,
+  b }] }` (hoogstens 500; antwoord `{ ok, saved, skipped }`). Ongeldige items worden overgeslagen; zie
   `server/src/yearlist.js`.
 
 ## Eenmalige opzet
@@ -287,7 +290,8 @@ Goed om te weten:
 ### Spelen met een eigen playlist
 
 In de wachtkamer kiest de host onder *Nummers* een van zijn Spotify-playlists. Spotify toont alleen playlists die hij
-zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van de eerste release op bij MusicBrainz.
+zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van de eerste release op bij MusicBrainz,
+met Wikidata als derde bron (zie *Hoe het jaar gekozen wordt*).
 
 - **Je hoeft niet te wachten.** Wat al gekend is (een eigen verbetering, de standaardlijst, de gedeelde lijst op de
   server, wat de browser onthield) is er meteen. Zodra er 10 nummers met een jaartal klaar zijn, kan de host starten.
@@ -308,18 +312,24 @@ zelf maakte of waaraan hij meewerkt. Het spel zoekt dan per nummer het jaar van 
 - *Stop met opzoeken* houdt wat al klaar is; de playlist later opnieuw kiezen zoekt alleen de rest op. Een andere
   playlist of *Terug naar de standaardlijst* stopt het opzoeken ook.
 - Het opzoeken kost gemiddeld anderhalf verzoek per nummer, en MusicBrainz laat 1 verzoek per seconde toe: reken de
-  eerste keer op ongeveer 2 seconden per nummer, 500 nieuwe nummers duren zo'n kwartier. Alles
+  eerste keer op ongeveer 2 seconden per nummer, 500 nieuwe nummers duren zo'n kwartier. Wikidata loopt daarnaast,
+  met één verzoek per 25 titels (20 verzoeken voor 500 nummers), en maakt het niet trager. Alles
   wat opgezocht is, onthoudt de browser van de host en gaat ook naar de gedeelde lijst op de server. Een tweede keer
-  gaat het meteen, ook op een ander toestel, in een andere browser of bij een andere host. Op de server staan alleen
-  track-ID, jaar, bron en twijfels; alleen een host van een lopend spel kan ze lezen of aanvullen.
+  gaat het meteen, ook op een ander toestel, in een andere browser of bij een andere host. Op de server staan
+  alleen track-ID, jaar, bron, twijfels en wat elke bron zei; alleen een host van een lopend spel kan ze lezen of
+  aanvullen.
 - Is de server even niet bereikbaar of kent hij de gedeelde lijst nog niet, dan gaat alles zoals voordien, met wat
-  de browser onthield en MusicBrainz.
+  de browser onthield en MusicBrainz. Is Wikidata niet bereikbaar of te druk, dan beslissen Spotify en MusicBrainz
+  zoals vroeger.
+- Jaartallen die met oudere regels gekozen zijn en een twijfel hadden, worden bij de volgende keuze van de playlist
+  opnieuw beoordeeld: eerst met wat MusicBrainz toen zei en Wikidata (geen nieuw verzoek naar MusicBrainz als dat
+  volstaat), anders helemaal opnieuw. Wat geen twijfel had, blijft; een handmatige verbetering blijft altijd.
 - Nummers uit de standaardlijst van het spel zijn al nagekeken en worden niet opnieuw opgezocht.
 - Een remix krijgt het jaar van de remix, niet dat van het origineel: de spelers horen de remix. Dat zie je aan de
   titel ("- X Remix", "(X Remix)", ook "Rework", "Bootleg", "Mashup" en "Refix"). "Radio Edit", "Extended Mix" of
   "Remastered" tellen als het origineel. Kent MusicBrainz de remix niet, dan geldt het jaar van het Spotify-album.
-- Het spel toont de jaartallen waar Spotify en MusicBrainz het oneens zijn, ook al terwijl de rest nog opgezocht
-  wordt. De host kan ze daar verbeteren;
+- Het spel toont de jaartallen waar de bronnen het oneens blijven, met kort wat elke bron zegt ("Spotify 2009 ·
+  MusicBrainz 2000 · Wikidata –"), ook al terwijl de rest nog opgezocht wordt. De host kan ze daar verbeteren;
   ook dat wordt onthouden en gedeeld, apart gemarkeerd als handmatig, zodat het ook voor andere hosts geldt. Die lijst
   verklapt wel antwoorden.
 - Een lijst telt minstens 10 en hoogstens 500 nummers. Dubbels en nummers zonder jaartal doen niet mee. Heeft de
@@ -360,13 +370,38 @@ Dit gaat over de standaardlijst van het spel, de lijst waarmee iedereen kan spel
 eigen playlist is het script niet nodig: zie *Spelen met een eigen playlist*.
 
 `web/public/tracks.json` bevat per nummer: Spotify track-ID, artiest, titel, jaar en de bron van dat jaar
-(`musicbrainz`, `spotify` of `handmatig`). Het script `tools/tracks.py` maakt dat bestand.
+(`musicbrainz`, `spotify`, `wikidata` of `handmatig`). Het script `tools/tracks.py` maakt dat bestand.
 
-Spotify geeft alleen de datum van het album, en dat is vaak een remaster of compilatie. Het script zoekt daarom per
-nummer het jaar van de eerste release op bij MusicBrainz, en neemt het vroegste van de twee. Bij MusicBrainz tellen
-alleen officiële studio-uitgaven: bootlegs, live-albums en demo's zijn er vaak fout of veel te vroeg gedateerd.
-Een remix krijgt het jaar van die remix zelf; vindt MusicBrainz ze niet, dan het jaar van het Spotify-album (en
-nooit dat van het origineel). "Edit", "Mix" en "Remastered" zonder het woord "remix" tellen als het origineel.
+### Hoe het jaar gekozen wordt
+
+In de browser van de host en in het script hetzelfde (`web/src/lib/years.js`, `web/src/lib/wikidata.js`,
+`tools/tracks.py`). Drie bronnen:
+
+- **Spotify** geeft alleen de datum van het album, en dat is vaak een remaster of compilatie.
+- **MusicBrainz** (vrijwilligers, vrije gegevens): het jaar van de eerste release. Alleen officiële studio-uitgaven
+  tellen: bootlegs, promo's, live-albums en demo's zijn er vaak fout of veel te vroeg gedateerd. Een remix-, live-,
+  instrumentale, karaoke- of demo-opname telt niet voor het gewone nummer. Alle opnames van een nummer samen: een
+  jaar met alleen verzamelaars telt pas vanaf twee verschillende verzamelaars, want een enkele verzamelaar is vaak
+  fout gedateerd (Radar Love op "The Best of Golden Earring, 1971", terwijl de single van 1973 is).
+- **Wikidata** (vrije gegevens, CC0, zonder account): de publicatiedatum van het nummer of de single, gezocht op
+  titel en uitvoerder (albums, video's en covers van anderen tellen niet). Eén verzoek naar `query.wikidata.org`
+  zoekt 25 titels tegelijk. Een lied-item draagt vaak de datum van de single, soms een jaar na het album.
+
+De regel: twee bronnen die het eens zijn (hoogstens een jaar verschil), winnen van de derde. MusicBrainz en Spotify
+eens: het vroegste van de twee (een album kan niet voor de eerste release liggen). Oneens: Wikidata beslist als het
+bij precies een van de twee past. Ligt Wikidata nog vroeger dan beide, dan Wikidata, met twijfel. Zonder beslissing
+geldt MusicBrainz als het meerdere uitgaven in zijn jaar heeft en vóór Spotify ligt (een remaster of verzamelaar);
+anders het vroegste, met twijfel. Een losse vroegste uitgave bij MusicBrainz met kort daarna veel meer, telt niet
+als Wikidata dat latere jaar zegt (een album "van 2003" dat in 2004 uitkwam); een echte vroege single heeft in
+Wikidata haar eigen datum. Zegt Spotify precies het vroegste jaar dat MusicBrainz kent, dan telt dat (een nieuw
+nummer op een eigen best-of). Een remix krijgt het jaar van die remix zelf; vindt MusicBrainz ze niet, dan het jaar
+van het Spotify-album (en nooit dat van het origineel). Bij remixes, live-opnames en heropnames ("Taylor's Version")
+telt Wikidata niet mee: het beschrijft het origineel. "Edit", "Mix" en "Remastered" zonder het woord "remix" tellen
+als het origineel. Alleen als er geen overeenstemming is, komt het nummer op de lijst om na te kijken.
+
+De browser van de host spreekt daarvoor `musicbrainz.org` en `query.wikidata.org` aan (beide laten dat toe vanuit
+een webpagina), met de gewone User-Agent van de browser. De titels en artiesten gaan dus naar die twee diensten;
+verder niets.
 
 Zo zoekt het (in het script en in de browser hetzelfde): eerst op titel en artiest. Passen alle opnames op één pagina
 (hoogstens 100), dan is dat genoeg: 1 verzoek. Bekende nummers hebben honderden opnames; dan volgt één gericht verzoek
@@ -374,6 +409,8 @@ naar de opnames die vóór het gevonden jaar voor het eerst uitkwamen. Is die pa
 geen vroegere officiële uitgave: een officiële uitgave is nooit vroeger dan de eerste release van haar opname. Alleen
 als de eerste pagina geen officiële studio-uitgave bevat, of als ook de oudere opnames niet op één pagina passen, komt
 er een verzoek bij met alleen officiële studio-uitgaven. Gemiddeld kost een nummer zo anderhalf verzoek.
+
+### Het script draaien
 
 Draaien op Windows (Python 3.9 of nieuwer, geen extra pakketten):
 
@@ -390,11 +427,12 @@ python tools/tracks.py --playlist https://open.spotify.com/playlist/JOUW_PLAYLIS
 - Je browser opent Spotify om in te loggen. De Client ID leest het script uit `web/src/config.js`.
 - De playlist moet van jou zijn (of je bent medewerker), anders weigert Spotify.
 - MusicBrainz laat 1 verzoek per seconde toe; 100 nieuwe nummers duren een paar minuten. De antwoorden staan in
-  `tools/musicbrainz-cache.json`, dus een tweede keer gaat snel. Met `--opnieuw` zoekt het alles opnieuw op.
+  `tools/musicbrainz-cache.json` en `tools/wikidata-cache.json`, dus een tweede keer gaat snel. Met `--opnieuw`
+  zoekt het alles opnieuw op, met `--zonder-wikidata` vraagt het Wikidata niet.
 - `tools/playlist.json` is de laatst opgehaalde lijst. Met `--invoer tools/playlist.json` draai je zonder Spotify-login.
 
-**Nakijken.** `tools/tracks-nakijken.md` somt op wat je best controleert: nummers waar Spotify en MusicBrainz meer dan
-een jaar verschillen, nummers die MusicBrainz niet vond, live-opnames en dubbels. Onderaan staat de volledige lijst op
+**Nakijken.** `tools/tracks-nakijken.md` somt op wat je best controleert: nummers waar de bronnen het oneens blijven
+(met wat Spotify, MusicBrainz en Wikidata zeggen), nummers die niemand vond, en dubbels. Onderaan staat de volledige lijst op
 jaar, om snel te overlopen. MusicBrainz is door vrijwilligers ingevuld en niet foutloos.
 
 **Verbeteren.** Zet het juiste jaar in `tools/correcties.json` en draai het script opnieuw:
@@ -486,8 +524,15 @@ Gedekt, automatisch:
   de standaardlijst kiezen midden in het opzoeken of terwijl een upload nog onderweg is, een herlaad nadat het
   opzoeken tijdens het spel klaar raakte, en een evenwichtige greep bij een vroege start. Een run laat hoogstens 51
   rijen achter in de gedeelde lijst.
+- Wikidata als derde bron, tegen een nagebootste Wikidata (`tests/e2e/wikidata.spec.js`): overeenstemming zonder
+  twijfel, onenigheid die Wikidata beslist, geen Wikidata-resultaat, Wikidata onbereikbaar of te druk (alles zoals
+  met twee bronnen), oude jaartallen met twijfel die opnieuw beoordeeld worden (zonder nieuw verzoek naar
+  MusicBrainz waar dat kan) en een handmatige verbetering die blijft. Het echte MusicBrainz en Wikidata worden in geen enkele
+  test aangesproken, ook niet met `npm run test:live`. Een run laat 12 rijen achter in de gedeelde lijst.
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script), ook met een nagebootste
-  MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet.
+  MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet, en met echte gevallen waar
+  MusicBrainz te vroeg zat (fout gedateerde verzamelaars, een remix die als origineel telde, een losse fout
+  gedateerde uitgave) en de beslisregel met drie bronnen.
 - Installeren als app: het manifest, de iconen (bestaan, PNG, juiste afmetingen), de meta's voor iOS, en dat Chromium
   de site installeerbaar vindt. De iconen maak je opnieuw met `node tools/iconen.mjs`.
 - Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.

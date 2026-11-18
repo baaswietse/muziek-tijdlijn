@@ -150,14 +150,29 @@ function JobStatus({ job, deck }) {
         </p>
       )}
       <p class="muted small">
-        Nieuwe nummers worden een voor een opgezocht bij MusicBrainz (dat laat 1 verzoek per seconde toe). Dat is eenmalig, ook voor
-        andere hosts: daarna zijn ze onthouden. Laat het spel open op deze gsm; na een herlaad gaat het verder.
+        Nieuwe nummers worden een voor een opgezocht bij MusicBrainz (dat laat 1 verzoek per seconde toe), met Wikidata erbij als
+        derde bron. Dat is eenmalig, ook voor andere hosts: daarna zijn ze onthouden. Laat het spel open op deze gsm; na een herlaad gaat het verder.
       </p>
       <button class="btn" onClick={deck.cancel} data-testid="deck-stop">
         Stop met opzoeken
       </button>
     </div>
   );
+}
+
+/**
+ * Kort wat elke bron zegt ("Spotify 2009 · MusicBrainz 2000 · Wikidata –"),
+ * gevolgd door de twijfels die daar niet al in staan. Oudere items hebben
+ * alleen de twijfels.
+ */
+function why(r) {
+  const b = r.sources;
+  if (!b) return r.doubts.join('; ');
+  const year = (y) => y ?? '–';
+  const parts = [`Spotify ${year(b.sp)}`, `MusicBrainz ${year(b.mb)}`];
+  if ('wd' in b) parts.push(`Wikidata ${year(b.wd)}`);
+  const rest = r.doubts.filter((d) => !/^(Spotify|MusicBrainz) zegt /.test(d));
+  return [parts.join(' · '), ...rest].join('; ');
 }
 
 /** Jaartallen waar de bronnen het oneens zijn; de host kan ze verbeteren. */
@@ -173,7 +188,7 @@ function Doubts({ doubts, onYear }) {
           <li key={r.id}>
             <span class="doubt-text">
               <strong>{r.title}</strong> · {r.artist}
-              <span class="muted small"> — {r.doubts.join('; ')}</span>
+              <span class="muted small" data-testid={`doubt-why-${r.id}`}> — {why(r)}</span>
             </span>
             <input
               class="input year-input"
