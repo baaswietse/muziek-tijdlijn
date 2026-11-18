@@ -66,20 +66,24 @@ const MANUAL = 'handmatig';
 let builtin = null;
 
 /**
- * Vraagt de gedeelde lijst op voor deze nummers: { id: { y, s, d, r, b } }.
+ * Vraagt de gedeelde lijst op voor deze nummers: { id: { y, s, d, r, b, named } }.
  * null als de server ze niet kan geven; dan gaat alles verder zonder.
+ * `years.names` (niet opsombaar): de server bewaart ook titel en artiest.
  */
 async function sharedLookup(code, token, ids) {
   const years = {};
+  let withNames = ids.length > 0;
   try {
     for (let i = 0; i < ids.length; i += SHARED_IDS) {
       const res = await post(`/api/rooms/${code}/years/lookup`, { token, ids: ids.slice(i, i + SHARED_IDS) });
       if (!res || typeof res.years !== 'object' || res.years === null) return null;
       Object.assign(years, res.years);
+      withNames = withNames && res.names === true;
     }
   } catch {
     return null; // oudere server (404), onbereikbaar of geen host meer: zonder verder
   }
+  Object.defineProperty(years, 'names', { value: withNames });
   return years;
 }
 
@@ -94,12 +98,22 @@ async function sharedSave(code, token, entries) {
   }
 }
 
-/** Een item voor de gedeelde lijst: track-ID, jaar, bron, twijfels, regelversie en de jaren per bron. */
-function shareable(id, e) {
+/**
+ * Een item voor de gedeelde lijst: track-ID, jaar, bron, twijfels, regelversie,
+ * de jaren per bron, en titel en artiest zoals Spotify ze geeft (om de lijst
+ * te kunnen nakijken; een oudere server laat ze weg).
+ */
+function shareable(id, e, track) {
   const out = { id, y: e.y ?? null, s: e.s, d: e.s === MANUAL ? [] : e.d || [] };
   if (e.r !== undefined) out.r = e.r;
   if (e.b && e.s !== MANUAL) out.b = e.b;
+  if (track) Object.assign(out, names(track));
   return out;
+}
+
+/** Titel en artiest van een nummer voor de gedeelde lijst. */
+function names(t) {
+  return { title: String(t.title ?? '').slice(0, 120), artist: (t.artists || []).join(', ').slice(0, 120) };
 }
 
 /** Het jaar dat MusicBrainz volgens een oud item zei (uit de twijfel), of undefined als het niet te zeggen is. */
@@ -345,13 +359,21 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
           if (entry.from === 'cache') {
             // Eerder in deze browser opgezocht, maar (nog) niet op de server:
             // zo gaat het werk van vroeger niet verloren.
-            share.push(shareable(t.id, entry));
+            share.push(shareable(t.id, entry, t));
           } else if (entry.from === 'eigen' && shared?.[t.id]?.s !== MANUAL) {
             // Een eigen verbetering van vroeger. Een verbetering die al op de
             // server staat, kan nieuwer zijn (van een andere host): die blijft.
-            share.push(shareable(t.id, entry));
+            share.push(shareable(t.id, entry, t));
           }
           rows.push(rowOf(t, entry, atStart.has(t.id)));
+        }
+        // Titel en artiest aanvullen voor nummers die al in de gedeelde lijst
+        // staan maar zonder (alleen als de server ze bewaart), behalve wat
+        // hoe dan ook opnieuw gedeeld wordt. Op de achtergrond: de host wacht er niet op.
+        if (shared?.names && !nothingLeft) {
+          const again = new Set([...todo.map((t) => t.id), ...share.map((e) => e.id)]);
+          const fills = tracks.filter((t) => shared[t.id] && !shared[t.id].named && !again.has(t.id)).map((t) => ({ id: t.id, ...names(t) }));
+          if (fills.length) sharedSave(code, token, fills);
         }
         const job = { code, id: spec.id, name: spec.name, tracks, sampled, total, known: knownIds };
         if (todo.length) storage.write(JOB, job);
@@ -461,7 +483,7 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
             if (latest[t.id]?.s !== MANUAL) {
               latest[t.id] = entry;
               storage.write(CACHE, latest);
-              share.push(shareable(t.id, entry));
+              share.push(shareable(t.id, entry, t));
             }
           }
           rows.push(rowOf(t, entry));
@@ -593,7 +615,7 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
       storage.write(CACHE, cache);
       refresh(data);
       // Faalt de server hier, dan gaat de verbetering mee bij een volgende keuze van de playlist.
-      const sharing = sharedSave(code, token, [shareable(id, cache[id])]);
+      const sharing = sharedSave(code, token, [shareable(id, cache[id], row.track)]);
       clearTimeout(data.timer);
       data.timer = null;
       try {

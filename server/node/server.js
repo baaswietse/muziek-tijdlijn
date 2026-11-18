@@ -37,7 +37,7 @@ const MAX_BODY = 2048;
 /** code -> { state, sockets:Set<WebSocket> } */
 const rooms = new Map();
 
-/** De gedeelde lijst met jaartallen (zie ../src/yearlist.js): id -> { id, y, s, d, r?, b? } */
+/** De gedeelde lijst met jaartallen (zie ../src/yearlist.js): id -> { id, y, s, d, r?, b?, title?, artist?, at } */
 const years = new Map();
 
 // ---------- nummers ----------
@@ -90,7 +90,9 @@ function loadSaved() {
     }
     for (const raw of Array.isArray(data?.years) ? data.years : []) {
       const entry = yearlist.normaliseEntry(raw);
-      if (entry) years.set(entry.id, entry);
+      if (!entry) continue;
+      if (Number.isInteger(raw.at)) entry.at = raw.at;
+      years.set(entry.id, entry);
     }
     console.log(`${rooms.size} spel(len) en ${years.size} jaartallen hersteld uit ${DATA_FILE}`);
   } catch (err) {
@@ -213,22 +215,31 @@ const server = http.createServer(async (req, res) => {
       broadcast(r);
       return sendJson(req, res, 200, { ok: true, count: r.state.custom.tracks.length });
     }
-    const y = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/years(\/lookup)?$/);
+    const y = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/years(\/lookup|\/export)?$/);
     if (req.method === 'POST' && y) {
-      // De gedeelde lijst met jaartallen: lezen (/years/lookup) of aanvullen
-      // (/years). Alleen voor de host van een bestaand spel.
+      // De gedeelde lijst met jaartallen: lezen (/years/lookup), aanvullen
+      // (/years) of in pagina's opvragen (/years/export). Alleen voor de host
+      // van een bestaand spel.
       const body = await readJson(req, yearlist.MAX_YEARS_BODY);
       room.authenticateHost(getRoom(y[1]).state, body.token);
-      if (y[2]) {
+      if (y[2] === '/lookup') {
         const found = {};
         for (const id of yearlist.parseLookup(body).ids) {
           if (years.has(id)) found[id] = yearlist.publicEntry(years.get(id));
         }
-        return sendJson(req, res, 200, { years: found });
+        // names: deze server bewaart ook titel en artiest (een oudere niet).
+        return sendJson(req, res, 200, { years: found, names: true });
+      }
+      if (y[2] === '/export') {
+        const { after, limit } = yearlist.parseExport(body);
+        const ids = [...years.keys()].filter((id) => id > after).sort();
+        const page = ids.slice(0, limit + 1).map((id) => years.get(id));
+        return sendJson(req, res, 200, yearlist.exportPage(page, limit));
       }
       const { entries, skipped } = yearlist.parseEntries(body);
       const changed = yearlist.mergeEntries(years, entries, yearlist.MAX_ROWS - years.size);
-      for (const e of changed) years.set(e.id, e);
+      const now = Date.now();
+      for (const e of changed) years.set(e.id, { ...e, at: now });
       if (changed.length) scheduleSave();
       return sendJson(req, res, 200, { ok: true, saved: changed.length, skipped: skipped + entries.length - changed.length });
     }

@@ -347,7 +347,7 @@ test('eigen playlist: nummers lezen, jaartallen opzoeken en ermee spelen', async
   await expect(doubts).toContainText('3 jaartallen om na te kijken');
   // De verbetering gaat ook naar de gedeelde lijst, apart gemarkeerd.
   await expect.poll(() => shared.writes.length).toBe(2);
-  expect(shared.writes[1].body.entries).toEqual([{ id: id('C'), y: 1998, s: 'handmatig', d: [] }]);
+  expect(shared.writes[1].body.entries).toEqual([{ id: id('C'), y: 1998, s: 'handmatig', d: [], title: 'Nieuw Lied C', artist: 'Band C' }]);
   expect(shared.writes[1].status).toBe(200);
 
   // --- spelen met de eigen lijst ---

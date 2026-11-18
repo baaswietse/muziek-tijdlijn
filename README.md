@@ -159,20 +159,33 @@ gsm host  ──┘        │
   andere spelers zien alleen de naam en het aantal nummers.
 - **Gedeelde jaartallen.** Wat een host opzocht, bewaart de server in één gedeelde lijst voor alle spellen: per
   Spotify-track-ID het jaar, de bron (`musicbrainz`, `spotify`, `wikidata`, `onbekend` of `handmatig`), eventuele
-  twijfels, de regelversie (`r`) en wat elke bron zei (`b`: `{ sp, mb, wd }`, het jaar van het Spotify-album, van
-  MusicBrainz en van Wikidata). Geen titels, geen namen, geen persoonsgegevens. Alleen de host van een bestaand spel
-  kan erin lezen of schrijven (met de geheime sleutel van zijn plaats in dat spel); gasten niet, want de lijst
-  verklapt antwoorden. Een handmatige verbetering gaat voor op een opgezocht jaar en wordt daar nooit door
-  overschreven; een nieuwere verbetering vervangt een oudere; een resultaat van oudere regels (lagere `r`) vervangt
-  nooit een nieuwer. Stuurt een oudere site een item zonder `b`, dan blijft dat staan. Op Cloudflare staat de lijst
-  in een tweede Durable Object (`YearStore`, één exemplaar, SQLite; de kolom `b` komt er bij de eerste start vanzelf
-  bij); de Node-server houdt ze in het geheugen en in `DATA_FILE` als dat ingesteld is.
+  twijfels, de regelversie (`r`), wat elke bron zei (`b`: `{ sp, mb, wd }`, het jaar van het Spotify-album, van
+  MusicBrainz en van Wikidata), de titel en de artiest zoals Spotify ze geeft (elk hoogstens 120 tekens platte
+  tekst), en wanneer het item het laatst veranderde. Geen namen van spelers of hosts, geen persoonsgegevens. Alleen
+  de host van een bestaand spel kan erin lezen of schrijven (met de geheime sleutel van zijn plaats in dat spel);
+  gasten niet, want de lijst verklapt antwoorden. Een handmatige verbetering gaat voor op een opgezocht jaar en wordt
+  daar nooit door overschreven; een nieuwere verbetering vervangt een oudere; een resultaat van oudere regels
+  (lagere `r`) vervangt nooit een nieuwer. Stuurt een oudere site een item zonder titel, artiest of `b`, dan blijven
+  die staan. Op Cloudflare staat de lijst in een tweede Durable Object (`YearStore`, één exemplaar, SQLite; de
+  kolommen `b`, `title` en `artist` komen er bij de eerste start vanzelf bij); de Node-server houdt ze in het
+  geheugen en in `DATA_FILE` als dat ingesteld is.
 - **Routes.** `POST /api/rooms` (spel maken), `POST /api/rooms/:code/join`, `POST /api/rooms/:code/deck` (eigen
-  lijst van de host), de WebSocket `/api/rooms/:code/ws`, en voor de gedeelde jaartallen
-  `POST /api/rooms/:code/years/lookup` met `{ token, ids }` (hoogstens 500 track-ID's; antwoord `{ years: { id: { y,
-  s, d, r, b } } }` met alleen wat gekend is) en `POST /api/rooms/:code/years` met `{ token, entries: [{ id, y, s, d, r,
-  b }] }` (hoogstens 500; antwoord `{ ok, saved, skipped }`). Ongeldige items worden overgeslagen; zie
-  `server/src/yearlist.js`.
+  lijst van de host), de WebSocket `/api/rooms/:code/ws`, en voor de gedeelde jaartallen (alleen de host):
+  - `POST /api/rooms/:code/years/lookup` met `{ token, ids }` (hoogstens 500 track-ID's). Antwoord
+    `{ years: { id: { y, s, d, r?, b?, named? } }, names: true }` met alleen wat gekend is; `named` zegt of titel en
+    artiest er al zijn, `names` dat de server ze bewaart.
+  - `POST /api/rooms/:code/years` met `{ token, entries }` (hoogstens 500). Een item is `{ id, y, s, d, r, b, title,
+    artist }`, of alleen `{ id, title, artist }` om titel en artiest aan te vullen van een nummer dat er al staat
+    (jaar en bron blijven dan wat ze waren; wat er al staat, wordt niet overschreven). Antwoord
+    `{ ok, saved, skipped }`. Ongeldige items worden overgeslagen.
+  - `POST /api/rooms/:code/years/export` met `{ token, after?, limit? }`: de hele lijst in pagina's, op track-ID.
+    `after` is het laatste ID van de vorige pagina (leeg of weg voor de eerste), `limit` 1 tot 500 (standaard 500).
+    Antwoord `{ entries: [{ id, y, s, d, r?, b?, title?, artist?, at }], next }`: `at` is het tijdstip van de
+    laatste wijziging in ms (null voor items van vóór die kolom), `next` het `after` voor de volgende pagina, of
+    `null` als dit de laatste is. Een pagina leest hoogstens `limit + 1` rijen.
+
+  Een gast krijgt `400 HOST_ONLY`, een onbestaand spel `404 NO_ROOM`, de sleutel van een ander spel `400 BAD_TOKEN`.
+  Zie `server/src/yearlist.js`.
 
 ## Eenmalige opzet
 
@@ -316,8 +329,9 @@ met Wikidata als derde bron (zie *Hoe het jaar gekozen wordt*).
   met één verzoek per 25 titels (20 verzoeken voor 500 nummers), en maakt het niet trager. Alles
   wat opgezocht is, onthoudt de browser van de host en gaat ook naar de gedeelde lijst op de server. Een tweede keer
   gaat het meteen, ook op een ander toestel, in een andere browser of bij een andere host. Op de server staan
-  alleen track-ID, jaar, bron, twijfels en wat elke bron zei; alleen een host van een lopend spel kan ze lezen of
-  aanvullen.
+  track-ID, jaar, bron, twijfels, wat elke bron zei, titel en artiest; alleen een host van een lopend spel kan ze
+  lezen of aanvullen. Titel en artiest van nummers die al in de gedeelde lijst stonden zonder, vult de app
+  op de achtergrond aan.
 - Is de server even niet bereikbaar of kent hij de gedeelde lijst nog niet, dan gaat alles zoals voordien, met wat
   de browser onthield en MusicBrainz. Is Wikidata niet bereikbaar of te druk, dan beslissen Spotify en MusicBrainz
   zoals vroeger.
@@ -527,7 +541,8 @@ Gedekt, automatisch:
 - Wikidata als derde bron, tegen een nagebootste Wikidata (`tests/e2e/wikidata.spec.js`): overeenstemming zonder
   twijfel, onenigheid die Wikidata beslist, geen Wikidata-resultaat, Wikidata onbereikbaar of te druk (alles zoals
   met twee bronnen), oude jaartallen met twijfel die opnieuw beoordeeld worden (zonder nieuw verzoek naar
-  MusicBrainz waar dat kan) en een handmatige verbetering die blijft. Het echte MusicBrainz en Wikidata worden in geen enkele
+  MusicBrainz waar dat kan), een handmatige verbetering die blijft, titel en artiest aanvullen, en de export voor de
+  host (in pagina's; gasten en onbestaande spellen geweigerd). Het echte MusicBrainz en Wikidata worden in geen enkele
   test aangesproken, ook niet met `npm run test:live`. Een run laat 12 rijen achter in de gedeelde lijst.
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script), ook met een nagebootste
   MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet, en met echte gevallen waar

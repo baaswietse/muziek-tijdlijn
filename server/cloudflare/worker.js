@@ -113,10 +113,11 @@ export default {
         const res = await stubFor(m[1]).fetch('https://room/deck', { method: 'POST', body: JSON.stringify(body) });
         return withCors(res, request, env);
       }
-      m = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/years(\/lookup)?$/);
+      m = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/years(\/lookup|\/export)?$/);
       if (request.method === 'POST' && m) {
-        // De gedeelde lijst met jaartallen: lezen (/years/lookup) of aanvullen
-        // (/years). Alleen voor de host van een bestaand spel.
+        // De gedeelde lijst met jaartallen: lezen (/years/lookup), aanvullen
+        // (/years) of in pagina's opvragen (/years/export). Alleen voor de
+        // host van een bestaand spel.
         const body = await readBody(request, yearlist.MAX_YEARS_BODY);
         const check = await stubFor(m[1]).fetch('https://room/host', {
           method: 'POST',
@@ -124,9 +125,12 @@ export default {
         });
         if (!check.ok) return withCors(check, request, env);
         const store = env.YEARS.get(env.YEARS.idFromName(YEARS_NAME));
-        const result = m[2]
-          ? await store.lookup(yearlist.parseLookup(body).ids)
-          : await store.write(yearlist.parseEntries(body));
+        const result =
+          m[2] === '/lookup'
+            ? await store.lookup(yearlist.parseLookup(body).ids)
+            : m[2] === '/export'
+              ? await store.exportPage(yearlist.parseExport(body))
+              : await store.write(yearlist.parseEntries(body));
         return json(result, 200, corsHeaders(request, env));
       }
       m = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/ws$/);
@@ -351,16 +355,16 @@ export class YearStore extends DurableObject {
          t INTEGER NOT NULL
        )`,
     );
-    // Kolommen die er later bij kwamen (jaren per bron als JSON). Een
-    // bestaande tabel krijgt ze hier; oude rijen hebben ze leeg.
+    // Kolommen die er later bij kwamen (titel, artiest, jaren per bron als
+    // JSON). Een bestaande tabel krijgt ze hier; oude rijen hebben ze leeg.
     const have = new Set([...this.sql.exec('PRAGMA table_info(years)')].map((c) => c.name));
-    for (const col of ['b']) {
+    for (const col of ['b', 'title', 'artist']) {
       if (!have.has(col)) this.sql.exec(`ALTER TABLE years ADD COLUMN ${col} TEXT`);
     }
     this.count = null; // aantal rijen, pas geteld bij het eerste schrijfverzoek
   }
 
-  /** Een rij uit de tabel als item (zie yearlist.normaliseEntry). */
+  /** Een rij uit de tabel als item (zie yearlist.normaliseEntry), met at = tijdstip van de laatste wijziging. */
   static entry(row) {
     let d = [];
     try {
@@ -378,6 +382,9 @@ export class YearStore extends DurableObject {
         // kapot: zonder jaren per bron
       }
     }
+    if (row.title) entry.title = row.title;
+    if (row.artist) entry.artist = row.artist;
+    entry.at = row.t;
     return entry;
   }
 
@@ -387,18 +394,33 @@ export class YearStore extends DurableObject {
     if (ids.length === 0) return found;
     // Eén parameter in plaats van honderden: SQLite pakt de lijst zelf uit.
     const rows = this.sql.exec(
-      'SELECT id, y, s, d, r, b FROM years WHERE id IN (SELECT value FROM json_each(?))',
+      'SELECT id, y, s, d, r, b, title, artist, t FROM years WHERE id IN (SELECT value FROM json_each(?))',
       JSON.stringify(ids),
     );
     for (const row of rows) found.set(row.id, YearStore.entry(row));
     return found;
   }
 
-  /** { years: { id: { y, s, d, r?, b? } } } */
+  /**
+   * Eén pagina van de hele lijst, op track-ID, na `after`. Leest hoogstens
+   * limit + 1 rijen (via de primaire sleutel): een volledige export van
+   * duizenden nummers kost een handvol verzoeken.
+   */
+  exportPage({ after, limit }) {
+    const rows = this.sql.exec(
+      'SELECT id, y, s, d, r, b, title, artist, t FROM years WHERE id > ? ORDER BY id LIMIT ?',
+      after,
+      limit + 1,
+    );
+    return yearlist.exportPage([...rows].map((row) => YearStore.entry(row)), limit);
+  }
+
+  /** { years: { id: { y, s, d, r?, b?, named? } }, names: true } */
   lookup(ids) {
     const years = {};
     for (const [id, entry] of this.read(ids)) years[id] = yearlist.publicEntry(entry);
-    return { years };
+    // names: deze server bewaart ook titel en artiest (een oudere niet).
+    return { years, names: true };
   }
 
   /** Voegt nagekeken items samen met wat er al staat; schrijft alleen wat verandert. */
@@ -410,13 +432,15 @@ export class YearStore extends DurableObject {
     this.ctx.storage.transactionSync(() => {
       for (const e of changed) {
         this.sql.exec(
-          'INSERT OR REPLACE INTO years (id, y, s, d, r, b, t) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO years (id, y, s, d, r, b, title, artist, t) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
           e.id,
           e.y,
           e.s,
           JSON.stringify(e.d),
           e.r ?? null,
           e.b ? JSON.stringify(e.b) : null,
+          e.title ?? null,
+          e.artist ?? null,
           now,
         );
       }

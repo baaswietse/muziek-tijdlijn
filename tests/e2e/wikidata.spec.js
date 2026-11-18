@@ -1,4 +1,5 @@
-// Wikidata als derde bron en de herbeoordeling van oude jaartallen. Spotify, MusicBrainz en Wikidata
+// Wikidata als derde bron, de herbeoordeling van oude jaartallen, titels in de
+// gedeelde lijst en de export voor de host. Spotify, MusicBrainz en Wikidata
 // zijn nagebootst (het echte MusicBrainz en Wikidata worden nooit aangesproken);
 // de spelserver is echt.
 //
@@ -8,6 +9,7 @@
 
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { NO_SUCH_ROOM } from './helpers.js';
 import { fakeIds, fakeMusicBrainz, fakeSpotify, fakeWikidata, hostAndLogin, playlistItem as item, watchYears } from './fake-spotify.js';
 
 const SITE_TRACKS = JSON.parse(readFileSync(new URL('../../web/public/tracks.json', import.meta.url), 'utf8'));
@@ -110,10 +112,10 @@ test('drie bronnen: wie het eens is, wint; alleen echte twijfels blijven over', 
   await doubts.locator('summary').click();
   await expect(a.page.getByTestId(`doubt-why-${id('W2')}`)).toHaveText(' — Spotify 1990 · MusicBrainz 1984 · Wikidata –');
 
-  // Gedeeld: met regelversie en de jaren per bron.
+  // Gedeeld: met regelversie, de jaren per bron, titel en artiest.
   await expect.poll(() => Object.keys(written(a.years)).length).toBe(4);
   const w = written(a.years);
-  expect(w[id('W1')]).toEqual({ id: id('W1'), y: 2009, s: 'spotify', d: [], r: 3, b: { sp: 2009, mb: 2000, wd: 2009 } });
+  expect(w[id('W1')]).toEqual({ id: id('W1'), y: 2009, s: 'spotify', d: [], r: 3, b: { sp: 2009, mb: 2000, wd: 2009 }, title: 'Wiki Een', artist: 'Band W' });
   expect(w[id('W2')]).toMatchObject({ y: 1984, s: 'musicbrainz', r: 3, b: { sp: 1990, mb: 1984, wd: null }, d: ['Spotify zegt 1990, MusicBrainz 1984, Wikidata niets'] });
   expect(w[id('W4')]).toMatchObject({ y: 1975, s: 'musicbrainz', d: [], b: { sp: 2015, mb: 1975, wd: 1975 } });
   await a.context.close();
@@ -139,7 +141,7 @@ test('Wikidata onbereikbaar of te druk: alles werkt zoals met twee bronnen', asy
   }
 });
 
-test('oude jaartallen: twijfels opnieuw beoordeeld, de rest en handmatige verbeteringen blijven', async ({ browser }) => {
+test('oude jaartallen: twijfels opnieuw beoordeeld, de rest en handmatige verbeteringen blijven; titels aangevuld; export voor de host', async ({ browser }) => {
   const id = fakeIds();
   const items = [
     ...SITE.map((t) => item(t.id, t.title, t.artist.split(', ')[0], '2019-01-01')),
@@ -159,7 +161,7 @@ test('oude jaartallen: twijfels opnieuw beoordeeld, de rest en handmatige verbet
   const base = a.base();
   expect(base).toBeTruthy();
 
-  // Wat een oudere versie van de app deelde: zonder jaren per bron.
+  // Wat een oudere versie van de app deelde: zonder jaren per bron, titel of artiest.
   const old = [
     { id: id('O1'), y: 1984, s: 'musicbrainz', d: ['Spotify zegt 1990, MusicBrainz 1984'], r: 2 },
     { id: id('O2'), y: 1979, s: 'musicbrainz', d: [], r: 2 },
@@ -184,13 +186,52 @@ test('oude jaartallen: twijfels opnieuw beoordeeld, de rest en handmatige verbet
   expect(asked(a.mb, 'Oud Vier')).toBeGreaterThan(0);
   await expect(a.page.getByTestId('deck-doubts')).toHaveCount(0);
 
-  // Alleen de nieuwe beoordelingen gaan naar de server.
+  // De nieuwe beoordelingen gaan naar de server; O2 en O3 krijgen alleen titel en artiest.
   const appWrites = () => a.years.writes.slice(seedWrites);
-  await expect.poll(() => appWrites().flatMap((w) => w.body.entries).length).toBe(2);
+  await expect.poll(() => appWrites().flatMap((w) => w.body.entries).length).toBe(4);
   const sent = appWrites().flatMap((w) => w.body.entries);
-  expect(sent.find((e) => e.id === id('O1'))).toMatchObject({ y: 1990, s: 'spotify', r: 3, b: { sp: 1990, mb: 1984, wd: 1990 } });
-  expect(sent.find((e) => e.id === id('O4'))).toMatchObject({ y: 2009, r: 3 });
+  expect(sent.find((e) => e.id === id('O1'))).toMatchObject({ y: 1990, s: 'spotify', r: 3, b: { sp: 1990, mb: 1984, wd: 1990 }, title: 'Oud Een' });
+  expect(sent.find((e) => e.id === id('O2'))).toEqual({ id: id('O2'), title: 'Oud Twee', artist: 'Band O' });
+  expect(sent.find((e) => e.id === id('O3'))).toEqual({ id: id('O3'), title: 'Oud Drie', artist: 'Band O' });
   for (const w of a.years.writes) expect(w.status).toBe(200);
 
+  // --- export: alleen de host, in pagina's ---
+  // De verzonnen ID's beginnen allemaal met dezelfde voorloop: vanaf daar staan ze achter elkaar.
+  const prefix = id('O1').slice(0, 18);
+  const got = [];
+  let after = prefix;
+  for (let i = 0; i < 4; i++) {
+    const res = await postFrom(a.page, `${base}/api/rooms/${a.code}/years/export`, { token: a.token, after, limit: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body.entries.length).toBeLessThanOrEqual(2);
+    got.push(...res.body.entries.filter((e) => e.id.startsWith(prefix)));
+    if (!res.body.next || !res.body.entries.every((e) => e.id.startsWith(prefix))) break;
+    expect(res.body.next).toBe(res.body.entries.at(-1).id);
+    after = res.body.next;
+  }
+  const byId = Object.fromEntries(got.map((e) => [e.id, e]));
+  expect(Object.keys(byId).sort()).toEqual([id('O1'), id('O2'), id('O3'), id('O4')].sort());
+  expect(byId[id('O1')]).toMatchObject({ y: 1990, s: 'spotify', d: [], r: 3, b: { sp: 1990, mb: 1984, wd: 1990 }, title: 'Oud Een', artist: 'Band O' });
+  expect(byId[id('O2')]).toMatchObject({ y: 1979, s: 'musicbrainz', d: [], r: 2, title: 'Oud Twee', artist: 'Band O' });
+  expect(byId[id('O3')]).toMatchObject({ y: 1983, s: 'handmatig', d: [], title: 'Oud Drie', artist: 'Band O' });
+  for (const e of got) expect(typeof e.at).toBe('number');
+
+  // Een gast, een onbestaand spel of de sleutel van een ander spel: geweigerd.
+  const guest = await (await browser.newContext()).newPage();
+  await guest.goto('./');
+  await guest.getByTestId('code-input').fill(a.code);
+  await guest.getByTestId('name-input').fill('Bob');
+  await guest.getByTestId('enter-button').click();
+  await expect(guest.getByTestId('waiting')).toBeVisible();
+  const guestToken = await guest.evaluate(() => JSON.parse(localStorage.getItem('mt.session')).token);
+  const asGuest = await postFrom(guest, `${base}/api/rooms/${a.code}/years/export`, { token: guestToken });
+  expect(asGuest.status).toBe(400);
+  expect(asGuest.body).toMatchObject({ error: 'HOST_ONLY' });
+  expect(asGuest.body).not.toHaveProperty('entries');
+  const none = await postFrom(guest, `${base}/api/rooms/${NO_SUCH_ROOM}/years/export`, { token: a.token });
+  expect(none.status).toBe(404);
+  const bad = await postFrom(a.page, `${base}/api/rooms/${a.code}/years/export`, { token: a.token, after: 'fout!' });
+  expect(bad).toMatchObject({ status: 400, body: { error: 'BAD_REQUEST' } });
+  await guest.context().close();
   await a.context.close();
 });
