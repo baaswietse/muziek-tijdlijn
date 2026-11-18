@@ -320,8 +320,10 @@ test('opzoeken klaar tijdens het spel, daarna herladen: het volgende spel krijgt
   await openMenu(page);
   await page.getByRole('button', { name: 'Stop dit spel' }).click();
   await expect(page.getByTestId('deck-current')).toHaveText('Playlist «Na» · 18 nummers', { timeout: 20_000 });
+  // Het verzoek wordt hier pas genoteerd als het helemaal binnen is; de stand
+  // via de WebSocket kan er net voor aankomen.
+  await expect.poll(() => decks.at(-1).body.tracks.length).toBe(18);
   expect(decks.at(-1).status).toBe(200);
-  expect(decks.at(-1).body.tracks).toHaveLength(18);
   expect(await page.evaluate(() => localStorage.getItem('mt.deckJob'))).toBeNull();
   await host.context.close();
 });
