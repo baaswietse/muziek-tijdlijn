@@ -134,7 +134,7 @@ export async function pieceIndex(page, testid) {
  * met de knoppen omhoog/omlaag: de weg die ook werkt zonder slepen. Het slepen
  * zelf testen de specs in drag.spec.js.
  */
-async function stepTo(page, testid, index) {
+export async function stepTo(page, testid, index) {
   for (let k = 0; k < 40; k++) {
     const now = await pieceIndex(page, testid);
     if (now === index) return;
