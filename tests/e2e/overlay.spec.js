@@ -24,7 +24,9 @@ async function challengeForHanne(browser) {
   const ids = await Promise.all([host, bob].map(myId));
   await host.getByTestId('start-game').click();
   await expect(bob.getByTestId('turn-banner')).toBeVisible();
-  await skipTo(host, ids[1], await playCount(host));
+  // Eerst het eerste nummer: anders telt het overslaan verkeerd.
+  await expect.poll(() => playCount(host)).toBe(1);
+  await skipTo(host, ids[1], 1);
   const right = correctSlot(await activeYears(bob), YEAR.get(await lastPlayed(host)));
   await placeCard(bob, right);
   await bob.getByTestId('confirm-place').click();
@@ -99,7 +101,9 @@ async function bobsTurn(browser) {
   const ids = await Promise.all([host, bob].map(myId));
   await host.getByTestId('start-game').click();
   await expect(bob.getByTestId('turn-banner')).toBeVisible();
-  await skipTo(host, ids[1], await playCount(host));
+  // Eerst het eerste nummer: anders telt het overslaan verkeerd.
+  await expect.poll(() => playCount(host)).toBe(1);
+  await skipTo(host, ids[1], 1);
   await expect(bob.getByTestId('turn-banner')).toHaveAttribute('data-mine', 'yes');
   return { host, bob };
 }
