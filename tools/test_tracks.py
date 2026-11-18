@@ -228,6 +228,18 @@ class TooEarly(unittest.TestCase):
         r = T.decide({"id": "x", "title": "Sweet Goodbyes", "spotify_date": "2008-11-06"}, mb, None)
         self.assertEqual((r["year"], r["source"], r["reasons"]), (2008, "musicbrainz", []))
 
+    def test_own_best_of_does_not_count_when_wikidata_says_the_later_year(self):
+        # Islands in the Stream: fout gedateerde "Greatest Hits" bij Spotify (1982), MusicBrainz en Wikidata 1983.
+        islands = {"year": 1983, "raw": 1982, "count": 12, "official": True, "method": "exact"}
+        r = T.decide({"id": "x", "title": "Islands in the Stream", "spotify_date": "1982"}, islands, None, {"year": 1983})
+        self.assertEqual((r["year"], r["source"], r["reasons"]), (1983, "musicbrainz", []))
+        # Zonder Wikidata, als Wikidata niets kent of zelf het vroege jaar zegt: de regel blijft gelden.
+        mb = {"year": 2009, "raw": 2008, "count": 4, "official": True, "method": "exact"}
+        t = {"id": "x", "title": "Sweet Goodbyes", "spotify_date": "2008-11-06"}
+        self.assertEqual(T.decide(t, mb, None)["year"], 2008)
+        self.assertEqual(T.decide(t, mb, None, {"year": None})["year"], 2008)
+        self.assertEqual(T.decide(t, mb, None, {"year": 2008})["year"], 2008)
+
 
 def wdrow(q, labels, performers, dates, types="Q134556"):
     """Een rij zoals de zoekdienst van Wikidata ze teruggeeft (na wd_search)."""

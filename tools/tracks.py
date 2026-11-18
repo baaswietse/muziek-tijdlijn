@@ -849,7 +849,8 @@ def decide(track: dict, mb: dict | None, correction: dict | None, wd: dict | Non
     if m is not None and s is not None and mb.get("next") and w is not None and w >= mb["next"]:
         m = mb["next"]
     raw = mb.get("raw")
-    if m is not None and s is not None and raw and raw == s and raw < m:
+    # Behalve als Wikidata het latere jaar (of later) zegt: dan is de best-of fout gedateerd.
+    if m is not None and s is not None and raw and raw == s and raw < m and not (w is not None and w >= m):
         m = raw
     strong = m == mb.get("year") and (mb.get("count") or 0) >= 2
 
