@@ -18,6 +18,7 @@ import {
   passWaiting,
   pieceIndex,
   placeCard,
+  expectSameSpot,
 } from './helpers.js';
 
 // Het spelscherm: je kaart (en je token) sleep je van de houder boven de
@@ -386,8 +387,8 @@ test('onthulling als paneel: de tijdlijn verspringt niet, wegvegen en weer opene
   // Waar staan de kaarten nu, bij Bob en bij Hanne (en de "?" van Bob)?
   const where = (page) =>
     page.getByTestId('active-timeline').evaluate((list) => ({
-      scroll: Math.round(window.scrollY),
-      rows: [...list.children].filter((el) => el.hasAttribute('data-row')).map((el) => Math.round(el.getBoundingClientRect().top)),
+      scroll: window.scrollY,
+      rows: [...list.children].filter((el) => el.hasAttribute('data-row')).map((el) => el.getBoundingClientRect().top),
     }));
   const before = await Promise.all(pages.map(where));
   await bob.getByTestId('reveal-now').click();
@@ -397,7 +398,11 @@ test('onthulling als paneel: de tijdlijn verspringt niet, wegvegen en weer opene
   }
   // Elke rij staat nog op dezelfde plaats; de "?" is een gemarkeerde kaart geworden.
   await bob.waitForTimeout(500);
-  expect(await Promise.all(pages.map(where))).toEqual(before);
+  const after = await Promise.all(pages.map(where));
+  for (const k of [0, 1]) {
+    expect(after[k].rows).toHaveLength(before[k].rows.length);
+    expectSameSpot(after[k], before[k], 'tijdlijn');
+  }
   for (const p of pages) {
     await expect(p.locator(`[data-testid="active-timeline"] [data-card="${right}"]`)).toHaveClass(/\bfresh\b/);
   }
@@ -419,7 +424,7 @@ test('onthulling als paneel: de tijdlijn verspringt niet, wegvegen en weer opene
   const start = { x: headBox.x + 40, y: headBox.y + 10 };
   await mouseDrag(bob, start, { x: start.x, y: start.y + 160 });
   await expect(bob.getByTestId('outcome-sheet')).toHaveAttribute('data-open', 'no');
-  expect(await where(bob)).toEqual(before[1]);
+  expectSameSpot(await where(bob), before[1], 'tijdlijn na wegvegen');
   const small = await bob.locator('.outcome-head').boundingBox();
   await mouseDrag(bob, { x: small.x + 40, y: small.y + 20 }, { x: small.x + 40, y: small.y - 120 });
   await expect(bob.getByTestId('outcome-sheet')).toHaveAttribute('data-open', 'yes');

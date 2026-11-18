@@ -23,6 +23,18 @@ export async function openPhone(browser, { hash = '', name = '', viewport = null
       }
     }, name);
   }
+  // MT_FONT_CSS (bv. "font-size: 17.3px") draait de tests met andere
+  // lettermaten, zoals op een andere machine: zo zie je of ze op exacte pixels
+  // steunen.
+  if (process.env.MT_FONT_CSS) {
+    await context.addInitScript((css) => {
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = `html, body, button, input { ${css} }`;
+        document.head.append(style);
+      });
+    }, process.env.MT_FONT_CSS);
+  }
   const page = await context.newPage();
   page.on('dialog', (d) => d.accept());
   // Alles wat de server naar deze gsm stuurt, om te kunnen nakijken wat lekt.
@@ -121,6 +133,38 @@ export async function closePanel(page) {
 export async function hostAction(page, testid) {
   await openMenu(page);
   await page.getByTestId(testid).click();
+}
+
+/**
+ * Het element staat helemaal in beeld: binnen het scherm en binnen elk
+ * ouderelement dat afknipt (zoals een paneel dat zelf scrolt), met een marge
+ * van `margin` px voor afronding (lettertypes en schermen verschillen in
+ * fracties van een pixel). Of er iets óver ligt, meet `onTop` apart.
+ */
+export async function expectFullyVisible(loc, { margin = 1 } = {}) {
+  await expect(loc).toBeVisible();
+  await expect
+    .poll(() =>
+      loc.evaluate((el, m) => {
+        const r = el.getBoundingClientRect();
+        let [top, left, bottom, right] = [0, 0, window.innerHeight, window.innerWidth];
+        for (let p = el.parentElement; p && p !== document.documentElement; p = p.parentElement) {
+          const s = getComputedStyle(p);
+          if (!/(auto|scroll|hidden|clip)/.test(s.overflowX + s.overflowY)) continue;
+          const b = p.getBoundingClientRect();
+          [top, left, bottom, right] = [Math.max(top, b.top), Math.max(left, b.left), Math.min(bottom, b.bottom), Math.min(right, b.right)];
+        }
+        const ok = r.top >= top - m && r.left >= left - m && r.bottom <= bottom + m && r.right <= right + m;
+        return ok || `(${r.top.toFixed(1)}..${r.bottom.toFixed(1)}) buiten (${top.toFixed(1)}..${bottom.toFixed(1)})`;
+      }, margin),
+    )
+    .toBe(true);
+}
+
+/** Twee plaatsen ({x, y, w, h} of getallen) zijn gelijk op hoogstens 1 px na. */
+export function expectSameSpot(a, b, what = 'plaats') {
+  const diff = (x, y) => (typeof x === 'number' ? Math.abs(x - y) : Math.max(...Object.keys(x).map((k) => diff(x[k], y[k]))));
+  expect(diff(a, b), `${what} verschoof: ${JSON.stringify(a)} → ${JSON.stringify(b)}`).toBeLessThanOrEqual(1);
 }
 
 /** Huidige plaats van het sleepbare stuk (`drag-card` of `drag-token`); null = in de houder. */

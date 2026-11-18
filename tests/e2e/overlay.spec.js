@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { openPhone, hostGame, setupMusic, joinGame, myId, YEAR, lastPlayed, activeYears, correctSlot, skipTo, placeCard, placeToken, playCount, stepTo } from './helpers.js';
+import { openPhone, hostGame, setupMusic, joinGame, myId, YEAR, lastPlayed, activeYears, correctSlot, skipTo, placeCard, placeToken, playCount, stepTo, expectFullyVisible } from './helpers.js';
 
 // Een melding of balk bedekt nooit een knop die de speler moet kunnen
 // aantikken: ook niet als de verbinding wegvalt (balk bovenaan, melding
@@ -54,7 +54,7 @@ async function confirmOffline(page) {
   await expect(page.getByTestId('bet-error')).toBeVisible();
   for (const id of ['confirm-bet', 'move-up', 'move-down']) {
     const loc = page.getByTestId(id);
-    await expect(loc).toBeInViewport({ ratio: 1 });
+    await expectFullyVisible(loc);
     expect(await onTop(loc), `${id} bedekt`).toBe(true);
   }
   await expect(page.locator('.game-top .banner')).toBeVisible();
@@ -112,7 +112,7 @@ async function bobsTurn(browser) {
 async function expectFree(page, ids) {
   for (const id of ids) {
     for (const loc of await page.getByTestId(id).all()) {
-      await expect(loc).toBeInViewport({ ratio: 1 });
+      await expectFullyVisible(loc);
       expect(await onTop(loc), `${id} bedekt`).toBe(true);
     }
   }
@@ -196,8 +196,9 @@ test('een melding tijdens de onthulling of met het menu open bedekt geen knoppen
       const menu = host.getByTestId('menu');
       for (const name of ['Verlaat het spel', 'Opnieuw afspelen', 'Haal Bob uit het spel']) {
         const loc = menu.getByRole('button', { name });
-        await loc.scrollIntoViewIfNeeded();
-        await expect(loc).toBeInViewport({ ratio: 1 });
+        // In het midden van het paneel (niet tegen de rand, zoals scrollIntoViewIfNeeded).
+        await loc.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+        await expectFullyVisible(loc);
         expect(await onTop(loc), `${name} bedekt`).toBe(true);
       }
       await host.getByTestId('menu-close').click();

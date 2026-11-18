@@ -15,6 +15,8 @@ import {
   placeCard,
   placeToken,
   collectCards,
+  expectFullyVisible,
+  expectSameSpot,
 } from './helpers.js';
 
 // De hoofdknop van de beurt ("Leg het …", "Onthul", "Volgende beurt", en voor
@@ -41,11 +43,11 @@ const toBottom = (page) => page.evaluate(() => window.scrollTo(0, document.docum
 async function expectReachable(page, testid) {
   await toBottom(page);
   const button = page.getByTestId(testid);
-  await expect(button).toBeInViewport({ ratio: 1 });
+  await expectFullyVisible(button);
   expect(await onTop(button), `${testid} is bedekt`).toBe(true);
   // Ook bovenaan de pagina staat hij er.
   await page.evaluate(() => window.scrollTo(0, 0));
-  await expect(button).toBeInViewport({ ratio: 1 });
+  await expectFullyVisible(button);
   expect(await onTop(button), `${testid} is bedekt`).toBe(true);
 }
 
@@ -90,7 +92,7 @@ test('hoofdknop: Leg, Onthul en Volgende beurt op exact dezelfde plek, en een du
   await placeCard(bob, slot);
   await expect(place).toBeEnabled();
   const atPlace = await boxOf(place);
-  expect(atPlace).toEqual(before);
+  expectSameSpot(atPlace, before, 'Leg het');
   await place.click();
 
   // Tussenfase: Hanne (host) moet kiezen, dus haar balk toont haar keuze. Bob
@@ -98,7 +100,7 @@ test('hoofdknop: Leg, Onthul en Volgende beurt op exact dezelfde plek, en een du
   const reveal = bob.getByTestId('reveal-now');
   await expect(reveal).toBeDisabled();
   await expect(bob.getByTestId('bar-note')).toHaveText('Nog wachten op Hanne.');
-  expect(await boxOf(reveal)).toEqual(atPlace);
+  expectSameSpot(await boxOf(reveal), atPlace, 'Onthul');
   await expect(host.getByTestId('pass-bet')).toBeEnabled();
   await expect(host.getByTestId('reveal-now')).toHaveCount(0);
   await host.getByTestId('pass-bet').click();
@@ -106,7 +108,7 @@ test('hoofdknop: Leg, Onthul en Volgende beurt op exact dezelfde plek, en een du
   await expect(host.getByTestId('reveal-now')).toBeEnabled();
   await expect(reveal).toBeEnabled();
   await expect(bob.getByTestId('bar-note')).toHaveCount(0);
-  expect(await boxOf(reveal)).toEqual(atPlace);
+  expectSameSpot(await boxOf(reveal), atPlace, 'Onthul');
 
   // Een dubbele (en zelfs een herhaalde) tik op Onthul: alleen de onthulling.
   const plays = await playCount(host);
@@ -128,7 +130,7 @@ test('hoofdknop: Leg, Onthul en Volgende beurt op exact dezelfde plek, en een du
   // Volgende beurt staat weer op dezelfde plek, en werkt na de korte pauze.
   const next = bob.getByTestId('next-turn');
   await expect(next).toBeEnabled();
-  expect(await boxOf(next)).toEqual(atPlace);
+  expectSameSpot(await boxOf(next), atPlace, 'Volgende beurt');
   // Het raad-token kan dus nog gegeven worden voor iemand doorgaat.
   await bob.getByTestId('token-button').first().click();
   await expect(bob.getByTestId('reveal-token')).toBeVisible();
@@ -234,7 +236,7 @@ test('klein scherm (390×600) met 9 kaarten: elke verplichte knop staat in beeld
   const other = slot === 0 ? 9 : 0;
   await placeToken(cas, other);
   const confirmBet = cas.getByTestId('confirm-bet');
-  await expect(confirmBet).toBeInViewport({ ratio: 1 });
+  await expectFullyVisible(confirmBet);
   expect(await onTop(confirmBet), 'confirm-bet is bedekt').toBe(true);
   await expectReachable(cas, 'pass-bet');
   await cas.getByTestId('pass-bet').click();
@@ -252,18 +254,18 @@ test('klein scherm (390×600) met 9 kaarten: elke verplichte knop staat in beeld
     // Juist of fout, jaar, titel en artiest: in beeld en niet onder de kopbalk of de balk.
     for (const part of ['.reveal-verdict', '.reveal-year', '.reveal-title', '.reveal-artist']) {
       const loc = p.getByTestId('reveal').locator(part);
-      await expect(loc).toBeInViewport({ ratio: 1 });
+      await expectFullyVisible(loc);
       await expect.poll(() => onTop(loc), { message: `${part} is bedekt` }).toBe(true);
     }
   }
   // Het raad-token: de knoppen voor de speler aan beurt, opeisen voor Cas.
   for (const b of await bob.getByTestId('token-button').all()) {
-    await b.scrollIntoViewIfNeeded();
-    await expect(b).toBeInViewport({ ratio: 1 });
+    await b.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await expectFullyVisible(b);
     expect(await onTop(b)).toBe(true);
   }
-  await cas.getByTestId('token-claim-button').scrollIntoViewIfNeeded();
-  await expect(cas.getByTestId('token-claim-button')).toBeInViewport({ ratio: 1 });
+  await cas.getByTestId('token-claim-button').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await expectFullyVisible(cas.getByTestId('token-claim-button'));
   // Doorgaan: de speler aan beurt en de host.
   await expectReachable(bob, 'next-turn');
   await expectReachable(host, 'next-turn');
