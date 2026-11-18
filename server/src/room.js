@@ -5,6 +5,7 @@
 import * as rules from './rules.js';
 import { GameError } from './rules.js';
 import { normaliseTracks } from './tracks.js';
+import * as sound from './sound.js';
 
 // Geen I en O: die lijken te veel op 1 en 0.
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -105,9 +106,15 @@ export async function applyAction(state, playerId, msg, { loadTracks, online = n
     case 'lobby':
       rules.backToLobby(state, playerId);
       break;
+    case 'sound':
+      // De host bedient het geluid voor wie meeluistert (alleen met fragmenten; zie sound.js).
+      sound.applySound(state, playerId, msg, now);
+      break;
     default:
       throw new GameError('UNKNOWN', 'Onbekende actie.');
   }
+  // Een nieuwe beurt, een ander nummer of het einde: het geluid van het vorige nummer vervalt.
+  sound.tidySound(state);
   state.updatedAt = now;
 }
 
@@ -137,8 +144,28 @@ export function setDeck(state, body, now = Date.now()) {
   state.updatedAt = now;
 }
 
+/**
+ * Wat één speler mag zien. De host krijgt er ook bij of er geluid is voor wie
+ * meeluistert (`sound`: zonder adres, dat heeft hij zelf).
+ */
 export function view(state, playerId, online) {
-  return rules.viewFor(state, playerId, online);
+  const v = rules.viewFor(state, playerId, online);
+  if (playerId === state.hostId) v.sound = sound.hostSound(state);
+  return v;
+}
+
+/**
+ * Het geluidsbericht voor één verbinding (zie sound.js), of null. `listening`:
+ * deze verbinding vroeg om geluid (`{ t: 'listen', on: true }`).
+ */
+export function soundMessage(state, playerId, listening, now = Date.now()) {
+  return sound.soundMessage(state, playerId, listening, now);
+}
+
+/** Een meeluisterende speler meldt dat start `n` niet speelt; true als de host een vers adres moet vragen. */
+export function soundFailed(state, playerId, n) {
+  if (!state.players.some((p) => p.id === playerId) || playerId === state.hostId) return false;
+  return sound.reportFailed(state, Number(n));
 }
 
 export function errorPayload(err) {

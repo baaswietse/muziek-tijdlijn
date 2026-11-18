@@ -4,9 +4,10 @@ import { qrPath } from '../lib/qr.js';
 import { MusicPanel } from '../components/MusicPanel.jsx';
 import { DeckPanel } from '../components/DeckPanel.jsx';
 import { Rules } from '../components/Rules.jsx';
+import { ListenToggle } from '../components/Listen.jsx';
 import { deckMatches } from '../lib/source.js';
 
-export function Lobby({ view, send, music, deck, onLeave, notify }) {
+export function Lobby({ view, send, music, listen = null, deck, onLeave, notify }) {
   const isHost = view.you === view.hostId;
   const url = inviteUrl(view.code);
   const qr = useMemo(() => qrPath(url), [url]);
@@ -120,6 +121,12 @@ export function Lobby({ view, send, music, deck, onLeave, notify }) {
             <p class="muted small" data-testid="lobby-playlist">
               Nummers: {view.playlist.source === 'fragment' ? 'lijst' : 'playlist'} «{view.playlist.name}» ({view.playlist.count})
             </p>
+          )}
+          {/* Speelt de host met fragmenten, dan kan je het geluid ook hier laten spelen (op afstand). */}
+          {listen?.available && (
+            <div class="lobby-listen">
+              <ListenToggle listen={listen} />
+            </div>
           )}
         </section>
       )}

@@ -226,11 +226,28 @@ export class GameRoom extends DurableObject {
         ws.send(JSON.stringify({ t: 'error', code: 'BAD_TOKEN', message: 'Je zit niet (meer) in dit spel.' }));
         return ws.close(4003, 'bad token');
       }
-      ws.serializeAttachment({ playerId });
+      ws.serializeAttachment({ playerId, listen: ws.deserializeAttachment()?.listen === true });
       return this.broadcast();
     }
-    const playerId = ws.deserializeAttachment()?.playerId;
+    const attachment = ws.deserializeAttachment();
+    const playerId = attachment?.playerId;
     if (!playerId) return;
+    if (msg?.t === 'listen') {
+      // Geluid op dit toestel aan of uit: geldt voor deze verbinding (blijft
+      // bij de verbinding bewaard, ook als de kamer even slaapt).
+      const listen = msg.on === true;
+      ws.serializeAttachment({ ...attachment, listen });
+      if (listen) this.sendSound(ws, playerId, true);
+      return;
+    }
+    if (msg?.t === 'soundFail') {
+      // Het adres speelt niet bij deze speler: de host vraagt een vers adres.
+      if (attachment.listen === true && room.soundFailed(this.state, playerId, msg.n)) {
+        await this.save();
+        this.broadcast();
+      }
+      return;
+    }
     try {
       const hadCustom = Boolean(this.state.custom);
       await room.applyAction(this.state, playerId, msg, {
@@ -277,7 +294,10 @@ export class GameRoom extends DurableObject {
     return this.ctx
       .getWebSockets()
       .filter((s) => s !== gone)
-      .map((s) => ({ s, playerId: s.deserializeAttachment()?.playerId }))
+      .map((s) => {
+        const a = s.deserializeAttachment();
+        return { s, playerId: a?.playerId, listen: a?.listen === true };
+      })
       .filter((x) => x.playerId);
   }
 
@@ -290,13 +310,22 @@ export class GameRoom extends DurableObject {
   broadcast(gone) {
     const sockets = this.sockets(gone);
     const online = new Set(sockets.map((x) => x.playerId));
-    for (const { s, playerId } of sockets) {
+    const now = Date.now();
+    for (const { s, playerId, listen } of sockets) {
       try {
         s.send(JSON.stringify({ t: 'state', state: room.view(this.state, playerId, online) }));
+        // Alleen wie om geluid vroeg, krijgt het adres van het fragment (apart bericht).
+        this.sendSound(s, playerId, listen, now);
       } catch {
         // verbinding net weggevallen
       }
     }
+  }
+
+  /** Het geluidsbericht voor één verbinding, als die meeluistert (zie ../src/sound.js). */
+  sendSound(ws, playerId, listen, now = Date.now()) {
+    const msg = room.soundMessage(this.state, playerId, listen, now);
+    if (msg) ws.send(JSON.stringify(msg));
   }
 
   /** Bewaart het spel. De eigen lijst alleen als die veranderd is (`custom`). */

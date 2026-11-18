@@ -2,7 +2,8 @@
 
 Muziekspel voor een groep vrienden: er speelt een nummer, niemand ziet titel of artiest, en wie aan de beurt is legt het op
 de juiste plaats op zijn tijdlijn. Iedereen speelt op zijn eigen gsm in de browser; de muziek komt uit één box, via de
-Spotify van de host, of zonder enig account met fragmenten van 30 seconden van Deezer.
+Spotify van de host, of zonder enig account met fragmenten van 30 seconden van Deezer. Met fragmenten kan je ook op
+afstand spelen: wie wil, laat het fragment dan ook op zijn eigen gsm spelen.
 
 - Site: <https://baaswietse.github.io/muziek-tijdlijn/>
 - Privéspel voor eigen gebruik, niet commercieel. Eigen naam en eigen vormgeving.
@@ -50,7 +51,8 @@ Details:
   aan beurt. Het raad-token van een beurt kan je pas in een latere beurt inzetten.
 - Het spelscherm toont één ding per moment. Bovenaan een balk met links *Stand* (je eigen kaarten en tokens; een tik
   toont alle spelers, wie aan de beurt is en wie niet verbonden is, het beurtnummer en hoeveel nummers er nog in de
-  stapel zitten) en rechts het menu (spelcode, spelregels, het spel verlaten, en voor de host de muziek, *Ander
+  stapel zitten) en rechts het menu (spelcode, spelregels, het spel verlaten, bij fragmenten voor de andere spelers
+  *Geluid op dit toestel*, en voor de host de muziek, *Ander
   nummer*, *Sla beurt over*, een speler verwijderen en *Stop dit spel*). Daaronder één regel uitleg en één tijdlijn:
   die waarop nu gespeeld wordt. Tijdens andermans beurt wissel je tussen zijn tijdlijn en de jouwe; via de stand kan
   je elke tijdlijn bekijken. Een probleem met de muziek ziet de host als één regel met een knop op het spelscherm
@@ -103,6 +105,7 @@ gsm host  ──┘        │
    │                 └─ beslist alles: stapel schudden, beurt, juist/fout
    ├── Spotify Web API ──> Spotify-toestel van de host ──> box
    └── of: Deezer-API (adres van het fragment) ──> <audio> in de browser van de host ──> box
+              └── adres ──> spelserver ──> alleen gsm's met «Geluid op dit toestel» ──> <audio> op die gsm
 ```
 
 | Map | Wat |
@@ -127,6 +130,10 @@ gsm host  ──┘        │
   onthullen), `buy` (op je eigen beurt de kaart kopen voor 3 tokens), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
   `skipTrack`, `skipTurn`, `remove` en `lobby`. De server antwoordt met `{ t: 'state' }` of
   `{ t: 'error', code, message }`. Zie `server/src/room.js`.
+- **Geluid op afstand (alleen met fragmenten).** De host stuurt `sound` (`{ action: 'play' | 'url' | 'pause' |
+  'resume', trackId, url? }`); een andere speler stuurt `listen` (`{ on: true | false }`, per verbinding) en
+  `soundFail` (`{ n }`: het adres speelt hier niet). Wie `listen` aan heeft, krijgt naast de stand een apart bericht
+  `{ t: 'sound', sound: { n, url, playing, pos } | null }`. Zie *Spelen op afstand* hieronder en `server/src/sound.js`.
 - **Spotify blijft bij de host.** De host logt in met Authorization Code + PKCE, volledig in de browser. Er is geen
   Client Secret, en de tokens gaan nooit naar de spelserver.
 - **Twee manieren om geluid te maken.** De site stuurt een Spotify-toestel aan (Spotify Connect): een gsm, laptop, tv
@@ -180,12 +187,57 @@ gsm host  ──┘        │
   - Een browser speelt geen geluid zonder aanraking: de host tikt één keer op *Zet het geluid aan*. Na een herlaad
     (of als de browser het geluid toch weigert) verschijnt die knop op het spelscherm en begint het fragment van de
     beurt opnieuw.
-  - Het ophalen en afspelen (`web/src/fragment/`) weet niet wie host is, zodat later ook een andere gsm geluid kan
-    maken.
+  - Het ophalen en afspelen (`web/src/fragment/`) weet niet wie host is: de gsm van een speler die meeluistert,
+    gebruikt dezelfde speler.
+- **Spelen op afstand: geluid op de gsm van een speler.** Alleen als de host met fragmenten speelt; met Spotify blijft
+  het geluid bij de host (`web/src/lib/listen.js`, `server/src/sound.js`):
+  - **Hoe het adres bij de spelers komt.** De browser van de host vraagt het adres van de mp3 op bij Deezer (dat
+    deed hij al om zelf af te spelen) en stuurt het met `{ t: 'sound', action: 'play', trackId, url }` naar de
+    server. De server aanvaardt dat alleen van de host van het spel en alleen voor het nummer van de lopende beurt
+    (een bericht voor een vorig of verzonnen nummer doet niets), en kijkt het adres streng na: letterlijk
+    `https://`, alleen `cdnt-preview.dzcdn.net` of `cdns-preview-<x>.dzcdn.net`, geen poort, gebruikersnaam of `#`,
+    geen spaties, aanhalingstekens of stuurtekens, hoogstens 600 tekens. Een ander nummer, een volgende beurt of
+    het einde van het spel maakt het ongeldig. De browser van een speler spreekt de API van Deezer dus nooit aan
+    (die zou het ID nodig hebben); hij krijgt alleen het adres en speelt dat.
+  - **Wie het krijgt.** Alleen een verbinding van een speler die geen host is en `{ t: 'listen', on: true }` stuurde,
+    krijgt het, in een apart bericht `{ t: 'sound', sound: { n, url, playing, pos } }`: `n` telt de starts (een
+    nieuwe start = van voren), `playing` of het speelt, `pos` waar het staat. Geen track-ID, titel, artiest of jaar,
+    en nooit in de gewone stand. De keuze geldt per verbinding; de gsm stuurt ze bij elke nieuwe verbinding opnieuw
+    (op Cloudflare blijft ze bij de verbinding bewaard, ook als de kamer slaapt). De host ziet in zijn stand alleen
+    `sound: { n, playing, stale, r }`, zonder adres.
+  - **Gelijk lopen.** De server houdt met zijn eigen klok bij wanneer het fragment begon, en bij pauze waar het
+    stond. In elk bericht staat `pos`: de plaats op het moment dat de server het bericht maakt. De gsm telt daar de
+    tijd sinds ontvangst bij (met `performance.now()`, de klok van de gsm zelf, die alleen vooruit loopt) en de
+    halve duur van de kortste recente ping naar de server. Zo worden nooit de klokken van twee toestellen met
+    elkaar vergeleken. Herhalen gaat modulo de echte duur van het fragment (30 s zolang die niet gekend is), net
+    als bij de host. Bij elk bericht en om de 5 s kijkt de gsm na of hij nog gelijk loopt, en springt hij bij als
+    het meer dan 0,35 s verschilt. Wie later aanhaakt of herlaadt, valt zo in op de juiste plaats. Pauze, *Opnieuw
+    afspelen*, *Ander nummer* en een nieuwe beurt volgen vanzelf; tijdens de onthulling blijft het spelen, zoals bij
+    de host.
+  - **Fouten.** Speelt het adres niet op een gsm, dan ziet alleen die speler één regel met *Probeer opnieuw*.
+    Misschien is het adres verlopen: de gsm meldt dat (`soundFail`), de host ziet `stale`, vraagt een vers adres bij
+    Deezer en stuurt het met `action: 'url'` (de plaats blijft); de gsm probeert dan vanzelf opnieuw. Dat kan
+    hoogstens 3 keer per start, zodat een gsm zonder netwerk de host geen reeks verzoeken bij Deezer laat doen.
+    Weigert de browser het geluid, of na een herlaad, dan staat er *Zet het geluid aan*. Bestaat het fragment niet,
+    dan stuurt de host niets en beslist hij zoals altijd (*Ander nummer*).
+  - **De host zonder geluid.** Ook als de host zelf geen geluid maakt, krijgen de spelers het adres: na een herlaad
+    (voor hij *Zet het geluid aan* tikt; heeft de server al een adres voor deze beurt, dan stuurt hij niets, zodat
+    het bij de spelers niet opnieuw begint) en als hij koos voor *Geen geluid op dit toestel* (bv. in een stille
+    ruimte). Die keuze blijft bewaard op zijn gsm voor dit spel; hij kan dan starten zonder geluid, en bedient
+    pauze, opnieuw en ander nummer zoals altijd. Hoort dan niemand iets, dan zet niemand *Geluid op dit toestel*
+    aan.
+  - Een verzoek naar Deezer per beurt, zoals voordien (ook zonder geluid bij de host), plus hoogstens 3 voor een vers
+    adres als een speler erom vraagt.
 - **Wat de browsers zien.**
   - Een gast krijgt van de server tot de onthulling niets van het lopende nummer: geen ID (ook geen Deezer-ID),
     titel, artiest of jaar, bij Spotify en bij fragmenten. Zijn browser spreekt Deezer en Spotify niet aan en haalt
     geen lijst met nummers op.
+  - Een gast met *Geluid op dit toestel* krijgt daarbovenop alleen het bericht `{ t: 'sound', sound: { n, url,
+    playing, pos } }`, met het adres van de mp3 (`https://cdnt-preview.dzcdn.net/api/1/1/…/<hash>.mp3?hdnea=…`), en
+    zijn browser haalt dat mp3-bestand op bij `cdnt-preview.dzcdn.net`. Het adres van de mp3 bevat bij het echte
+    Deezer een hash en een handtekening, niet het ID of de titel (zoals we het kennen; zie *Niet gedekt*). Zijn
+    browser spreekt `api.deezer.com` niet aan. Een gast met geluid uit krijgt geen enkel geluidsbericht en geen
+    adres.
   - De host ziet op zijn scherm tot de onthulling geen titel, artiest of jaar. Zijn browser krijgt wel het ID van het
     lopende nummer. Met Spotify vraagt zijn browser daarmee bij Spotify wat er speelt (met titel en artiest in het
     antwoord); met fragmenten vraagt hij het adres bij Deezer, en ook dat antwoord bevat titel, artiest, album en
@@ -332,7 +384,7 @@ Zonder Spotify (geen account, geen Premium): zie *Spelen met fragmenten*. Met Sp
 
 Iedereen kan zo host zijn: er is geen login, geen toestelkeuze en geen Premium nodig. Elke beurt speelt een fragment
 van 30 seconden van Deezer, steeds opnieuw tot de beurt voorbij is. Het geluid komt uit de gsm (of laptop) van de host;
-hang die aan een box als je wil.
+hang die aan een box als je wil. Op afstand spelen kan ook: zie hieronder.
 
 1. **Host:** open de site en kies *Nieuw spel*.
 2. **Host:** kies onder *Muziek* de bron *Fragmenten (30 seconden, zonder account)* en tik op *Zet het geluid aan*
@@ -348,6 +400,18 @@ staat er *Open in Deezer* (bij Spotify *Open in Spotify*).
 
 De keuze van de bron blijft bewaard op de gsm van de host. Wissel je terug naar Spotify, dan speelt het spel weer met
 de standaardlijst (een fragmentenlijst kan Spotify niet spelen, en omgekeerd).
+
+**Op afstand spelen.** Zit niet iedereen bij dezelfde box, dan zet elke speler die ver weg zit *Geluid op dit toestel*
+aan: in de wachtkamer of in het menu (onder *Voor iedereen*). Dan speelt het fragment van de beurt ook op zijn gsm,
+ongeveer gelijk met de host, en het volgt pauze, *Opnieuw afspelen* en *Ander nummer*. Zit je wel bij de box van de
+host, laat het dan uit: anders hoor je het dubbel. De keuze staat standaard uit en blijft bewaard op je gsm voor dit
+spel. Na een herlaad (of als de browser het geluid weigert) staat op je spelscherm *Zet het geluid aan*; speelt het
+fragment bij jou niet, dan zie alleen jij dat, met *Probeer opnieuw*. Met Spotify is de keuze er niet: dan blijft het
+geluid bij de host.
+
+Wil de host zelf geen geluid (hij zit bv. in een stille ruimte, of alle spelers zitten elders), dan tikt hij bij
+*Muziek* op *Geen geluid op dit toestel*. Het spel werkt dan gewoon, en de spelers met *Geluid op dit toestel* horen
+het fragment; de host bedient het zoals altijd. *Zet het geluid hier toch aan* maakt dat ongedaan.
 
 ### Als app op het beginscherm
 
@@ -445,6 +509,9 @@ Een box of auto met een schermpje kan de titel ook tonen.
 | Fragmenten: geen geluid | Tik op *Zet het geluid aan* (na een herlaad altijd nodig). Staat het volume van de gsm open? |
 | Fragmenten: «bestaat niet (meer)» | Deezer heeft dat fragment niet (meer). Tik op *Ander nummer*. |
 | Fragmenten: «Deezer antwoordt niet» | Geen internet, of Deezer is even weg. *Opnieuw afspelen*, of *Ander nummer*. |
+| Op afstand: geen geluid op mijn gsm | Staat *Geluid op dit toestel* aan (menu)? Na een herlaad: *Zet het geluid aan* op het spelscherm. Staat het volume open? |
+| Op afstand: «speelt niet op dit toestel» | Controleer je verbinding en tik op *Probeer opnieuw*. De anderen spelen gewoon verder. |
+| Op afstand: dubbel geluid | Wie bij de box van de host zit, zet *Geluid op dit toestel* uit. |
 
 ## Nummers en jaartallen bijwerken
 
@@ -713,7 +780,20 @@ Gedekt, automatisch:
   herlaad (*Zet het geluid aan* op het spelscherm), en wisselen tussen Spotify en fragmenten. En dat een gast tot de
   onthulling geen ID, Deezer-ID, titel, artiest of jaar van het lopende (of overgeslagen) nummer krijgt en zelf Deezer
   niet aanspreekt en geen lijst ophaalt, en dat de host Spotify niet aanspreekt. Het echte Deezer (`deezer.com`,
-  `dzcdn.net`) is in alle tests geblokkeerd, ook met `npm run test:live`. Unit-tests: het bronbestand en de lijsten,
+  `dzcdn.net`) is in alle tests geblokkeerd, ook met `npm run test:live`. De nagebootste Deezer geeft, zoals de
+  echte, mp3-adressen met een hash in plaats van het ID.
+- Spelen op afstand (`tests/e2e/listen.spec.js`, drie gsm's): een gast zet *Geluid op dit toestel* aan en hoort het
+  fragment van de host (in zijn eigen nagebootste Deezer te zien), gelijk met de host (binnen 0,45 s); hij volgt
+  pauze, verder spelen, opnieuw afspelen, ander nummer, de onthulling en de volgende beurt, en haakt na een herlaad
+  met één tik weer aan op de juiste plaats; uitzetten stopt het en er komen geen adressen meer. Zijn browser spreekt
+  de API van Deezer nooit aan; een gast met geluid uit krijgt geen geluidsbericht en geen adres; geen enkele gast
+  krijgt titel, artiest, jaar of ID's voor de onthulling. Een host zonder geluid (*Geen geluid op dit toestel*, ook
+  na een herlaad, zonder dat het bij de gast opnieuw begint). Fouten bij één gast: een verlopen adres (de host
+  vraagt vanzelf een vers), geen netwerk (melding en *Probeer opnieuw* alleen bij die gast, hoogstens 3 verse
+  adressen per start), geluid dat de browser weigert. En dat de keuze er met Spotify niet is. Unit-tests
+  (`tests/unit/sound.test.js`): de controle van het adres, dat alleen de host het kan doorgeven en alleen voor de
+  lopende beurt, wie het krijgt, de plaats bij pauze, verder en later aanhaken, dat het vervalt bij een ander
+  nummer, en het rekenen op de gsm (verstreken tijd, herhalen, wanneer bijspringen). Unit-tests: het bronbestand en de lijsten,
   het opvragen van een adres, de speler (ontgrendelen, herhalen, geweigerd, verlopen, een nieuwere start wint) en hoe
   de server een fragmentenlijst herkent; `tools/test_deezer.py` voor het zoeken en het maken van de lijsten.
 - Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.
@@ -731,4 +811,9 @@ Niet gedekt, alleen in het echt te testen:
   `cdnt-preview.dzcdn.net` in een browser spelen (dat adres was bij het bouwen niet bereikbaar), hoe Safari op iPhone
   en Chrome op Android met het ontgrendelen, het herhalen en een vergrendeld scherm omgaan, en wat de mediabediening
   van een echte gsm toont, is alleen in het echt te zien.
+- Spelen op afstand in het echt: getest is met Chromium op één machine, tegen een nagebootste Deezer en een mp3 van
+  1,5 s. Of het echte geluid op echte gsm's (Safari op iPhone, Chrome op Android, ook met vergrendeld scherm of de
+  site op de achtergrond) speelt, hoe gelijk het loopt over echte netwerken met wisselende vertraging (gerekend is
+  met een halve ping; enkele tienden van een seconde verschil zijn verwacht), en of het echte adres van Deezer echt
+  geen ID bevat en op een andere gsm (ander IP-adres) speelt, is niet nagekeken.
 - De voorwaarden van Deezer voor het gebruik van de API en de fragmenten in een spel zijn niet nagekeken.

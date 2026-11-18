@@ -143,6 +143,32 @@ export function createFragmentPlayer({ audio = null, fetch = fetchPreview, onEve
     get paused() {
       return el ? el.paused : true;
     },
+    /** Het adres dat nu op het element staat (voor wie het doorgeeft aan spelers die meeluisteren). */
+    get url() {
+      return current?.url ?? null;
+    },
+    /** Het adres voor `trackId`, als dat er nu op staat (ook als het afspelen geweigerd werd). */
+    urlFor(trackId) {
+      return current?.trackId === trackId ? current.url : null;
+    },
+    /** Waar het element nu staat (s). */
+    get position() {
+      return el ? el.currentTime : 0;
+    },
+    /** De echte duur van het fragment (s), of NaN zolang die niet gekend is. */
+    get duration() {
+      return el ? el.duration : NaN;
+    },
+
+    /** Springt naar `seconds` (binnen de duur). Voor wie gelijk met de anderen speelt. */
+    seek(seconds) {
+      if (!el || !current) return;
+      try {
+        el.currentTime = Math.max(0, seconds);
+      } catch {
+        // Nog geen gegevens: dan speelt het van voren, een volgende controle zet het juist.
+      }
+    },
 
     /**
      * Ontgrendelt het geluid. Roep dit op in de klik-handler zelf, vóór elke

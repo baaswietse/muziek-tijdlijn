@@ -8,10 +8,31 @@
 // testlijst tests/fixtures/fragmenten.json, met verzonnen titels.
 
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 export const FRAGMENTS = JSON.parse(readFileSync(new URL('../fixtures/fragmenten.json', import.meta.url), 'utf8'));
 const MP3 = readFileSync(new URL('../fixtures/fragment.mp3', import.meta.url));
 export const FRAGMENT_SECONDS = 1.5; // zo lang duurt het testfragment
+
+// Zoals bij het echte Deezer staat het ID van het nummer niet in het adres van
+// de mp3: alleen een hash. Hier onthouden we welk nummer erbij hoort (voor
+// alle nagebootste Deezers samen, zodat ook de browser van een gast die het
+// adres via de server kreeg, het juiste fragment krijgt).
+const MEDIA = new Map(); // hash -> { id, version }
+
+/** Het adres van versie `n` van het fragment van Deezer-ID `id`. */
+function mediaUrl(id, n) {
+  const hash = createHash('md5').update(`nep-${id}-${n}`).digest('hex');
+  MEDIA.set(hash, { id: String(id), version: n });
+  return `https://cdnt-preview.dzcdn.net/api/1/1/${hash[0]}/${hash[1]}/${hash[2]}/0/${hash}.mp3?hdnea=exp=9999999999~hmac=nep`;
+}
+
+/** Welk fragment (ID `dz-…`) en welke versie een adres is, of null. */
+export function mediaOf(url) {
+  const m = /\/([0-9a-f]{32})\.mp3/.exec(String(url || ''));
+  const found = m && MEDIA.get(m[1]);
+  return found ? { id: `dz-${found.id}`, version: found.version } : null;
+}
 
 /** Het nummer uit de testlijst bij een ID `dz-…` of een Deezer-ID. */
 export const fragmentOf = (id) => FRAGMENTS.tracks.find((t) => `dz-${t.deezer}` === String(id) || String(t.deezer) === String(id));
@@ -54,7 +75,7 @@ export async function fakeDeezer(context, { missing = [], noPreview = [], expire
         album: { id: 2, title: `Album van ${t.title}` },
         release_date: `${t.year}-01-01`,
         duration: 200,
-        preview: deezer.noPreview.has(m[1]) ? '' : `https://cdnt-preview.dzcdn.net/api/1/1/f/a/k/e/${m[1]}-${n}.mp3?hdnea=exp=9999999999~hmac=nep`,
+        preview: deezer.noPreview.has(m[1]) ? '' : mediaUrl(m[1], n),
       };
     }
     // Zoals de echte API: JSONP als erom gevraagd wordt, anders JSON zonder CORS-kop.
@@ -66,10 +87,10 @@ export async function fakeDeezer(context, { missing = [], noPreview = [], expire
   });
 
   await context.route('https://cdnt-preview.dzcdn.net/**', async (route) => {
-    const m = /\/(\d+)-(\d+)\.mp3$/.exec(new URL(route.request().url()).pathname);
-    const id = m ? m[1] : null;
-    const version = m ? Number(m[2]) : 0;
-    const status = !m ? 404 : deezer.expired.has(id) && version === 1 ? 403 : 200;
+    const media = mediaOf(route.request().url());
+    const id = media ? media.id.slice(3) : null;
+    const version = media ? media.version : 0;
+    const status = !media ? 404 : deezer.expired.has(id) && version === 1 ? 403 : 200;
     deezer.media.push({ id, version, status });
     if (status !== 200) return route.fulfill({ status, body: '' });
     return route.fulfill({ status: 200, contentType: 'audio/mpeg', body: MP3, headers: { 'accept-ranges': 'none' } });
@@ -78,14 +99,16 @@ export async function fakeDeezer(context, { missing = [], noPreview = [], expire
   return deezer;
 }
 
-/** Wat het <audio>-element van de host nu doet. */
+/** Wat het <audio>-element van een gsm (de host, of een gast die meeluistert) nu doet. */
 export async function audioState(page) {
-  return page.evaluate(() => {
+  const s = await page.evaluate(() => {
     const a = document.querySelector('[data-testid="fragment-audio"]');
     if (!a) return null;
-    const m = /\/(\d+)-\d+\.mp3/.exec(a.currentSrc || a.src || '');
-    return { id: m ? `dz-${m[1]}` : null, paused: a.paused, loop: a.loop, time: a.currentTime, seeks: a.__seeks || 0 };
+    return { src: a.currentSrc || a.src || '', paused: a.paused, loop: a.loop, time: a.currentTime, duration: a.duration, seeks: a.__seeks || 0 };
   });
+  if (!s) return null;
+  const media = mediaOf(s.src);
+  return { ...s, id: media?.id ?? null, version: media?.version ?? null };
 }
 
 /** Telt hoe vaak het fragment opnieuw van voren begon (herhalen). */

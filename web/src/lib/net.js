@@ -55,6 +55,9 @@ export class Connection {
     this.retryTimer = null;
     this.pingTimer = null;
     this.probeTimer = null;
+    // Hoe lang een ping heen en terug duurt (ms), voor wie geluid gelijk met de anderen wil spelen.
+    this.pingAt = 0;
+    this.rtts = [];
     this.wake = this.wake.bind(this);
   }
 
@@ -98,6 +101,8 @@ export class Connection {
     ws.onopen = () => {
       this.lastSeen = Date.now();
       ws.send(JSON.stringify({ t: 'hello', token: this.opts.token }));
+      // Meteen ook een ping: zo is de vertraging van de verbinding snel gekend.
+      this.ping(ws);
     };
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
@@ -108,7 +113,12 @@ export class Connection {
       } catch {
         return;
       }
-      if (msg.t === 'state') {
+      if (msg.t === 'pong') {
+        this.pong();
+      } else if (msg.t === 'sound') {
+        // Alleen voor wie om geluid vroeg (zie lib/listen.js); met het tijdstip van ontvangst.
+        this.opts.onSound?.(msg.sound ?? null, performance.now());
+      } else if (msg.t === 'state') {
         this.attempts = 0;
         this.status('online');
         this.opts.onState?.(msg.state);
@@ -158,7 +168,23 @@ export class Connection {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (Date.now() - this.lastSeen > SILENCE_LIMIT) return this.drop();
+    this.ping(ws);
+  }
+
+  ping(ws) {
+    this.pingAt = performance.now();
     ws.send('{"t":"ping"}');
+  }
+
+  pong() {
+    if (!this.pingAt) return;
+    this.rtts = [...this.rtts.slice(-4), performance.now() - this.pingAt];
+    this.pingAt = 0;
+  }
+
+  /** Geschatte tijd (s) die een bericht van de server onderweg is: de helft van de kortste recente ping. */
+  latency() {
+    return this.rtts.length ? Math.min(...this.rtts) / 2000 : 0;
   }
 
   /** De pagina komt terug in beeld of het netwerk is terug. */
@@ -173,7 +199,7 @@ export class Connection {
     // Na een vergrendeld scherm lijkt een verbinding soms open terwijl ze dood
     // is. Stuur een ping; komt er niet snel antwoord, begin dan opnieuw.
     const asked = Date.now();
-    ws.send('{"t":"ping"}');
+    this.ping(ws);
     clearTimeout(this.probeTimer);
     this.probeTimer = setTimeout(() => {
       if (this.ws === ws && this.lastSeen < asked) this.drop();

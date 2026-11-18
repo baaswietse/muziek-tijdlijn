@@ -4,6 +4,7 @@ import { clearInvite, loadSession, saveSession } from './lib/session.js';
 import { useInvite } from './lib/useInvite.js';
 import { keepAwake } from './lib/wakelock.js';
 import { useHostMusic } from './lib/source.js';
+import { useListen } from './lib/listen.js';
 import { useDeck } from './lib/deck.js';
 import { APP_NAME } from './config.js';
 import { Home } from './screens/Home.jsx';
@@ -17,6 +18,8 @@ export function App({ loginResult }) {
   const [view, setView] = useState(null);
   const [net, setNet] = useState('offline');
   const [toast, setToast] = useState(loginResult?.error ? { text: loginResult.error, id: 0 } : null);
+  // Het laatste geluidsbericht van de server (alleen als deze gsm meeluistert).
+  const [sound, setSound] = useState(null);
   const conn = useRef(null);
 
   const notify = useCallback((text, code = null) => setToast({ text, code, id: Date.now() }), []);
@@ -41,10 +44,12 @@ export function App({ loginResult }) {
     }
     // Ander spel (bv. via een uitnodigingslink): toon niet nog even het vorige.
     setView(null);
+    setSound(null);
     const c = new Connection({
       code,
       token,
       onState: setView,
+      onSound: (s, receivedAt) => setSound({ sound: s, receivedAt }),
       onStatus,
       onError: (msg) => notify(msg.message, msg.code),
       onGone: (msg) => {
@@ -82,7 +87,9 @@ export function App({ loginResult }) {
   const { invite, submit, stepOver, cancel } = useInvite({ session, view, enter, notify });
 
   const isHost = Boolean(view && view.you === view.hostId);
-  const music = useHostMusic({ enabled: isHost, view });
+  const music = useHostMusic({ enabled: isHost, view, send });
+  const latency = useCallback(() => conn.current?.latency() ?? 0, []);
+  const listen = useListen({ view, send, net, incoming: sound, latency });
   const deck = useDeck({ code, token, phase: view?.phase ?? null, players: view?.players.length ?? 1, target: view?.settings.target ?? 10 });
 
   useEffect(() => {
@@ -108,11 +115,11 @@ export function App({ loginResult }) {
       </main>
     );
   } else if (view.phase === 'lobby') {
-    screen = <Lobby view={view} send={send} music={music} deck={deck} onLeave={leave} notify={notify} />;
+    screen = <Lobby view={view} send={send} music={music} listen={listen} deck={deck} onLeave={leave} notify={notify} />;
   } else {
     // Het spelscherm heeft een eigen bovenbalk (stand en menu), met daarin ook
     // de verbindingsstatus en de testmodus.
-    screen = <Game view={view} send={send} music={music} deck={deck} net={net} onLeave={leave} />;
+    screen = <Game view={view} send={send} music={music} listen={listen} deck={deck} net={net} onLeave={leave} />;
   }
   const inGame = screen?.type === Game;
 
