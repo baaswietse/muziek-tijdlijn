@@ -846,9 +846,13 @@ def decide(track: dict, mb: dict | None, correction: dict | None, wd: dict | Non
     w = (wd or {}).get("year") if asked else None
     mb = mb or {}
     m = mb.get("year")
-    if m is not None and s is not None and mb.get("next") and w is not None and w >= mb["next"]:
+    # Alleen als Spotify later zegt dan de vroege uitgave: anders bevestigt het album die.
+    if m is not None and s is not None and s > m and mb.get("next") and w is not None and w >= mb["next"]:
         m = mb["next"]
     raw = mb.get("raw")
+    # Wikidata zegt precies het vroegste jaar van MusicBrainz: die vroege uitgave is echt.
+    if m is not None and raw and raw < m and w is not None and w == raw:
+        m = raw
     # Behalve als Wikidata het latere jaar (of later) zegt: dan is de best-of fout gedateerd.
     if m is not None and s is not None and raw and raw == s and raw < m and not (w is not None and w >= m):
         m = raw

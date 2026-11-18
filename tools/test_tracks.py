@@ -344,6 +344,27 @@ class DecideThreeSources(unittest.TestCase):
         self.assertEqual(self.pick("Beat It", 1982, mb(1982, count=12), 1983), (1982, "musicbrainz", 0))
         self.assertEqual(self.pick("Lied", 2008, mb(2009), 2009), (2009, "musicbrainz", 0))
 
+    def test_spotify_confirms_the_early_release(self):
+        # Deze en de volgende test: dezelfde gevallen als in tests/unit/years.test.js.
+        mb = self.mb
+        # Daar gaat ze: album 1989 (Spotify en MusicBrainz), single 1990 (Wikidata).
+        self.assertEqual(self.pick("Daar Gaat Ze", 1989, mb(1989, count=1, next=1990), 1990), (1989, "musicbrainz", 0))
+        self.assertEqual(
+            self.pick("The Sound of Silence - Acoustic Version", 1964, mb(1964, count=1, next=1965), 1965), (1964, "musicbrainz", 0)
+        )
+        # Zegt Spotify later, dan geldt de regel nog: een fout gedateerd album.
+        self.assertEqual(self.pick("Because of You", 2004, mb(2003, count=1, next=2004), 2004), (2004, "musicbrainz", 0))
+        self.assertEqual(self.pick("Can't Stop Loving You", 2002, mb(2001, count=1, next=2002), 2002), (2002, "musicbrainz", 0))
+
+    def test_wikidata_confirms_the_raw_earliest_year(self):
+        mb = self.mb
+        self.assertEqual(self.pick("Centuries", 2015, mb(2015, raw=2014, count=16), 2014), (2014, "musicbrainz", 0))
+        self.assertEqual(self.pick("Rose Tattoo", 2013, mb(2013, raw=2012, count=8), 2012), (2012, "musicbrainz", 0))
+        self.assertEqual(self.pick("Laat De Zon In Je Hart", 2015, mb(2007, raw=2006, count=2), 2006), (2006, "musicbrainz", 0))
+        # Zonder Wikidata blijft de losse verzamelaar fout gedateerd.
+        self.assertEqual(self.pick("Centuries", 2015, mb(2015, raw=2014, count=16)), (2015, "musicbrainz", 0))
+        self.assertEqual(self.pick("Radar Love", 1973, mb(1973, raw=1971, count=3), 1973), (1973, "musicbrainz", 0))
+
     def test_remix_live_and_rerecording_ignore_wikidata(self):
         r = T.decide({"id": "x", "title": "Roses - Imanbek Remix", "spotify_date": "2019"}, {"year": None}, None, {"year": 2016})
         self.assertEqual((r["year"], r["source"], r["wd_asked"]), (2019, "spotify", False))

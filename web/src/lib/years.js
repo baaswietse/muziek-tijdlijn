@@ -258,7 +258,8 @@ export function otherVersion(recording, wanted, { live = false } = {}) {
  *    verzamelaars: een enkele verzamelaar is in MusicBrainz vaak fout gedateerd
  *    (Radar Love op "The Best of Golden Earring, 1971"; de single is van 1973).
  *  - `raw`: het vroegste jaar zonder die regel (decide gebruikt het als Spotify
- *    precies dat jaar zegt: een nieuw nummer op een eigen best-of).
+ *    of Wikidata precies dat jaar zegt: een nieuw nummer op een eigen best-of,
+ *    een single vóór het album).
  *  - `next`: is het gekozen jaar maar één uitgave, en liggen er kort daarna
  *    meer, dan is dat latere jaar een kandidaat (een fout gedateerd album, maar
  *    ook een echte vroege single). decide kiest met Wikidata.
@@ -413,7 +414,7 @@ const near = (a, b) => a !== null && b !== null && Math.abs(a - b) <= 1;
  *
  * Twee bronnen die het eens zijn (hoogstens een jaar verschil) winnen van de
  * derde. Alleen als er geen overeenstemming is, blijft er twijfel (`doubts`).
- * In detail, afgeleid uit 287 nagekeken nummers:
+ * In detail, afgeleid uit 287 nagekeken nummers en nagemeten op 370 nieuwe:
  *  - MusicBrainz en Spotify eens: het vroegste van de twee, want een album
  *    kan niet voor de eerste release liggen. Zegt Wikidata precies hetzelfde
  *    jaar als MusicBrainz, dan dat jaar (Spotify een jaar te vroeg).
@@ -426,8 +427,13 @@ const near = (a, b) => a !== null && b !== null && Math.abs(a - b) <= 1;
  *    uitgaven (mb.next): zegt Wikidata dat latere jaar (of later), dan is de
  *    vroege uitgave fout gedateerd (een album "van 2003" dat in 2004 uitkwam).
  *    Een echte vroege single heeft in Wikidata haar eigen, vroege datum.
- *    Alleen met een Spotify-jaar erbij (dat kan de vroege uitgave nog
- *    bevestigen): Wikidata heeft vaak de datum van een latere single.
+ *    Alleen als Spotify later zegt dan die vroege uitgave: zegt Spotify
+ *    precies het vroege jaar, dan bevestigt dat album de vroege uitgave en
+ *    heeft Wikidata de datum van een latere single (Daar gaat ze: album
+ *    1989, single 1990). Zonder Spotify-jaar geldt de regel ook niet.
+ *  - Kent MusicBrainz een vroeger jaar dan het gekozen (mb.raw, een losse
+ *    verzamelaar) en zegt Wikidata precies dat jaar, dan is die vroege
+ *    uitgave echt (Centuries: single 2014, album 2015).
  *  - Zegt Spotify precies het vroegste jaar dat MusicBrainz kent (ook een
  *    jaar met maar één verzamelaar), dan telt dat: een nieuw nummer op een
  *    eigen best-of. Behalve als Wikidata het latere MusicBrainz-jaar (of
@@ -445,7 +451,8 @@ export function decide({ title, spotifyYear }, mb, wd) {
   const asked = own && wd !== undefined && wd !== null;
   const w = asked ? (wd.year ?? null) : null;
   let m = mb?.year ?? null;
-  if (m !== null && s !== null && mb.next && w !== null && w >= mb.next) m = mb.next;
+  if (m !== null && s !== null && s > m && mb.next && w !== null && w >= mb.next) m = mb.next;
+  if (m !== null && mb.raw && mb.raw < m && w === mb.raw) m = mb.raw;
   if (m !== null && s !== null && mb.raw && mb.raw === s && mb.raw < m && !(w !== null && w >= m)) m = mb.raw;
   const strong = m === (mb?.year ?? null) && (mb?.count ?? 0) >= 2;
 
