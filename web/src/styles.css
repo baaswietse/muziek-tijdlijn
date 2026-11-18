@@ -1259,6 +1259,13 @@ html.dragging * {
   margin-bottom: 10px;
 }
 
+/* Ligt het stuk op de tijdlijn, dan is de lege houder er alleen tijdens het
+   slepen (om terug te slepen): zo blijft er op een laag scherm plaats voor
+   het stuk en zijn knoppen. Omlaag met de knop brengt het ook terug. */
+html:not(.dragging) .holder.empty {
+  display: none;
+}
+
 .holder .tl-card::before {
   display: none;
 }

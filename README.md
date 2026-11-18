@@ -67,8 +67,9 @@ Details:
 - Leggen gaat door te slepen: bij het begin van je beurt ligt de kaart met het vraagteken in een houder net boven de
   zwevende balk. Sleep ze in je tijdlijn: de kaarten schuiven uit elkaar waar ze zou landen. Loslaten legt ze daar
   als voorlopige keuze (pas dan gaat die naar de server, zodat de anderen zien waar je twijfelt); opnieuw slepen
-  verplaatst ze, terug naar de houder slepen maakt de keuze ongedaan, en *Leg het …* in de balk bevestigt. Sleep je
-  tot bij de boven- of onderrand, dan schuift de tijdlijn mee; bij veel kaarten worden ze compacter. Zonder slepen
+  verplaatst ze, terug naar de houder slepen (die verschijnt dan weer in de balk) maakt de keuze ongedaan, en
+  *Leg het …* in de balk bevestigt. Sleep je tot bij de boven- of onderrand, dan schuift de tijdlijn mee; bij veel
+  kaarten worden ze compacter. Zonder slepen
   kan het ook: de knoppen omhoog/omlaag op de kaart (of de pijltjestoetsen) schuiven ze één plaats op, en elke plaats
   heeft een naam voor schermlezers ("tussen 1984 en 1991"). Een afgebroken gebaar (scherm gedraaid, verbinding weg,
   beurt voorbij) legt de kaart terug waar ze lag.

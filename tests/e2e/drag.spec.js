@@ -161,9 +161,12 @@ test('slepen met de muis: van de houder naar een plaats, de kaarten maken plaats
   await expect(card).toHaveAttribute('data-index', '3');
   await expect.poll(() => pendingAt(host)).toBe(Number.POSITIVE_INFINITY);
 
-  // Terug naar de houder: geen keuze meer, ook niet bij de host.
+  // Terug naar de houder: geen keuze meer, ook niet bij de host. Ligt de kaart
+  // op de tijdlijn, dan verschijnt de lege houder pas tijdens het slepen.
   const holder = bob.getByTestId('card-holder');
-  await mouseDrag(bob, await grip(card), await centerOf(holder), { release: false });
+  await expect(holder).toBeHidden();
+  await mouseDrag(bob, await grip(card), await centerOf(bob.getByTestId('action-bar')), { release: false });
+  await expect(holder).toBeVisible();
   await expect(holder).toHaveClass(/\btarget\b/);
   await bob.mouse.up();
   await expectSettled(bob);
@@ -201,7 +204,7 @@ test('slepen met de vinger: naar een plaats en terug, en een afgebroken gebaar l
   // Naar plaats 0, dan terug naar de houder.
   await touchDrag(bob, await grip(card), await slotPoint(bob, 0));
   await expect(card).toHaveAttribute('data-index', '0');
-  await touchDrag(bob, await grip(card), await centerOf(bob.getByTestId('card-holder')));
+  await touchDrag(bob, await grip(card), await centerOf(bob.getByTestId('action-bar')));
   await expectSettled(bob);
   await expect(card).toHaveAttribute('data-index', '');
   await expect.poll(() => pendingAt(host)).toBe(-1);
@@ -241,8 +244,12 @@ test('lange tijdlijn: tot bij de rand slepen schuift de tijdlijn vanzelf mee', a
   await expect(card).toHaveAttribute('data-index', '0');
 
   // En omgekeerd: van bovenaan tot net boven de zwevende balk.
+  // Eerst oppakken: tijdens het slepen is de balk hoger (de lege houder verschijnt).
+  const from = await grip(card);
+  await mouseDrag(bob, from, { x: from.x, y: from.y + 12 }, { release: false, steps: 4 });
+  await expect(bob.getByTestId('card-holder')).toBeVisible();
   const bar = await bob.getByTestId('action-bar').boundingBox();
-  await mouseDrag(bob, await grip(card), { x: 200, y: bar.y - 8 }, { release: false });
+  await bob.mouse.move(200, bar.y - 8, { steps: 14 });
   await expect.poll(() => bob.evaluate(() => window.scrollY), { timeout: 5000 }).toBeGreaterThanOrEqual(bottomY - 5);
   await expect(bob.getByTestId('active-timeline')).toHaveAttribute('data-hover', '5');
   await bob.mouse.up();
@@ -363,7 +370,7 @@ test('token slepen: een bezette plaats neemt niets aan, het token terug naar de 
   await expect(host.locator(`[data-testid="board-row"][data-player="${await myId(host)}"]`)).toHaveAttribute('data-tokens', '2');
 
   // Terug naar de houder, en opnieuw op die vrije plaats.
-  await mouseDrag(host, await grip(host.getByTestId('drag-token')), await centerOf(host.getByTestId('card-holder')));
+  await mouseDrag(host, await grip(host.getByTestId('drag-token')), await centerOf(host.getByTestId('action-bar')));
   await expectSettled(host);
   await expect(host.getByTestId('bet-pick')).toHaveCount(0);
   await expect(host.getByTestId('drag-token')).toHaveAttribute('data-index', '');

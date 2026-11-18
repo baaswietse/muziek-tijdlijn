@@ -163,6 +163,9 @@ export function useSlotDrag({ listRef, count, index, blocked, enabled, onDrop, l
     const mids = meta.filter((m) => m.card !== null).map((m) => (m.top + m.bottom) / 2 - (m.afterPick ? size : 0));
     const rest = meta.filter((m) => m.el !== pick);
     const end = rest.length ? Math.max(...rest.map((m) => m.bottom - (m.afterPick ? size : 0))) + gap : 0;
+    // Eerst `dragging`: dan verschijnt een lege houder in de balk (het doel om
+    // terug te slepen) en meten we de balk zoals ze tijdens het slepen is.
+    document.documentElement.classList.add('dragging');
     const bar = document.querySelector('[data-testid="action-bar"]');
     const head = document.querySelector('.game-top');
     s.layout = { list, pick, meta, mids, size, gap, end, docTop: lr.top + window.scrollY };
@@ -174,7 +177,6 @@ export function useSlotDrag({ listRef, count, index, blocked, enabled, onDrop, l
     // Komt de kaart uit de houder, dan is er achteraan plaats nodig.
     if (!pick) list.style.paddingBottom = `${size}px`;
     (pick ?? s.el).classList.add('lifted');
-    document.documentElement.classList.add('dragging');
     setGhost({ left: src.left, top: src.top, width: src.width, height: src.height });
     s.raf = requestAnimationFrame(() => tick(s));
     return true;

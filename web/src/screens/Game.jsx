@@ -567,7 +567,8 @@ function clearZone() {
 function keepClear() {
   const row = document.querySelector('.timeline [data-pick]');
   if (!row) return;
-  const head = row.querySelector('[data-testid="drag-card"], [data-testid="drag-token"]') ?? row;
+  // Van de pijltjes (de bovenste knoppen) tot de bevestigknop.
+  const head = row.querySelector('.mv') ?? row;
   const last = row.querySelector('[data-testid="confirm-bet"]') ?? head;
   const { top, bottom } = clearZone();
   const t = head.getBoundingClientRect().top;
@@ -1095,7 +1096,7 @@ function DragToken({ index, name, onPointerDown, move, sending }) {
         <Coin />
         <span class="tl-text">
           <span class="tl-title">{placed ? (sending ? 'Token wordt ingezet…' : `Nog niet ingezet: ${name(index)}`) : 'Je token'}</span>
-          <span class="tl-artist">{placed ? (sending ? 'Even geduld.' : 'Je token is pas ingezet als je op de knop tikt.') : 'Sleep het naar een vrije plaats'}</span>
+          {!placed && <span class="tl-artist">Sleep het naar een vrije plaats</span>}
         </span>
       </div>
       <MoveButtons move={move} />
