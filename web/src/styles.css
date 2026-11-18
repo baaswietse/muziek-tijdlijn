@@ -1912,3 +1912,23 @@ html:not(.has-bar) .outcome {
     transition: none !important;
   }
 }
+
+/* «Geluid op dit toestel» (spelers die geen host zijn, alleen met fragmenten). */
+.listen {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.listen .menu-row .chip {
+  margin-left: auto;
+}
+
+.listen p {
+  margin: 0;
+}
+
+.lobby-listen {
+  margin-top: 12px;
+  text-align: left;
+}

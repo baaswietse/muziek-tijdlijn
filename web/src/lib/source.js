@@ -16,10 +16,10 @@ export function deckMatches(source, playlist) {
   return source === 'fragment' ? fragmentDeck : !fragmentDeck;
 }
 
-export function useHostMusic({ enabled, view }) {
+export function useHostMusic({ enabled, view, send = () => false }) {
   const [source, setSourceState] = useState(() => (storage.read(SOURCE) === 'fragment' ? 'fragment' : 'spotify'));
   const spotify = useMusic({ enabled: enabled && source === 'spotify', view });
-  const fragment = useFragmentMusic({ enabled: enabled && source === 'fragment', view });
+  const fragment = useFragmentMusic({ enabled: enabled && source === 'fragment', view, send });
   const setSource = useCallback((s) => {
     const next = s === 'fragment' ? 'fragment' : 'spotify';
     storage.write(SOURCE, next);

@@ -59,9 +59,20 @@ function FragmentPanel({ music, chooser }) {
       {chooser}
       <p class="muted small">
         Elke beurt speelt een fragment van 30 seconden van Deezer, steeds opnieuw tot de beurt voorbij is. Het geluid komt uit
-        dit toestel: hang het aan een box als je wil. Laat de site open op het scherm.
+        dit toestel: hang het aan een box als je wil. Laat de site open op het scherm. Speel je op afstand, dan kan elke speler
+        in het menu «Geluid op dit toestel» aanzetten.
       </p>
-      {music.local !== 'on' ? (
+      {music.local === 'mute' ? (
+        <>
+          <p class="notice" data-testid="fragment-muted">
+            Dit toestel blijft stil. Alleen spelers die «Geluid op dit toestel» aanzetten, horen het fragment; jij bedient het
+            zoals altijd (pauze, opnieuw afspelen, ander nummer).
+          </p>
+          <button class="btn" onClick={music.chooseBrowser} data-testid="fragment-unlock">
+            Zet het geluid hier toch aan
+          </button>
+        </>
+      ) : music.local !== 'on' ? (
         <>
           <p class="notice" data-testid="fragment-locked">
             Je browser speelt pas geluid na een tik. Tik één keer op de knop hieronder.
@@ -69,16 +80,22 @@ function FragmentPanel({ music, chooser }) {
           <button class="btn primary" onClick={music.chooseBrowser} disabled={music.local === 'starting'} data-testid="fragment-unlock">
             {music.local === 'starting' ? 'Bezig…' : 'Zet het geluid aan'}
           </button>
+          <MuteButton music={music} />
         </>
       ) : (
         <div class="row gap">
           <button class="btn" onClick={music.test} disabled={music.busy || music.inGame} data-testid="music-test">
             Test het geluid
           </button>
+          <MuteButton music={music} />
         </div>
       )}
       <p class="music-status" data-testid="music-status" data-ready={music.ready ? 'yes' : 'no'}>
-        {music.ready ? 'Klaar: het geluid komt uit dit toestel. ' : 'Zet eerst het geluid aan. '}
+        {music.ready
+          ? music.local === 'mute'
+            ? 'Klaar: dit toestel blijft stil. '
+            : 'Klaar: het geluid komt uit dit toestel. '
+          : 'Zet eerst het geluid aan. '}
         {STATUS[music.status]}
       </p>
       {music.error && (
@@ -95,6 +112,15 @@ function FragmentPanel({ music, chooser }) {
         </ul>
       </details>
     </section>
+  );
+}
+
+/** Voor een host zonder geluid (bv. in een stille ruimte): de spelers op afstand horen het toch. */
+function MuteButton({ music }) {
+  return (
+    <button class="btn link" onClick={music.chooseMute} disabled={music.local === 'starting'} data-testid="fragment-mute">
+      Geen geluid op dit toestel
+    </button>
   );
 }
 

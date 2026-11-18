@@ -4,6 +4,7 @@ import { step, useSlotDrag } from '../lib/drag.js';
 import { MusicPanel } from '../components/MusicPanel.jsx';
 import { deezerId, deezerLink } from '../fragment/deezer.js';
 import { Rules } from '../components/Rules.jsx';
+import { ListenAlert, ListenToggle } from '../components/Listen.jsx';
 import { MockChip, NetBanner, NetDot } from '../components/Status.jsx';
 
 // Het spelscherm: één ding per moment. Bovenaan een balk met de stand en het
@@ -11,7 +12,7 @@ import { MockChip, NetBanner, NetDot } from '../components/Status.jsx';
 // balk met de knop die je nu nodig hebt. Alles wat je niet elke beurt nodig
 // hebt (stand, hostbediening, spelregels) zit achter één tik in een paneel.
 
-export function Game({ view, send, music, deck, net = 'online', onLeave }) {
+export function Game({ view, send, music, listen = null, deck, net = 'online', onLeave }) {
   const me = view.you;
   const isHost = me === view.hostId;
   const byId = new Map(view.players.map((p) => [p.id, p]));
@@ -385,6 +386,8 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
       {/* Vaste plek voor een probleem met de muziek: de host ziet het altijd,
           niet alleen in het menu. Staat het menu open, dan staat het daar. */}
       {isHost && panel !== 'menu' && <MusicAlert music={music} onSettings={openSettings} onSkip={() => send({ t: 'skipTrack' })} />}
+      {/* Voor een speler met «Geluid op dit toestel»: alleen als het hier niet speelt. */}
+      {!isHost && listen && <ListenAlert listen={listen} />}
 
       {views.length > 1 && (
         <div class="view-switch" role="group" aria-label="Welke tijdlijn">
@@ -497,6 +500,7 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
         )}
         <div class="menu-group">
           <p class="menu-label">Voor iedereen</p>
+          {!isHost && listen && <ListenToggle listen={listen} />}
           <Rules target={target} />
           <button type="button" class="menu-row danger" onClick={() => confirm('Dit spel verlaten?') && onLeave()}>
             Verlaat het spel

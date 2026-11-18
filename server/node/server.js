@@ -110,11 +110,20 @@ function onlineSet(r) {
 
 function broadcast(r) {
   const online = onlineSet(r);
+  const now = Date.now();
   for (const ws of r.sockets) {
     if (!ws.playerId || ws.readyState !== ws.OPEN) continue;
     ws.send(JSON.stringify({ t: 'state', state: room.view(r.state, ws.playerId, online) }));
+    // Alleen wie om geluid vroeg, krijgt het adres van het fragment (apart bericht).
+    sendSound(r, ws, now);
   }
   scheduleSave();
+}
+
+/** Het geluidsbericht voor één verbinding, als die meeluistert (zie ../src/sound.js). */
+function sendSound(r, ws, now = Date.now()) {
+  const msg = room.soundMessage(r.state, ws.playerId, ws.listen === true, now);
+  if (msg) ws.send(JSON.stringify(msg));
 }
 
 function createRoom(name) {
@@ -297,6 +306,17 @@ function onConnection(ws, code) {
       return broadcast(r);
     }
     if (!ws.playerId) return;
+    if (msg?.t === 'listen') {
+      // Geluid op dit toestel aan of uit: geldt voor deze verbinding.
+      ws.listen = msg.on === true;
+      if (ws.listen) sendSound(r, ws);
+      return;
+    }
+    if (msg?.t === 'soundFail') {
+      // Het adres speelt niet bij deze speler: de host vraagt een vers adres.
+      if (ws.listen === true && room.soundFailed(r.state, ws.playerId, msg.n)) broadcast(r);
+      return;
+    }
     try {
       await room.applyAction(r.state, ws.playerId, msg, { loadTracks, online: onlineSet(r) });
       // Een verwijderde speler krijgt nog één melding en wordt dan afgesloten.
