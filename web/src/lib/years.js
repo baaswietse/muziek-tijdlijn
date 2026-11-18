@@ -7,10 +7,15 @@
 // ook met gewone unit-tests te controleren zijn.
 
 /**
- * Versie van de regels voor remixes. Jaartallen van remixes die de browser
- * met oudere regels onthield, worden opnieuw opgezocht (zie deck.js).
- * Verhoog dit als de regels voor remixes veranderen.
+ * Versie van de regels om een jaar te kiezen (veld `r` in de lokale cache en
+ * de gedeelde lijst). Tot versie 2 ging het alleen over remixes; vanaf 3 over
+ * alle regels: MusicBrainz strenger gelezen en Wikidata als derde bron.
+ * Resultaten van oudere regels met een twijfel worden opnieuw beoordeeld, en
+ * remixes van vóór versie 2 opnieuw opgezocht (zie deck.js). Verhoog dit als
+ * de regels veranderen.
  */
+export const RULES = 3;
+/** Vanaf deze versie kregen remixes het jaar van de remix zelf. */
 export const REMIX_RULES = 2;
 
 const MB_URL = 'https://musicbrainz.org/ws/2/recording';
@@ -192,52 +197,114 @@ export function yearOf(date) {
 
 // Uitgaven die niets zeggen over wanneer een nummer uitkwam.
 const SKIP_TYPES = new Set(['live', 'demo', 'interview', 'audiobook', 'audio drama', 'dj-mix', 'mixtape/street', 'spokenword']);
+// Een opname met een van deze woorden in de titel of de toelichting is een
+// andere versie dan het gewone nummer (tenzij de titel van Spotify ze ook heeft).
+const OTHER_VERSION_RE = /\b(?:instrumental|karaoke|a ?cappella|acapella|demo)\b/i;
+// In de toelichting niet "demo": die staat er soms ook bij de echte single (Enter Sandman).
+const NOTE_VERSION_RE = /\b(?:instrumental|karaoke|a ?cappella|acapella)\b/i;
+/** Een losse vroegste uitgave mag hoogstens zoveel jaar vóór een jaar met meer uitgaven liggen (zie pickYear). */
+const LONE_WINDOW = 3;
+
+/** Officiële studio-uitgaven met een datum van deze opname: [{ date, year, id, group, compilation }]. */
+function studioReleases(recording) {
+  const out = [];
+  for (const release of recording.releases || []) {
+    if (String(release.status || '').toLowerCase() !== 'official') continue;
+    const group = release['release-group'] || {};
+    const types = (group['secondary-types'] || []).map((t) => String(t).toLowerCase());
+    if (types.some((t) => SKIP_TYPES.has(t))) continue;
+    const date = release.date;
+    const year = yearOf(date);
+    if (year === null) continue;
+    const id = release.id || `${recording.id}|${date}|${release.title || ''}`;
+    out.push({ date: String(date), year, id, group: group.id || release.title || id, compilation: types.includes('compilation') });
+  }
+  return out;
+}
 
 /** Vroegste datum van een officiële studio-uitgave met deze opname. */
 export function officialDate(recording) {
   let best = null;
-  for (const release of recording.releases || []) {
-    if (String(release.status || '').toLowerCase() !== 'official') continue;
-    const types = ((release['release-group'] || {})['secondary-types'] || []).map((t) => String(t).toLowerCase());
-    if (types.some((t) => SKIP_TYPES.has(t))) continue;
-    const d = release.date;
-    if (yearOf(d) === null) continue;
-    if (best === null || String(d) < best) best = String(d);
-  }
+  for (const r of studioReleases(recording)) if (best === null || r.date < best) best = r.date;
   return best;
 }
 
 /**
- * Kiest uit zoekresultaten het jaar van de opname die echt past. Een officiële
- * studio-uitgave gaat altijd voor; pas als die er niet is, telt de vroegste
- * datum van eender welke uitgave (official: false).
+ * Is deze opname een andere versie dan wat gezocht wordt? Een remix, live-
+ * opname, instrumentale versie, karaoke of demo telt niet voor het gewone
+ * nummer: zo'n opname heeft een eigen (vaak latere, soms fout gedateerde) uitgave.
+ * Voorbeeld: "Shape of You (DJ Inko remix)" op een verzamelaar "uit 2015".
  */
-export function pickYear(recordings, title, artists) {
-  let best = null;
-  let count = 0;
-  for (const rec of recordings || []) {
-    if (!titleMatches(rec.title || '', title) || !artistMatches(rec, artists)) continue;
-    const official = officialDate(rec);
-    const date = official || rec['first-release-date'];
-    const year = yearOf(date);
-    if (year === null) continue;
-    count++;
-    const rank = (official ? 0 : 1) * 10000 + year;
-    if (best === null || rank < best.rank) {
-      best = { rank, year, date, official: Boolean(official), mbid: rec.id };
-    }
-  }
-  if (best) best.matches = count;
-  return best;
+export function otherVersion(recording, wanted, { live = false } = {}) {
+  const title = String(recording.title || '');
+  const note = String(recording.disambiguation || '');
+  if (!remixKey(wanted) && remixKey(title)) return true;
+  if (!live && (isLive(title) || /\blive\b/i.test(note))) return true;
+  const extra = `${title.slice(stripVersions(title).length)} ${(title.match(PARENS_RE) || []).join(' ')}`;
+  return (OTHER_VERSION_RE.test(extra) || NOTE_VERSION_RE.test(note)) && !OTHER_VERSION_RE.test(wanted);
 }
 
-function better(current, other) {
-  if (!current) return other;
-  if (other && other.rank < current.rank) {
-    other.matches = Math.max(current.matches || 0, other.matches || 0);
-    return other;
+/**
+ * Kiest uit zoekresultaten het jaar van de eerste release. Alle passende
+ * opnames samen (dezelfde opname staat in MusicBrainz vaak meer dan eens):
+ *  - Alleen officiële studio-uitgaven tellen. Zijn er geen, dan de vroegste
+ *    datum van eender welke uitgave (official: false).
+ *  - Een jaar met alleen verzamelaars telt pas vanaf twee verschillende
+ *    verzamelaars: een enkele verzamelaar is in MusicBrainz vaak fout gedateerd
+ *    (Radar Love op "The Best of Golden Earring, 1971"; de single is van 1973).
+ *  - `raw`: het vroegste jaar zonder die regel (decide gebruikt het als Spotify
+ *    precies dat jaar zegt: een nieuw nummer op een eigen best-of).
+ *  - `next`: is het gekozen jaar maar één uitgave, en liggen er kort daarna
+ *    meer, dan is dat latere jaar een kandidaat (een fout gedateerd album, maar
+ *    ook een echte vroege single). decide kiest met Wikidata.
+ *  - `count`: zoveel verschillende uitgaven in het gekozen jaar.
+ */
+export function pickYear(recordings, title, artists, { live = false } = {}) {
+  const releases = [];
+  let matches = 0;
+  let fallback = null; // { year, date, mbid } zonder officiële studio-uitgave
+  const seen = new Set();
+  for (const rec of recordings || []) {
+    if (!titleMatches(rec.title || '', title) || !artistMatches(rec, artists)) continue;
+    if (otherVersion(rec, title, { live })) continue;
+    if (rec.id && seen.has(rec.id)) continue;
+    if (rec.id) seen.add(rec.id);
+    const studio = studioReleases(rec);
+    if (studio.length) {
+      matches++;
+      for (const r of studio) releases.push({ ...r, mbid: rec.id });
+      continue;
+    }
+    const date = rec['first-release-date'];
+    const year = yearOf(date);
+    if (year === null) continue;
+    matches++;
+    if (!fallback || year < fallback.year) fallback = { year, date, mbid: rec.id };
   }
-  return current;
+  if (!releases.length) {
+    if (!fallback) return null;
+    return { year: fallback.year, date: fallback.date, official: false, mbid: fallback.mbid, matches, raw: fallback.year, count: 0 };
+  }
+  // Per jaar: verschillende uitgaven, en of er iets anders dan een verzamelaar bij is.
+  const years = new Map();
+  for (const r of releases) {
+    if (!years.has(r.year)) years.set(r.year, { ids: new Set(), groups: new Set(), other: false, first: r });
+    const y = years.get(r.year);
+    y.ids.add(r.id);
+    if (r.compilation) y.groups.add(r.group);
+    else y.other = true;
+    if (r.date < y.first.date) y.first = r;
+  }
+  const sorted = [...years.keys()].sort((a, b) => a - b);
+  const raw = sorted[0];
+  const year = sorted.find((y) => years.get(y).other || years.get(y).groups.size >= 2) ?? raw;
+  const count = years.get(year).ids.size;
+  const found = { year, date: years.get(year).first.date, official: true, mbid: years.get(year).first.mbid, matches, raw, count };
+  if (count === 1) {
+    const next = sorted.find((y) => y > year && y <= year + LONE_WINDOW && years.get(y).ids.size >= 2);
+    if (next) found.next = next;
+  }
+  return found;
 }
 
 function lucenePhrase(text) {
@@ -251,14 +318,23 @@ function words(text) {
 
 const STUDIO_FILTER = ' AND status:official AND NOT secondarytype:live AND NOT secondarytype:demo';
 
+/** Het resultaat van lookup: alleen wat decide en de cache nodig hebben. */
+function result(found, method) {
+  const out = { year: found.year, official: found.official, method, mbid: found.mbid, raw: found.raw, count: found.count };
+  if (found.next) out.next = found.next;
+  return out;
+}
+
 /**
  * Zoekt het eerste releasejaar. `search(query)` geeft { recordings, total }.
- * Resultaat: { year, official, method, mbid } of { year: null }.
+ * Resultaat: { year, official, method, mbid, raw, count, next? } of { year: null }
+ * (zie pickYear).
  */
 export async function lookup(title, artists, search) {
   const wanted = cleanTitle(title);
   const primary = (artists || [])[0] || '';
   const remix = remixParts(title);
+  const live = isLive(title);
   const queries = [];
   if (remix) {
     // MusicBrainz schrijft een remix meestal als "Titel (X remix)", soms met
@@ -277,8 +353,15 @@ export async function lookup(title, artists, search) {
   }
 
   for (const [method, query] of queries) {
+    // Alle opnames die deze zoekopdracht opleverde, over alle pagina's heen:
+    // pickYear kijkt naar alle uitgaven samen.
+    const pool = [];
+    const pick = (recordings) => {
+      pool.push(...(recordings || []));
+      return pickYear(pool, wanted, artists, { live });
+    };
     const first = await search(query);
-    let found = pickYear(first.recordings, wanted, artists);
+    let found = pick(first.recordings);
     if (first.total > first.recordings.length) {
       // Bekende nummers hebben honderden opnames (live, bootlegs); de eerste
       // honderd zijn niet noodzakelijk de oudste.
@@ -286,7 +369,7 @@ export async function lookup(title, artists, search) {
       if (!found?.official) {
         // Geen officiële studio-uitgave op de eerste pagina: vraag er gericht
         // naar. Dat zijn er hooguit enkele tientallen.
-        found = better(found, pickYear((await search(studio)).recordings, wanted, artists));
+        found = pick((await search(studio)).recordings);
       }
       // Een opname met een vroegere officiële uitgave heeft ook een vroegere
       // 'eerste release'. Kijk dus of er vóór het gevonden jaar nog iets zit.
@@ -298,18 +381,19 @@ export async function lookup(title, artists, search) {
         if (found.official && seen !== null && found.year <= seen) break;
         const before = ` AND firstreleasedate:[1900-01-01 TO ${found.year - 1}-12-31]`;
         const older = await search(`(${query})${before}`);
-        let improved = better(found, pickYear(older.recordings, wanted, artists));
+        let improved = pick(older.recordings);
         if (older.total > older.recordings.length) {
-          improved = better(improved, pickYear((await search(studio + before)).recordings, wanted, artists));
+          improved = pick((await search(studio + before)).recordings);
         } else {
           seen = found.year;
         }
-        if (improved === found) break;
+        const same = improved.year === found.year && improved.official === found.official;
         found = improved;
+        if (same) break;
       }
     }
     if (!found) continue;
-    return { year: found.year, official: found.official, method, mbid: found.mbid };
+    return result(found, method);
   }
   return { year: null, method: 'niets gevonden' };
 }
@@ -319,7 +403,11 @@ export async function lookup(title, artists, search) {
  * `doubts` somt op waarom het jaar best nagekeken wordt.
  */
 export function decide({ title, spotifyYear }, mb) {
-  const mbYear = mb?.year ?? null;
+  let mbYear = mb?.year ?? null;
+  // Zegt Spotify precies het vroegste jaar dat MusicBrainz kent (ook een jaar
+  // met maar één verzamelaar), dan zijn twee bronnen het eens: bv. een nieuw
+  // nummer op een eigen best-of.
+  if (mbYear && spotifyYear && mb.raw && mb.raw === spotifyYear && mb.raw < mbYear) mbYear = mb.raw;
   const doubts = [];
   let year;
   let source;

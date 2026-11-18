@@ -165,6 +165,70 @@ def lives(title, artist, n, first, last):
     return out
 
 
+def relx(date, title, secondary=(), status="Official"):
+    """Een uitgave met titel (en dus een eigen release group) en id."""
+    return {"id": f"{title}|{date}", "title": title, "date": date, "status": status,
+            "release-group": {"id": f"rg-{title}", "primary-type": "Album", "secondary-types": list(secondary)}}
+
+
+class TooEarly(unittest.TestCase):
+    """Echte gevallen uit een playlist (november 2026); dezelfde als in tests/unit/years.test.js."""
+
+    def test_a_single_misdated_compilation_does_not_count(self):
+        radar = rec("Radar Love", "Golden Earring", "1971", "radar", releases=[
+            relx("1971", "The Best of Golden Earring", ["Compilation"]), relx("1973", "Radar Love"),
+            relx("1973-06", "Radar Love / The Song Is Over"), relx("1976", "Golden Earring", ["Compilation"])])
+        found = T.pick_year([radar], "Radar Love", ["Golden Earring"])
+        self.assertEqual((found["year"], found["raw"], found["official"]), (1973, 1971, True))
+        weekend = rec("Weekend (radio edit)", "Scooter", "2001", "wk", releases=[
+            relx("2001", "Mädchen Soft+Crazy", ["Compilation"]), relx("2002-08-08", "Pepsi: More Music 2", ["Compilation"]),
+            relx("2003", "Weekend!"), relx("2003", "NOW 8", ["Compilation"])])
+        self.assertEqual(T.pick_year([weekend], "Weekend!", ["Scooter"])["year"], 2003)
+        alive = [
+            rec("I'm Alive", "Céline Dion", "2000", "c2000", releases=[relx("2000", "2000 Collection", ["Compilation"])]),
+            rec("I’m Alive", "Céline Dion", "2002", "single", releases=[relx("2002", "I'm Alive")]),
+        ]
+        found = T.pick_year(alive, "I'm Alive", ["Céline Dion"])
+        self.assertEqual((found["year"], found["mbid"]), (2002, "single"))
+
+    def test_two_different_compilations_in_one_year_do_count(self):
+        ongewoon = rec("Ongewoon", "Pommelien Thijs", "2022-06-10", "o", releases=[
+            relx("2022-06-10", "MNM Big Hits Summer 2022", ["Compilation"]), relx("2022-08-26", "Tien om te zien 2022", ["Compilation"]),
+            relx("2023-06-23", "Per ongeluk")])
+        self.assertEqual(T.pick_year([ongewoon], "Ongewoon", ["Pommelien Thijs"])["year"], 2022)
+
+    def test_remix_live_instrumental_and_karaoke_versions_do_not_count(self):
+        karaoke = rec("Shape of You", "Ed Sheeran", "2016", "karaoke", releases=[relx("2016", "Karaoke Hits")])
+        karaoke["disambiguation"] = "karaoke version"
+        recs = [
+            rec("Shape of You (DJ Inko remix)", "Ed Sheeran", "2015-01-30", "inko", releases=[relx("2015-01-30", "Various Tracks")]),
+            rec("Shape of You (live at Taratata)", "Ed Sheeran", "2016", "live", releases=[relx("2016", "Divide Collector")]),
+            rec("Shape of You (instrumental)", "Ed Sheeran", "2016", "instr", releases=[relx("2016", "Shape of You instr")]),
+            karaoke,
+            rec("Shape of You", "Ed Sheeran", "2017-01-06", "orig", releases=[relx("2017-01-06", "Shape of You"), relx("2017-03-03", "÷")]),
+        ]
+        found = T.pick_year(recs, "Shape of You", ["Ed Sheeran"])
+        self.assertEqual((found["year"], found["mbid"]), (2017, "orig"))
+        self.assertTrue(T.other_version(recs[0], "Shape of You"))
+        self.assertFalse(T.other_version(recs[4], "Shape of You"))
+        live = T.pick_year(recs, "Shape of You", ["Ed Sheeran"], live=True)
+        self.assertEqual((live["year"], live["mbid"]), (2016, "live"))
+
+    def test_a_lone_earliest_release_gives_a_candidate(self):
+        slim = rec("The Real Slim Shady", "Eminem", "1999-12-31", "s", releases=[
+            relx("1999-12-31", "The Way I Am"), relx("2000", "The Marshall Mathers LP"), relx("2000", "The Real Slim Shady"),
+            relx("2000-05", "VIVA Summer Hits", ["Compilation"])])
+        found = T.pick_year([slim], "The Real Slim Shady", ["Eminem"])
+        self.assertEqual((found["year"], found["count"], found["next"]), (1999, 1, 2000))
+        hey = rec("Hey Jude", "The Beatles", "1968", "h", releases=[relx("1968", "Hey Jude"), relx("1968-08-26", "Hey Jude US"), relx("1970", "Hey Jude LP")])
+        self.assertNotIn("next", T.pick_year([hey], "Hey Jude", ["The Beatles"]))
+
+    def test_spotify_equal_to_the_raw_earliest_year(self):
+        mb = {"year": 2009, "raw": 2008, "count": 4, "official": True, "method": "exact"}
+        r = T.decide({"id": "x", "title": "Sweet Goodbyes", "spotify_date": "2008-11-06"}, mb, None)
+        self.assertEqual((r["year"], r["source"], r["reasons"]), (2008, "musicbrainz", []))
+
+
 class Lookup(unittest.TestCase):
     def test_descends_to_older_recordings(self):
         calls = []
@@ -473,10 +537,10 @@ class Remix(unittest.TestCase):
     def test_cache_key_only_changes_for_remixes(self):
         # Gewone nummers houden hun sleutel, zodat de cache niet weggegooid wordt;
         # remixes krijgen een nieuwe en worden dus opnieuw opgezocht.
-        self.assertEqual(T._cache_key({"title": "Bohemian Rhapsody - Remastered 2011", "artists": ["Queen"]}), "v4|bohemian rhapsody|queen")
-        self.assertEqual(T._cache_key({"title": "Smalltown Boy - Extended Mix", "artists": ["Bronski Beat"]}), "v4|smalltown boy|bronski beat")
+        self.assertEqual(T._cache_key({"title": "Bohemian Rhapsody - Remastered 2011", "artists": ["Queen"]}), "v5|bohemian rhapsody|queen")
+        self.assertEqual(T._cache_key({"title": "Smalltown Boy - Extended Mix", "artists": ["Bronski Beat"]}), "v5|smalltown boy|bronski beat")
         key = T._cache_key({"title": "Roses - Imanbek Remix", "artists": ["SAINt JHN"]})
-        self.assertEqual(key, f"v4-remix{T.REMIX_RULES}|roses imanbek remix|saint jhn")
+        self.assertEqual(key, f"v5-remix{T.REMIX_RULES}|roses imanbek remix|saint jhn")
 
 
 class Misc(unittest.TestCase):

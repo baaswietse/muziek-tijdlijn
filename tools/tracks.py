@@ -306,15 +306,23 @@ def lucene_phrase(text: str) -> str:
 
 # Uitgaven die niets zeggen over wanneer een nummer uitkwam.
 _SKIP_TYPES = {"live", "demo", "interview", "audiobook", "audio drama", "dj-mix", "mixtape/street", "spokenword"}
+# Een opname met een van deze woorden in de titel of de toelichting is een
+# andere versie dan het gewone nummer (tenzij de titel van Spotify ze ook heeft).
+_OTHER_VERSION_RE = re.compile(r"\b(?:instrumental|karaoke|a ?cappella|acapella|demo)\b", re.IGNORECASE)
+# In de toelichting niet "demo": die staat er soms ook bij de echte single (Enter Sandman).
+_NOTE_VERSION_RE = re.compile(r"\b(?:instrumental|karaoke|a ?cappella|acapella)\b", re.IGNORECASE)
+_PARENS_RE = re.compile(r"[\(\[][^\)\]]*[\)\]]")
+# Een losse vroegste uitgave mag hoogstens zoveel jaar vóór een jaar met meer uitgaven liggen (zie pick_year).
+LONE_WINDOW = 3
 
 
-def official_date(recording: dict) -> str | None:
-    """Vroegste datum van een officiële studio-uitgave met deze opname.
+def _studio_releases(recording: dict) -> list[dict]:
+    """Officiële studio-uitgaven met een datum van deze opname.
 
     Bootlegs, promo's, live-albums en demo's tellen niet mee: die zijn in
     MusicBrainz vaak fout of veel te vroeg gedateerd.
     """
-    best = None
+    out = []
     for release in recording.get("releases") or []:
         if str(release.get("status") or "").casefold() != "official":
             continue
@@ -323,47 +331,100 @@ def official_date(recording: dict) -> str | None:
         if types & _SKIP_TYPES:
             continue
         d = release.get("date")
-        if year_of(d) is None:
-            continue
-        if best is None or str(d) < best:
-            best = str(d)
-    return best
-
-
-def pick_year(recordings: list[dict], title: str, artists: list[str]) -> dict | None:
-    """Kiest uit zoekresultaten het jaar van de opname die echt past.
-
-    Een officiële studio-uitgave gaat altijd voor; pas als die er niet is,
-    telt de vroegste datum van eender welke uitgave ('official': False).
-    """
-    best = None
-    count = 0
-    for rec in recordings:
-        if not title_matches(rec.get("title", ""), title) or not artist_matches(rec, artists):
-            continue
-        official = official_date(rec)
-        d = official or rec.get("first-release-date")
         y = year_of(d)
         if y is None:
             continue
-        count += 1
-        candidate = (0 if official else 1, y)
-        if best is None or candidate < best["_rank"]:
-            credit = "".join(
-                c.get("name", "") + (c.get("joinphrase") or "") for c in rec.get("artist-credit") or []
-            )
-            best = {
-                "_rank": candidate,
-                "year": y,
-                "date": d,
-                "official": bool(official),
-                "mbid": rec.get("id"),
-                "title": rec.get("title"),
-                "artist": credit,
-            }
-    if best:
-        best["matches"] = count
-    return best
+        rid = release.get("id") or f"{recording.get('id')}|{d}|{release.get('title') or ''}"
+        out.append({"date": str(d), "year": y, "id": rid, "group": group.get("id") or release.get("title") or rid,
+                    "compilation": "compilation" in types})
+    return out
+
+
+def official_date(recording: dict) -> str | None:
+    """Vroegste datum van een officiële studio-uitgave met deze opname."""
+    dates = [r["date"] for r in _studio_releases(recording)]
+    return min(dates) if dates else None
+
+
+def other_version(recording: dict, wanted: str, live: bool = False) -> bool:
+    """Is deze opname een andere versie dan wat gezocht wordt? Een remix, live-
+    opname, instrumentale versie, karaoke of demo telt niet voor het gewone
+    nummer (zie otherVersion in years.js)."""
+    title = str(recording.get("title") or "")
+    note = str(recording.get("disambiguation") or "")
+    if not remix_key(wanted) and remix_key(title):
+        return True
+    if not live and (is_live(title) or re.search(r"\blive\b", note, re.IGNORECASE)):
+        return True
+    extra = title[len(_strip_versions(title)):] + " " + " ".join(_PARENS_RE.findall(title))
+    return bool(_OTHER_VERSION_RE.search(extra) or _NOTE_VERSION_RE.search(note)) and not _OTHER_VERSION_RE.search(wanted)
+
+
+def pick_year(recordings: list[dict], title: str, artists: list[str], live: bool = False) -> dict | None:
+    """Kiest uit zoekresultaten het jaar van de eerste release (zie pickYear in years.js).
+
+    Alle passende opnames samen. Alleen officiële studio-uitgaven tellen; zijn
+    er geen, dan de vroegste datum van eender welke uitgave ('official': False).
+    Een jaar met alleen verzamelaars telt pas vanaf twee verschillende
+    verzamelaars (een enkele verzamelaar is vaak fout gedateerd). 'raw': het
+    vroegste jaar zonder die regel; 'next': een later jaar met meer uitgaven als
+    het gekozen jaar maar één uitgave heeft; 'count': zoveel uitgaven in het
+    gekozen jaar.
+    """
+    releases = []
+    matches = 0
+    fallback = None
+    seen = set()
+    for rec in recordings or []:
+        if not title_matches(rec.get("title", ""), title) or not artist_matches(rec, artists):
+            continue
+        if other_version(rec, title, live):
+            continue
+        rid = rec.get("id")
+        if rid and rid in seen:
+            continue
+        if rid:
+            seen.add(rid)
+        studio = _studio_releases(rec)
+        credit = "".join(c.get("name", "") + (c.get("joinphrase") or "") for c in rec.get("artist-credit") or [])
+        if studio:
+            matches += 1
+            for r in studio:
+                releases.append({**r, "mbid": rid, "title": rec.get("title"), "artist": credit})
+            continue
+        d = rec.get("first-release-date")
+        y = year_of(d)
+        if y is None:
+            continue
+        matches += 1
+        if fallback is None or y < fallback["year"]:
+            fallback = {"year": y, "date": d, "mbid": rid, "title": rec.get("title"), "artist": credit}
+    if not releases:
+        if not fallback:
+            return None
+        return {**fallback, "official": False, "matches": matches, "raw": fallback["year"], "count": 0}
+    years: dict = {}
+    for r in releases:
+        y = years.setdefault(r["year"], {"ids": set(), "groups": set(), "other": False, "first": r})
+        y["ids"].add(r["id"])
+        if r["compilation"]:
+            y["groups"].add(r["group"])
+        else:
+            y["other"] = True
+        if r["date"] < y["first"]["date"]:
+            y["first"] = r
+    ordered = sorted(years)
+    raw = ordered[0]
+    year = next((y for y in ordered if years[y]["other"] or len(years[y]["groups"]) >= 2), raw)
+    count = len(years[year]["ids"])
+    first = years[year]["first"]
+    found = {"year": year, "date": first["date"], "official": True, "mbid": first["mbid"], "title": first["title"],
+             "artist": first["artist"], "matches": matches, "raw": raw, "count": count}
+    if count == 1:
+        later = next((y for y in ordered if year < y <= year + LONE_WINDOW and len(years[y]["ids"]) >= 2), None)
+        if later:
+            found["next"] = later
+    return found
 
 
 def lookup(title: str, artists: list[str], search=mb_search) -> dict:
@@ -389,9 +450,17 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
         if loose and norm(loose) != norm(wanted):
             queries.append(("zonder haakjes", f"recording:{lucene_phrase(loose)} AND artist:{lucene_phrase(primary)}"))
         queries.append(("ruim", f"recording:({_words(wanted)}) AND artist:({_words(primary)})"))
+    live = is_live(title)
     for method, query in queries:
+        # Alle opnames van deze zoekopdracht, over alle pagina's heen.
+        pool: list = []
+
+        def pick(recs):
+            pool.extend(recs or [])
+            return pick_year(pool, wanted, artists, live)
+
         recordings, total = search(query)
-        found = pick_year(recordings, wanted, artists)
+        found = pick(recordings)
         if total > len(recordings):
             # Bekende nummers hebben honderden opnames (live, bootlegs); de eerste
             # honderd zijn niet noodzakelijk de oudste en de studio-opname zit er
@@ -400,7 +469,7 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
             if not (found and found["official"]):
                 # Geen officiële studio-uitgave op de eerste pagina: vraag er
                 # gericht naar. Dat zijn er hooguit enkele tientallen.
-                found = _better(found, pick_year(search(studio)[0], wanted, artists))
+                found = pick(search(studio)[0])
             # Een opname met een vroegere officiële uitgave heeft ook een vroegere
             # 'eerste release'. Kijk dus of er vóór het gevonden jaar nog iets zit.
             # `seen`: alle opnames met een eerste release vóór dat jaar zijn al
@@ -414,34 +483,24 @@ def lookup(title: str, artists: list[str], search=mb_search) -> dict:
                     break
                 before = f" AND firstreleasedate:[1900-01-01 TO {found['year'] - 1}-12-31]"
                 older, older_total = search(f"({query}){before}")
-                improved = _better(found, pick_year(older, wanted, artists))
+                improved = pick(older)
                 if older_total > len(older):
                     # Nog altijd te veel om te overzien: opnieuw alleen studio-uitgaven.
-                    improved = _better(improved, pick_year(search(studio + before)[0], wanted, artists))
+                    improved = pick(search(studio + before)[0])
                 else:
                     seen = found["year"]
-                if improved is found:
-                    break
+                same = improved["year"] == found["year"] and improved["official"] == found["official"]
                 found = improved
+                if same:
+                    break
         if not found:
             continue
         found["method"] = method
-        del found["_rank"]
         return found
     return {"year": None, "method": "niets gevonden"}
 
 
 _STUDIO_FILTER = " AND status:official AND NOT secondarytype:live AND NOT secondarytype:demo"
-
-
-def _better(current: dict | None, other: dict | None) -> dict | None:
-    """De beste van twee kandidaten: officieel voor onofficieel, dan het vroegste jaar."""
-    if current is None:
-        return other
-    if other and other["_rank"] < current["_rank"]:
-        other["matches"] = max(current.get("matches", 0), other.get("matches", 0))
-        return other
-    return current
 
 
 def _words(text: str) -> str:
@@ -613,6 +672,11 @@ def decide(track: dict, mb: dict | None, correction: dict | None) -> dict:
     """Kiest het jaar voor één nummer en zegt of het nagekeken moet worden."""
     sp_year = year_of(track.get("spotify_date"))
     mb_year = (mb or {}).get("year")
+    raw = (mb or {}).get("raw")
+    # Zegt Spotify precies het vroegste jaar dat MusicBrainz kent (ook een jaar
+    # met maar één verzamelaar), dan zijn twee bronnen het eens.
+    if mb_year and sp_year and raw and raw == sp_year and raw < mb_year:
+        mb_year = raw
     reasons = []
     if correction and correction.get("year"):
         year, source = int(correction["year"]), "handmatig"
@@ -818,12 +882,12 @@ def main(argv=None) -> int:
 
 
 def _cache_key(track: dict) -> str:
-    # "v4": verhoog dit als de zoekmethode verandert, dan wordt alles opnieuw opgezocht.
+    # "v5": verhoog dit als de zoekmethode verandert, dan wordt alles opnieuw opgezocht.
     # Remixes krijgen er de regelversie voor remixes bij: zo wordt een remix die
     # nog met de oude regels (jaar van het origineel) bewaard is, opnieuw opgezocht,
     # zonder de rest van de cache weg te gooien.
     title = track.get("title", "")
-    prefix = f"v4-remix{REMIX_RULES}|" if is_remix(title) else "v4|"
+    prefix = f"v5-remix{REMIX_RULES}|" if is_remix(title) else "v5|"
     return prefix + norm(clean_title(title)) + "|" + norm((track.get("artists") or [""])[0])
 
 
