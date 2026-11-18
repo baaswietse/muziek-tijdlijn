@@ -505,8 +505,16 @@ h2 {
 }
 
 /* Een melding verschijnt boven de zwevende balk, nooit over de knop. */
-html.has-bar .toast {
-  bottom: calc(var(--bar-h, 0px) + 10px);
+html.has-bar .toast,
+html.has-sheet .toast {
+  /* Boven de zwevende balk én boven de uitkomst: niet over hun knoppen. */
+  bottom: calc(var(--bar-h, 0px) + var(--sheet-h, 0px) + 10px);
+}
+
+/* Staat de stand of het menu open, dan bovenaan: het paneel vult de onderkant. */
+html.sheet-open .toast {
+  top: calc(8px + env(safe-area-inset-top));
+  bottom: auto;
 }
 
 @keyframes rise {
@@ -744,6 +752,12 @@ details ul {
   padding-bottom: calc(var(--bar-h, 0px) + var(--sheet-h, 0px) + 24px + env(safe-area-inset-bottom));
 }
 
+/* Staat er een melding boven de balk, dan kan de pagina verder: zo kan ook de
+   onderste kaart boven de melding uit (de app schuift ze daarheen). */
+.app:has(> .toast) .page.game {
+  padding-bottom: calc(var(--bar-h, 0px) + var(--sheet-h, 0px) + 120px + env(safe-area-inset-bottom));
+}
+
 .game-top {
   /* Over de hele breedte, ook al staat de pagina zelf in een smalle kolom. */
   margin: 0 -16px;
@@ -751,11 +765,15 @@ details ul {
   gap: 8px;
 }
 
+/* «Verbinding kwijt» hoort bij de bovenbalk (die blijft staan) en ligt
+   nergens over: wat eronder staat, schuift mee naar onder. */
+.game-top {
+  flex-wrap: wrap;
+}
+
 .game-top .banner {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
+  flex: 1 0 100%;
+  margin: 0 calc(-1 * max(12px, env(safe-area-inset-right))) -8px calc(-1 * max(12px, env(safe-area-inset-left)));
 }
 
 .stand-btn {
@@ -1572,7 +1590,7 @@ html:not(.has-bar) .outcome {
 .outcome-body {
   overflow-y: auto;
   overscroll-behavior: contain;
-  max-height: calc(100dvh - var(--bar-h, 0px) - 130px - env(safe-area-inset-top));
+  max-height: calc(100dvh - var(--bar-h, 0px) - 210px - env(safe-area-inset-top));
   padding: 0 16px 14px;
   display: flex;
   flex-direction: column;

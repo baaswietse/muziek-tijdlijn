@@ -94,17 +94,6 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
     const timer = setTimeout(() => setBetSend('slow'), BET_TIMEOUT);
     return () => clearTimeout(timer);
   }, [betSend]);
-  // De bevestigknop staat bij de gekozen plaats; schuif hem zo nodig in beeld,
-  // tussen de bovenbalk en de zwevende balk met de meldingen erboven.
-  useEffect(() => {
-    if (betChoice === null) return;
-    const btn = document.querySelector('[data-testid="confirm-bet"]');
-    if (!btn) return;
-    const room = window.innerHeight - barHeight() - 120;
-    const { bottom } = btn.getBoundingClientRect();
-    if (bottom > room) window.scrollBy(0, bottom - room);
-  }, [betChoice]);
-
   const nameOf = (id) => (id === me ? 'jij' : byId.get(id)?.name ?? 'iemand');
   // Namen bij de gaten: wie zette waar in (en na de onthulling: juist of fout).
   const marks = (challenge ? bets : reveal?.bets ?? []).map((b) => ({
@@ -240,13 +229,30 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
     if (!piece) return;
     const btn = piece.closest('[data-row], .holder')?.querySelector(`[data-testid="move-${dir}"]`);
     (btn && !btn.disabled ? btn : piece).focus({ preventScroll: true });
-    // Tussen de bovenbalk en de zwevende balk houden.
-    const head = document.querySelector('.game-top')?.getBoundingClientRect().bottom ?? 0;
-    const room = window.innerHeight - barHeight();
-    const r = piece.getBoundingClientRect();
-    if (r.bottom > room - 8) window.scrollBy(0, r.bottom - room + 8);
-    else if (r.top < head + 8) window.scrollBy(0, r.top - head - 8);
   });
+
+  // Wat je nu moet kunnen aantikken op de tijdlijn (de pijltjes en «Zet token
+  // hier») ligt nooit onder de bovenbalk, de balk «Verbinding kwijt», een
+  // melding of de zwevende balk. Opnieuw nagekeken bij alles wat het kan
+  // verschuiven of bedekken: een andere keuze, de foutmelding bij het token,
+  // de verbinding, een melding die verschijnt, een ander schermformaat. Niet
+  // tijdens het slepen, en niet als de speler zelf scrollt.
+  const clearKey = `${placeKind}:${placeIndex}:${betSend}:${net}:${shownId}`;
+  useLayoutEffect(() => {
+    if (placeKind && placeIndex !== null && !drag.ghost) keepClear();
+  }, [clearKey]);
+  useEffect(() => {
+    if (!placeKind) return undefined;
+    const app = document.querySelector('.app') ?? document.body;
+    const check = () => placeIndex !== null && !document.documentElement.classList.contains('dragging') && keepClear();
+    const observer = new MutationObserver(check);
+    observer.observe(app, { childList: true });
+    window.addEventListener('resize', check);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', check);
+    };
+  }, [placeKind, placeIndex]);
 
   const moveProps = {
     upTo: placeKind ? step(placeIndex, 'up', placeCards.length, placeBlocked) : undefined,
@@ -350,7 +356,7 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
             <circle cx="16" cy="10" r="1.6" fill="currentColor" />
           </svg>
         </button>
-        {/* Onder de balk, over de inhoud: zo verspringt niets als de verbinding wegvalt. */}
+        {/* In de bovenbalk: blijft in beeld en ligt over niets heen. */}
         {net !== 'online' && <NetBanner />}
       </header>
 
@@ -537,6 +543,39 @@ const ACTION_COOLDOWN = 900;
 /** Hoogte van de zwevende balk onderaan (0 als er geen is). */
 const barHeight = () => document.querySelector('[data-testid="action-bar"]')?.offsetHeight ?? 0;
 
+/**
+ * Het vrije stuk van het scherm: onder de bovenbalk (en de balk «Verbinding
+ * kwijt» eronder), boven de zwevende balk en een melding die erboven staat.
+ */
+const TOAST_RISE = 12;
+
+function clearZone() {
+  const bottoms = [...document.querySelectorAll('.game-top, .game-top .banner')].map((el) => el.getBoundingClientRect().bottom);
+  const top = Math.max(0, ...bottoms) + 8;
+  let bottom = window.innerHeight - barHeight() - 8;
+  const toast = document.querySelector('[data-testid="toast"]');
+  // Een nieuwe melding schuift nog 12px omhoog (animatie `rise`): reken met waar ze eindigt.
+  if (toast) bottom = Math.min(bottom, toast.getBoundingClientRect().top - TOAST_RISE - 8);
+  return { top, bottom };
+}
+
+/**
+ * Schuift de pagina zo dat het gekozen stuk op de tijdlijn met zijn knoppen
+ * (de pijltjes en, bij een token, «Zet token hier») in het vrije stuk ligt.
+ * Past het er niet helemaal in, dan gaat de onderkant (de bevestigknop) voor.
+ */
+function keepClear() {
+  const row = document.querySelector('.timeline [data-pick]');
+  if (!row) return;
+  const head = row.querySelector('[data-testid="drag-card"], [data-testid="drag-token"]') ?? row;
+  const last = row.querySelector('[data-testid="confirm-bet"]') ?? head;
+  const { top, bottom } = clearZone();
+  const t = head.getBoundingClientRect().top;
+  const b = last.getBoundingClientRect().bottom;
+  if (b > bottom) window.scrollBy(0, b - bottom);
+  else if (t < top) window.scrollBy(0, Math.max(t - top, b - bottom));
+}
+
 /** Zet de hoogte van een vast element in een CSS-variabele op <html>, zolang het er is. */
 function useHeightVar(ref, name, cls) {
   useEffect(() => {
@@ -659,7 +698,7 @@ function OutcomeSheet({ outcomeKey, summary, children }) {
   const [open, setOpen] = useState(true);
   useEffect(() => setOpen(true), [outcomeKey]);
   const box = useRef(null);
-  useHeightVar(box, '--sheet-h');
+  useHeightVar(box, '--sheet-h', 'has-sheet');
   // Een veeg over de kop: het paneel volgt de vinger (alleen transform), bij
   // het loslaten beslist de afstand. Een korte tik is gewoon een tik.
   const swipe = useRef(null);
@@ -1074,13 +1113,6 @@ function BetPick({ index, name, betSend, onConfirm, children }) {
       <div class="tl-pick-head" data-testid="pending-card">
         {children}
       </div>
-      {(betSend === 'offline' || betSend === 'slow') && (
-        <p class="notice error" role="alert" data-testid="bet-error">
-          {betSend === 'offline'
-            ? 'Geen verbinding: je token is nog niet ingezet. Tik opnieuw zodra je weer verbonden bent.'
-            : 'Je token is nog niet ingezet: de server gaf geen antwoord. Tik opnieuw.'}
-        </p>
-      )}
       <button
         type="button"
         class="btn primary big"
@@ -1091,6 +1123,14 @@ function BetPick({ index, name, betSend, onConfirm, children }) {
       >
         {betSend === 'sending' ? 'Even geduld…' : 'Zet token hier'}
       </button>
+      {/* Onder de knop, zodat die niet verschuift als de melding verschijnt. */}
+      {(betSend === 'offline' || betSend === 'slow') && (
+        <p class="notice error" role="alert" data-testid="bet-error">
+          {betSend === 'offline'
+            ? 'Geen verbinding: je token is nog niet ingezet. Tik opnieuw zodra je weer verbonden bent.'
+            : 'Je token is nog niet ingezet: de server gaf geen antwoord. Tik opnieuw.'}
+        </p>
+      )}
     </li>
   );
 }
