@@ -408,10 +408,10 @@ geldt MusicBrainz als het meerdere uitgaven in zijn jaar heeft en vóór Spotify
 anders het vroegste, met twijfel. Een losse vroegste uitgave bij MusicBrainz met kort daarna veel meer, telt niet
 als Wikidata dat latere jaar zegt (een album "van 2003" dat in 2004 uitkwam); een echte vroege single heeft in
 Wikidata haar eigen datum. Zegt Spotify precies het vroegste jaar dat MusicBrainz kent, dan telt dat (een nieuw
-nummer op een eigen best-of). Een remix krijgt het jaar van die remix zelf; vindt MusicBrainz ze niet, dan het jaar
-van het Spotify-album (en nooit dat van het origineel). Bij remixes, live-opnames en heropnames ("Taylor's Version")
-telt Wikidata niet mee: het beschrijft het origineel. "Edit", "Mix" en "Remastered" zonder het woord "remix" tellen
-als het origineel. Alleen als er geen overeenstemming is, komt het nummer op de lijst om na te kijken.
+nummer op een eigen best-of), tenzij Wikidata het latere jaar van MusicBrainz zegt. Een remix krijgt het jaar van die
+remix zelf; vindt MusicBrainz ze niet, dan het jaar van het Spotify-album (en nooit dat van het origineel). Bij remixes,
+live-opnames en heropnames ("Taylor's Version") telt Wikidata niet mee: het beschrijft het origineel. "Edit", "Mix" en
+"Remastered" zonder het woord "remix" tellen als het origineel. Alleen als er geen overeenstemming is, komt het nummer op de lijst om na te kijken.
 
 De browser van de host spreekt daarvoor `musicbrainz.org` en `query.wikidata.org` aan (beide laten dat toe vanuit
 een webpagina), met de gewone User-Agent van de browser. De titels en artiesten gaan dus naar die twee diensten;

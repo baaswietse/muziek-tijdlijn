@@ -206,6 +206,20 @@ test('decide: Spotify zegt precies het vroegste jaar van MusicBrainz (een nieuw 
   assert.deepEqual([r.year, r.source, r.doubts], [2008, 'musicbrainz', []]);
 });
 
+test('decide: een eigen best-of telt niet als Wikidata het latere MusicBrainz-jaar zegt', () => {
+  // Dolly Parton & Kenny Rogers – Islands in the Stream: Spotify heeft een fout gedateerde "Greatest Hits" (1982),
+  // MusicBrainz 12 uitgaven in 1983, Wikidata 1983.
+  const islands = { year: 1983, raw: 1982, count: 12, official: true, method: 'exact' };
+  const r = Y.decide({ title: 'Islands in the Stream', spotifyYear: 1982 }, islands, { year: 1983 });
+  assert.deepEqual([r.year, r.source, r.doubts], [1983, 'musicbrainz', []]);
+  // Zonder Wikidata, als Wikidata niets kent of zelf het vroege jaar zegt: de regel blijft gelden.
+  const mb = { year: 2009, raw: 2008, count: 4, official: true, method: 'exact' };
+  const t = { title: 'Sweet Goodbyes', spotifyYear: 2008 };
+  assert.equal(Y.decide(t, mb, undefined).year, 2008);
+  assert.equal(Y.decide(t, mb, { year: null }).year, 2008);
+  assert.equal(Y.decide(t, mb, { year: 2008 }).year, 2008);
+});
+
 /**
  * Een nagebootste MusicBrainz die zich gedraagt als de echte: de filters op
  * eerste release en studio-uitgave werken, en er komt hoogstens `limit`

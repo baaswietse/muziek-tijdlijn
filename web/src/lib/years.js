@@ -430,7 +430,9 @@ const near = (a, b) => a !== null && b !== null && Math.abs(a - b) <= 1;
  *    bevestigen): Wikidata heeft vaak de datum van een latere single.
  *  - Zegt Spotify precies het vroegste jaar dat MusicBrainz kent (ook een
  *    jaar met maar één verzamelaar), dan telt dat: een nieuw nummer op een
- *    eigen best-of.
+ *    eigen best-of. Behalve als Wikidata het latere MusicBrainz-jaar (of
+ *    later) zegt: dan is het een fout gedateerde best-of (Islands in the
+ *    Stream: "Greatest Hits" van 1982, single van 1983).
  *  - Remixes, live-opnames en heropnames: Wikidata beschrijft meestal het
  *    origineel en telt dan niet mee. Een remix krijgt nooit het jaar van het
  *    origineel.
@@ -444,7 +446,7 @@ export function decide({ title, spotifyYear }, mb, wd) {
   const w = asked ? (wd.year ?? null) : null;
   let m = mb?.year ?? null;
   if (m !== null && s !== null && mb.next && w !== null && w >= mb.next) m = mb.next;
-  if (m !== null && s !== null && mb.raw && mb.raw === s && mb.raw < m) m = mb.raw;
+  if (m !== null && s !== null && mb.raw && mb.raw === s && mb.raw < m && !(w !== null && w >= m)) m = mb.raw;
   const strong = m === (mb?.year ?? null) && (mb?.count ?? 0) >= 2;
 
   let year = null;
