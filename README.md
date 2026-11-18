@@ -309,6 +309,8 @@ zelf aan te zetten. Lukt dat niet (GitHub laat dat niet altijd toe aan een workf
 
 ## Een spelavond
 
+Zonder Spotify (geen account, geen Premium): zie *Spelen met fragmenten*. Met Spotify:
+
 1. **Host:** open de site, kies *Nieuw spel* en log in bij Spotify.
 2. **Host:** kies waar het geluid vandaan komt:
    - *Dit toestel*: het toestel waarop je de site open hebt speelt zelf, via zijn luidspreker of de box waaraan het
@@ -325,6 +327,27 @@ zelf aan te zetten. Lukt dat niet (GitHub laat dat niet altijd toe aan een workf
    - Is je naam al bezet, of is de server even onbereikbaar, dan kies je een andere naam of tik je opnieuw. Bestaat
      het spel niet (meer) of zit het vol, dan krijg je een melding en blijf je waar je was.
 5. **Host:** start het spel. Elke beurt begint het nummer vanzelf.
+
+### Spelen met fragmenten (zonder account)
+
+Iedereen kan zo host zijn: er is geen login, geen toestelkeuze en geen Premium nodig. Elke beurt speelt een fragment
+van 30 seconden van Deezer, steeds opnieuw tot de beurt voorbij is. Het geluid komt uit de gsm (of laptop) van de host;
+hang die aan een box als je wil.
+
+1. **Host:** open de site en kies *Nieuw spel*.
+2. **Host:** kies onder *Muziek* de bron *Fragmenten (30 seconden, zonder account)* en tik op *Zet het geluid aan*
+   (een browser speelt pas geluid na een tik).
+3. **Host:** kies onder *Nummers* een van de lijsten van het spel. Bij elke lijst staat hoeveel nummers ze heeft; een
+   lege lijst staat er niet bij. Heeft een lijst meer dan 500 nummers, dan kiest het spel er willekeurig 500 uit
+   (kies ze later opnieuw voor een andere greep). Daarna gaat het zoals altijd: spelers komen binnen, de host start.
+
+*Opnieuw afspelen*, *Pauze* en *Ander nummer* werken zoals bij Spotify. Herlaadt de host de pagina, of weigert de
+browser het geluid, dan staat op het spelscherm *Zet het geluid aan*: één tik en het fragment van de beurt begint
+opnieuw. Bestaat een fragment niet (meer), dan zegt het spelscherm dat, met de knop *Ander nummer*. Na de onthulling
+staat er *Open in Deezer* (bij Spotify *Open in Spotify*).
+
+De keuze van de bron blijft bewaard op de gsm van de host. Wissel je terug naar Spotify, dan speelt het spel weer met
+de standaardlijst (een fragmentenlijst kan Spotify niet spelen, en omgekeerd).
 
 ### Als app op het beginscherm
 
@@ -402,6 +425,8 @@ Een box of auto met een schermpje kan de titel ook tonen.
 - Android: zet *Instellingen → Geluid → Media → Media op vergrendelscherm tonen* uit (de naam verschilt per merk).
 - Het zekerst: hang een ander toestel aan de box (oude gsm, tablet of laptop met Spotify open, scherm naar beneden)
   en kies dat in de toestellenlijst. De gsm van de host stuurt dan alleen aan.
+- Met fragmenten: het spel toont geen titel, en de mediabediening van de gsm (melding, vergrendelscherm) toont alleen
+  «Muziek-tijdlijn». Open tijdens een beurt geen ontwikkelaarstools: het antwoord van Deezer bevat de titel.
 
 ### Als er iets hapert
 
@@ -417,6 +442,9 @@ Een box of auto met een schermpje kan de titel ook tonen.
 | Iemand is even weg | *Sla beurt over* (host). |
 | Scherm was vergrendeld | Niets doen: de gsm herverbindt vanzelf en kijkt na of het juiste nummer speelt. |
 | *Test het geluid* staat uit | Tijdens een spel zou de test het nummer van de beurt onderbreken: gebruik dan *Opnieuw afspelen*. |
+| Fragmenten: geen geluid | Tik op *Zet het geluid aan* (na een herlaad altijd nodig). Staat het volume van de gsm open? |
+| Fragmenten: «bestaat niet (meer)» | Deezer heeft dat fragment niet (meer). Tik op *Ander nummer*. |
+| Fragmenten: «Deezer antwoordt niet» | Geen internet, of Deezer is even weg. *Opnieuw afspelen*, of *Ander nummer*. |
 
 ## Nummers en jaartallen bijwerken
 
@@ -504,6 +532,87 @@ jaar, om snel te overlopen. MusicBrainz is door vrijwilligers ingevuld en niet f
 Commit daarna `web/public/tracks.json` en de bestanden in `tools/`. Na de push naar `main` staat de nieuwe lijst online;
 de server haalt ze bij de start van elk spel opnieuw op.
 
+## Lijsten met fragmenten bijwerken
+
+Het bronbestand is `web/public/fragmenten.json`. Het staat op de site; alleen de browser van een host die met
+fragmenten speelt, haalt het op. Eén nummer per regel:
+
+```json
+{
+  "lists": [
+    {"id": "alles", "name": "Alle hits"},
+    {"id": "nl", "name": "Nederlandstalig"}
+  ],
+  "tracks": [
+    {"deezer": 3135556, "artist": "Daft Punk", "title": "Harder, Better, Faster, Stronger", "year": 2001, "lists": ["alles"]}
+  ]
+}
+```
+
+- Een lijst toevoegen: een item in `lists` (de volgorde is die op het scherm) en het `id` bij de nummers die erin
+  horen. Een lijst zonder nummers wordt niet getoond: zo staan *Nederlandstalig* (`nl`) en *Rustige pop en ballads*
+  (`rustig`) er al klaar.
+- Een nummer wijzigen of toevoegen: die ene regel. `deezer` is het ID uit het adres bij Deezer
+  (`deezer.com/track/<ID>`), `year` het jaar dat bij de onthulling verschijnt. Elk nummer zit in minstens één lijst;
+  een nummer met een ongeldig ID, jaar of lege titel of artiest, of een ID dat al voorkomt, doet niet mee. Een lijst
+  heeft minstens 10 nummers nodig om mee te spelen.
+- `npm test` kijkt het bestand na (geldige nummers, geen dubbels, de afgesproken lijsten, "2000 tot nu" klopt).
+
+Nu (november 2026) staan er 616 nummers in, uit de 644 nagekeken nummers van de eigenaar:
+
+| Lijst | Nummers | Wat |
+| --- | --- | --- |
+| Alle hits | 616 | alles met een Deezer-ID (dubbels eruit) |
+| 2000 tot nu | 281 | jaar 2000 of later |
+| Pop | 258 | genre Pop |
+| Rock | 272 | genres Rock, Alternative en Indie Rock, plus de 54 bekendste nummers met Metal of Hard Rock (hoogstens een vijfde) |
+| Dance | 51 | genres Dance, Electro, Techno/House, Dancefloor of Disco |
+| Nederlandstalig | 0 | nog te vullen |
+| Rustige pop en ballads | 0 | nog te vullen |
+
+De genres zijn die van het album bij Deezer. Voor Rock telt een nummer met ook Metal of Hard Rock als metal; daarvan
+gaan er zoveel mee als een vijfde van de lijst toelaat, de bekendste eerst (`rank` van Deezer, bij gelijke rank het
+laagste ID). Dat ligt vast in het bronbestand, er is geen toeval bij het bouwen.
+
+### Deezer-ID's zoeken
+
+`tools/deezer.py` (Python 3.9 of nieuwer, geen extra pakketten) zoekt voor een lijst nummers het Deezer-ID van de
+juiste opname:
+
+```bash
+python tools/deezer.py zoek nummers.json --uit gevonden.json
+python tools/deezer.py lijsten gevonden.json
+```
+
+- `nummers.json` is een lijst met minstens `artist` en `title` per nummer (en `year` voor `lijsten`), of een
+  tekstbestand met per regel `Artiest - Titel`. `gevonden.json` krijgt per nummer `deezer` (of `null`),
+  `deezer_titel`, `deezer_artiest`, `rank`, `album` en `album_genres`. Wat het niet vond, schrijft het onderaan op het
+  scherm.
+- `lijsten` maakt daaruit `web/public/fragmenten.json` opnieuw, met de lijsten die uit jaar en genre volgen (zie
+  `LIJSTEN` bovenaan het script). Als genre telt `genres` uit de invoer, anders `album_genres`. Wat je met de hand in
+  `nl` of `rustig` zette, blijft staan. Het is eenmalig handig; daarna pas je het bronbestand ook gewoon zelf aan.
+- Zo zoekt het: eerst op artiest en titel samen, dan op de titel alleen, daarna hetzelfde zonder leestekens ("Chop
+  Suey!" → "Chop Suey"), en als laatste kans in de 100 bekendste nummers van de artiest (zo vindt het *NSYNC, dat de
+  gewone zoekfunctie mist). De geavanceerde zoekvorm `artist:"…" track:"…"` geeft bij Deezer nu niets terug en
+  gebruikt het dus niet. Van de resultaten telt alleen wat een fragment heeft, van de juiste artiest is en dezelfde
+  titel heeft (zonder accenten, hoofdletters en leestekens). Een live-versie, remix, akoestische, instrumentale of
+  karaokeversie, "Sped Up", "(2025 Version)" of een woord dat niet in de gevraagde titel staat ("Jacques Lu Cont's
+  Thin White Duke Mix") valt af, tenzij de gevraagde titel er zelf om vraagt ("Pump It - Live 2022"). "Remaster",
+  "Radio Edit", "Single Version" en "feat." tellen als het origineel; een "Mix" zonder meer is tweede keus. Van wat
+  overblijft wint het bekendste (`rank`).
+- Hoogstens 3 verzoeken per seconde (Deezer laat er 50 per 5 seconden toe), met een algemene User-Agent zonder naam of
+  adres; bij "Quota limit exceeded" wacht het. De antwoorden staan in `tools/deezer-cache.json` (niet in de repo: een
+  paar MB), dus een tweede keer gaat meteen; `--opnieuw` vraagt alles opnieuw.
+- `tools/deezer-gevonden.json` is wat het vond voor de 644 nummers (november 2026): 628 gevonden (eerder 593 juist).
+  Niet gevonden, meestal omdat Deezer alleen een live-versie of remix heeft, of het nummer niet: Brutus (All Along,
+  Victoria, War: alleen live), KVSH – Tokyo Drift, Black Sabbath – Paranoid (alleen live; staat twee keer in de
+  lijst), Bart Peeters – Brood voor Morgenvroeg, Krezip – I Would Stay (alleen live), Macklemore & Ryan Lewis – Can't
+  Hold Us (Live From Spotify NYC), Eddy Wally – Ik Spring Uit Een Vliegmachien, Niels Destadsbader – Verover Mij (Uit
+  Liefde Voor Muziek), Miley Cyrus – Party In The U.S.A. (alleen live), Adele – Make You Feel My Love (alleen live),
+  George Michael & Elton John – Don't Let the Sun Go Down on Me (Live), The Underdog Project – Summer Jam 2003
+  (Remix), Bart Kaell – Zeil Je Voor Het Eerst (alleen een remix) en Jaap Reesema & Pommelien Thijs – Nu Wij Niet
+  Meer Praten (alleen een remix).
+
 ## Ontwikkelen en testen
 
 ```bash
@@ -521,12 +630,13 @@ VITE_SERVER_URL=http://127.0.0.1:8787 npm run dev
 ```
 
 Open dan <http://127.0.0.1:5173/muziek-tijdlijn/?mock=1>. Met `?mock=1` is Spotify nagebootst: geen login en geen
-geluid, maar het hele spel werkt (`?mock=0` zet het weer uit).
+geluid, maar het hele spel werkt (`?mock=0` zet het weer uit). Fragmenten zijn niet nagebootst: die spreken ook met
+`?mock=1` het echte Deezer aan.
 
 | Commando | Wat |
 | --- | --- |
 | `npm test` | Unit-tests van de spelregels. |
-| `npm run test:py` | Unit-tests van het script voor de jaartallen (zonder netwerk). |
+| `npm run test:py` | Unit-tests van de scripts voor de jaartallen en de Deezer-ID's (zonder netwerk). |
 | `npm run test:e2e` | Spelverloop met meerdere browsers tegen de Node-server. |
 | `MT_SERVER=cloudflare npm run test:e2e` | Hetzelfde tegen de Cloudflare-variant (lokaal via wrangler). |
 | `npm run test:live` | Hetzelfde tegen de echte site op GitHub Pages en de echte spelserver. Spotify blijft nagebootst. |
@@ -594,6 +704,18 @@ Gedekt, automatisch:
   gedateerde uitgave) en de beslisregel met drie bronnen.
 - Installeren als app: het manifest, de iconen (bestaan, PNG, juiste afmetingen), de meta's voor iOS, en dat Chromium
   de site installeerbaar vindt. De iconen maak je opnieuw met `node tools/iconen.mjs`.
+- Fragmenten, tegen een nagebootste Deezer (`tests/e2e/fake-deezer.js`: de API met JSONP en een mp3 van 1,5 s), met
+  een vaste testlijst in plaats van `fragmenten.json` (`tests/fixtures/fragmenten.json`) (`tests/e2e/fragments.spec.js`):
+  een host zonder Spotify kiest de bron, zet het geluid aan en kiest een lijst (met aantallen, zonder de lege), het
+  fragment van de beurt speelt en herhaalt, pauze en verder, opnieuw afspelen (met een vers adres), ander nummer, de
+  onthulling met *Open in Deezer*, een volgende beurt; een fragment dat niet bestaat of geen adres heeft (melding met
+  *Ander nummer*), een verlopen adres (403, het spel vraagt zelf een nieuw), geluid dat de browser weigert en een
+  herlaad (*Zet het geluid aan* op het spelscherm), en wisselen tussen Spotify en fragmenten. En dat een gast tot de
+  onthulling geen ID, Deezer-ID, titel, artiest of jaar van het lopende (of overgeslagen) nummer krijgt en zelf Deezer
+  niet aanspreekt en geen lijst ophaalt, en dat de host Spotify niet aanspreekt. Het echte Deezer (`deezer.com`,
+  `dzcdn.net`) is in alle tests geblokkeerd, ook met `npm run test:live`. Unit-tests: het bronbestand en de lijsten,
+  het opvragen van een adres, de speler (ontgrendelen, herhalen, geweigerd, verlopen, een nieuwere start wint) en hoe
+  de server een fragmentenlijst herkent; `tools/test_deezer.py` voor het zoeken en het maken van de lijsten.
 - Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.
 
 Niet gedekt, alleen in het echt te testen:
@@ -605,3 +727,8 @@ Niet gedekt, alleen in het echt te testen:
   of het scrollen ernaast goed blijft werken) en het gedrag van Safari op iPhone zijn alleen in het echt te zien.
 - Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.
 - De app echt installeren op Android en iPhone, en inloggen bij Spotify vanuit de geïnstalleerde app.
+- Fragmenten echt afspelen: getest is alleen tegen een nagebootste Deezer, in Chromium. Of de echte mp3's van
+  `cdnt-preview.dzcdn.net` in een browser spelen (dat adres was bij het bouwen niet bereikbaar), hoe Safari op iPhone
+  en Chrome op Android met het ontgrendelen, het herhalen en een vergrendeld scherm omgaan, en wat de mediabediening
+  van een echte gsm toont, is alleen in het echt te zien.
+- De voorwaarden van Deezer voor het gebruik van de API en de fragmenten in een spel zijn niet nagekeken.
