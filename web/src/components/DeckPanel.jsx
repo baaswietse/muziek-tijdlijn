@@ -2,7 +2,7 @@
 // eigen Spotify-playlist van de host. Alleen op de gsm van de host.
 
 import { useState } from 'preact/hooks';
-import { MAX_DECK as MAX } from '../lib/deckplan.js';
+import { MAX_DECK as MAX, minutesLeft } from '../lib/deckplan.js';
 
 export function DeckPanel({ view, send, deck, loggedIn }) {
   const [open, setOpen] = useState(false);
@@ -132,8 +132,17 @@ function JobStatus({ job, deck }) {
       <progress value={job.done} max={Math.max(1, job.todo)} />
       {need <= 0 ? (
         <p class="notice ok small" data-testid="deck-can-start">
-          Je kan al starten met de {job.ready} nummers die klaar zijn. Het opzoeken loopt door, ook tijdens het spel; wat erbij komt,
-          doet mee vanaf het volgende spel.
+          Je kan al starten: dit spel speelt dan met <strong data-testid="deck-planned">{job.planned ?? job.ready}</strong> van de{' '}
+          {job.total} nummers. Het opzoeken loopt door, ook tijdens het spel; wat erbij komt, doet mee vanaf het volgende spel.
+          {job.untilFair > 0 ? (
+            <span data-testid="deck-unbalanced">
+              {' '}
+              Start je nu, dan zitten er vooral nummers in die al gekend waren (zoals die uit de standaardlijst van het spel). Over
+              ongeveer {minutesLeft(job.untilFair, job.seconds ?? 2)} min is het een evenwichtige greep uit je hele playlist.
+            </span>
+          ) : (
+            <> Het is een evenwichtige greep uit de hele playlist.</>
+          )}
         </p>
       ) : (
         <p class="muted small" data-testid="deck-need">

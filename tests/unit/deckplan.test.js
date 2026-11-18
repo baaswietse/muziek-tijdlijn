@@ -108,3 +108,47 @@ test('canSendDeck: alleen tussen twee spellen', () => {
   assert.equal(P.canSendDeck('finished'), true);
   for (const phase of ['playing', 'challenge', 'reveal', null, undefined]) assert.equal(P.canSendDeck(phase), false);
 });
+
+test('fairDeck: zolang er opgezocht wordt, trekken de gekende nummers de greep niet scheef', () => {
+  // Zoals de mix van de gebruiker: 500 nummers, waarvan 60 rocknummers al
+  // gekend (ze staan ook in de standaardlijst van het spel).
+  const known = Array.from({ length: 60 }, (_, i) => ({ id: `k${i}`, year: 1980, known: true }));
+  const looked = Array.from({ length: 80 }, (_, i) => ({ id: `n${i}`, year: 2005, known: false }));
+  const rank = new Map(P.shuffled(known.map((r) => r.id), seeded(2)).map((id, i) => [id, i]));
+  const deck = P.fairDeck([...known, ...looked], { done: 80, todo: 440, finished: false, need: 80, rank });
+  const fromKnown = deck.filter((t) => t.id.startsWith('k')).length;
+  // 80 van de 440 opgezocht (18%): van de 60 gekende gaan er evenveel procent mee (11).
+  assert.equal(fromKnown, 11);
+  assert.equal(deck.length, 91);
+  // Altijd genoeg voor een volledig spel, ook vlak na de start.
+  const early = P.fairDeck([...known, ...looked.slice(0, 5)], { done: 5, todo: 440, finished: false, need: 80, rank });
+  assert.equal(early.length, 65);
+  // Welke gekende meegaan, ligt vast (rank) en is niet het begin van de playlist.
+  const same = P.fairDeck([...known, ...looked], { done: 80, todo: 440, finished: false, need: 80, rank });
+  assert.deepEqual(same, deck);
+  assert.notDeepEqual(
+    deck.filter((t) => t.id.startsWith('k')).map((t) => t.id),
+    known.slice(0, 11).map((r) => r.id),
+  );
+  // Alles opgezocht: alles doet mee.
+  assert.equal(P.fairDeck([...known, ...looked], { done: 440, todo: 440, finished: true, need: 80, rank }).length, 140);
+  // Nummers zonder jaartal tellen niet.
+  const noYear = [{ id: 'x', year: null, known: false }, ...looked.slice(0, 12)];
+  assert.equal(P.fairDeck(noYear, { done: 13, todo: 13, finished: false, need: 10 }).length, 12);
+});
+
+test('lookupsUntilFair: hoeveel er nog opgezocht moet worden voor een evenwichtige greep', () => {
+  // 60 gekend, 440 op te zoeken, 80 nodig: na 71 opzoekingen is de greep 71 + 10 = 81.
+  assert.equal(P.lookupsUntilFair({ known: 60, todo: 440, done: 0, need: 80 }), 71);
+  assert.equal(P.lookupsUntilFair({ known: 60, todo: 440, done: 50, need: 80 }), 21);
+  assert.equal(P.lookupsUntilFair({ known: 60, todo: 440, done: 80, need: 80 }), 0);
+  assert.equal(P.lookupsUntilFair({ known: 0, todo: 440, done: 0, need: 80 }), 0);
+  // Kleine playlist: nooit meer dan wat er op te zoeken valt.
+  assert.equal(P.lookupsUntilFair({ known: 10, todo: 8, done: 0, need: 80 }), 8);
+});
+
+test('deckNeed: genoeg voor een volledig spel, minstens het minimum', () => {
+  assert.equal(P.deckNeed(4, 10), 80);
+  assert.equal(P.deckNeed(1, 3), P.MIN_DECK);
+  assert.equal(P.deckNeed(0, 10), 20);
+});

@@ -9,6 +9,7 @@ const STATUS = {
   playing: 'Muziek speelt',
   paused: 'Muziek gepauzeerd',
   error: '',
+  wrong: '',
 };
 
 export function MusicPanel({ music }) {
@@ -111,7 +112,8 @@ export function MusicPanel({ music }) {
         <button class="btn" onClick={music.refreshDevices} disabled={music.busy}>
           Zoek opnieuw
         </button>
-        <button class="btn" onClick={music.test} disabled={music.busy || !music.device} data-testid="music-test">
+        {/* Tijdens een spel zou de test het nummer van de beurt onderbreken: gebruik dan «Opnieuw afspelen». */}
+        <button class="btn" onClick={music.test} disabled={music.busy || !music.device || music.inGame} data-testid="music-test">
           Test het geluid
         </button>
       </div>

@@ -714,8 +714,21 @@ function HostControls({ view, send, music, deck }) {
           {music.error}
         </p>
       )}
+      {music.wrong && !needsSetup && (
+        // Nooit welk nummer er wel speelt: ook de host mag de titel niet zien.
+        <div class="notice warn" role="alert" data-testid="music-wrong" data-kind={music.wrong}>
+          <p>
+            {music.wrong === 'unknown'
+              ? `Spotify meldt niet wat er op «${music.device.name}» speelt. Hoor je het nummer van deze beurt niet, start het dan opnieuw.`
+              : `Op «${music.device.name}» speelt niet het nummer van deze beurt. Het spel zette het stil.`}
+          </p>
+          <button class="btn primary" onClick={music.replay} data-testid="music-fix">
+            Start het juiste nummer
+          </button>
+        </div>
+      )}
       <div class="host-grid">
-        <button class="btn" disabled={!trackId || needsSetup} onClick={() => music.playTrack(trackId)} data-testid="replay">
+        <button class="btn" disabled={!trackId || needsSetup} onClick={music.replay} data-testid="replay">
           Opnieuw afspelen
         </button>
         {music.status === 'paused' ? (
@@ -748,7 +761,9 @@ function HostControls({ view, send, music, deck }) {
       {deck?.job?.phase === 'years' && (
         <p class="muted small" data-testid="deck-background">
           Jaartallen opzoeken voor «{deck.job.name}»: {deck.job.ready} klaar, nog {deck.left} te gaan
-          {deck.left > 0 && <> (ongeveer {deck.minutes} min)</>}. Wat erbij komt, doet mee vanaf het volgende spel.
+          {deck.left > 0 && <> (ongeveer {deck.minutes} min)</>}.
+          {view.playlist && <> Dit spel speelt met {view.playlist.count} van de {deck.job.total} nummers.</>} Wat erbij komt, doet mee
+          vanaf het volgende spel.
         </p>
       )}
     </section>
@@ -757,6 +772,7 @@ function HostControls({ view, send, music, deck }) {
 
 const MUSIC_STATUS = {
   starting: 'Nummer wordt gestart…',
+  wrong: 'Controleer de muziek',
   paused: 'Gepauzeerd',
   error: 'Probleem met de muziek',
 };

@@ -1,5 +1,7 @@
 # Tests bij elke pull request: spelregels, het Python-script en het volledige
-# spelverloop met meerdere browsers, tegen beide servervarianten.
+# spelverloop met meerdere browsers, tegen beide servervarianten. De twee
+# e2e-varianten lopen als aparte jobs naast elkaar; de snelle tests en de
+# build lopen in een eigen job.
 name: Tests
 
 on:
@@ -14,9 +16,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  unit:
+    name: Unit-tests en build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -30,11 +33,35 @@ jobs:
         run: npm run test:py
       - name: Site bouwen
         run: npm run build
+
+  e2e:
+    name: Spelverloop (${{ matrix.server }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # Een fout in de ene variant breekt de andere niet af.
+      fail-fast: false
+      matrix:
+        server: [node, cloudflare]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - name: Browser installeren
         run: npx playwright install --with-deps chromium
-      - name: Spelverloop met de Node-server
-        run: npm run test:e2e
-      - name: Spelverloop met de Cloudflare-server (lokaal)
+      # Playwright bouwt de site zelf (webServer in playwright.config.js).
+      - name: Spelverloop met de ${{ matrix.server }}-server
         run: npm run test:e2e
         env:
-          MT_SERVER: cloudflare
+          MT_SERVER: ${{ matrix.server }}
+      - name: Testresultaten bewaren
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.server }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
