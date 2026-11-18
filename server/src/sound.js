@@ -99,7 +99,9 @@ export function applySound(state, actorId, msg, now) {
       s.stale = false;
       return true;
     }
-    state.sound = { trackId: card, url, n: (state.sound?.n ?? 0) + 1, playing: true, offset: 0, anchor: now, stale: false, refreshes: 0 };
+    // `n` telt elke start in deze kamer, ook over nummers heen: zo ziet een gsm altijd dat het een nieuwe start is.
+    state.soundSeq = (state.soundSeq ?? 0) + 1;
+    state.sound = { trackId: card, url, n: state.soundSeq, playing: true, offset: 0, anchor: now, stale: false, refreshes: 0 };
     return true;
   }
   if (action === 'pause') {

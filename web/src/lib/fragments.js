@@ -237,6 +237,8 @@ export function useFragmentMusic({ enabled, view, send = () => false }) {
     if (!enabled || !key || handled.current === key || local === 'starting') return;
     handled.current = key;
     retried.current = null;
+    // Zonder eigen geluid en heeft de server het al (de host herlaadde): niets, zo begint het bij de spelers niet opnieuw.
+    if (local === 'mute' && soundRef.current) return;
     if (local === 'on' || local === 'mute') {
       start(trackId);
       return;
