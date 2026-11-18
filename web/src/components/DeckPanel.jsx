@@ -1,10 +1,88 @@
 // Welke nummers er gespeeld worden: de standaardlijst van de site of een
-// eigen Spotify-playlist van de host. Alleen op de gsm van de host.
+// eigen Spotify-playlist van de host, of met fragmenten een van de
+// ingebouwde lijsten. Alleen op de gsm van de host.
 
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { MAX_DECK as MAX, minutesLeft } from '../lib/deckplan.js';
+import { loadFragments } from '../lib/fragments.js';
+import { deckFor, listsOf } from '../fragment/lists.js';
 
-export function DeckPanel({ view, send, deck, loggedIn }) {
+export function DeckPanel({ view, send, deck, loggedIn, source = 'spotify' }) {
+  if (source === 'fragment') return <FragmentLists view={view} deck={deck} />;
+  return <SpotifyDeck view={view} send={send} deck={deck} loggedIn={loggedIn} />;
+}
+
+/** Met fragmenten: kies een van de lijsten van het spel. */
+function FragmentLists({ view, deck }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sample, setSample] = useState(null); // { name, total } als het spel een greep nam
+  const playlist = view.playlist?.source === 'fragment' ? view.playlist : null;
+
+  function load() {
+    setError('');
+    loadFragments().then(setData, (err) => setError(err.message));
+  }
+  useEffect(load, []);
+
+  async function pick(list) {
+    setBusy(true);
+    const { tracks, sampled, total } = deckFor(data, list.id);
+    if (await deck.sendList(list.name, tracks)) setSample(sampled ? { name: list.name, total } : null);
+    setBusy(false);
+  }
+
+  const lists = data ? listsOf(data) : null;
+  return (
+    <section class="card" data-testid="deck-panel" data-source="fragment">
+      <h2>Nummers</h2>
+      <p class="deck-current" data-testid="deck-current">
+        {playlist ? `Lijst «${playlist.name}» · ${playlist.count} nummers` : 'Kies een lijst.'}
+      </p>
+      {sample && playlist?.name === sample.name && (
+        <p class="muted small" data-testid="deck-sample">
+          Deze lijst heeft {sample.total} nummers; het spel koos er willekeurig {MAX} uit. Kies de lijst later opnieuw voor een andere greep.
+        </p>
+      )}
+      {!lists && !error && <p class="muted small">Lijsten ophalen…</p>}
+      {lists && (
+        <ul class="devices" data-testid="fragment-lists">
+          {lists.map((l) => (
+            <li key={l.id}>
+              <button
+                type="button"
+                class={`device${playlist?.name === l.name ? ' on' : ''}`}
+                aria-pressed={playlist?.name === l.name}
+                disabled={busy}
+                data-testid={`list-${l.id}`}
+                onClick={() => pick(l)}
+              >
+                <span class="device-name">{l.name}</span>
+                <span class="muted small">{l.count} nummers</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(error || deck.error) && (
+        <p class="notice error" data-testid="deck-error">
+          {error || deck.error}
+          {error && (
+            <>
+              {' '}
+              <button class="btn link" onClick={load}>
+                Opnieuw
+              </button>
+            </>
+          )}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function SpotifyDeck({ view, send, deck, loggedIn }) {
   const [open, setOpen] = useState(false);
   const playlist = view.playlist;
   const job = deck.job;
@@ -29,7 +107,7 @@ export function DeckPanel({ view, send, deck, loggedIn }) {
     <section class="card" data-testid="deck-panel">
       <h2>Nummers</h2>
       <p class="deck-current" data-testid="deck-current">
-        {playlist ? `Playlist «${playlist.name}» · ${playlist.count} nummers` : 'Standaardlijst van het spel'}
+        {playlist && playlist.source !== 'fragment' ? `Playlist «${playlist.name}» · ${playlist.count} nummers` : 'Standaardlijst van het spel'}
       </p>
 
       {job && <JobStatus job={job} deck={deck} />}

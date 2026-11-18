@@ -1,5 +1,6 @@
-// Instellingen voor de muziek, alleen op de gsm van de host:
-// inloggen bij Spotify, een toestel kiezen en het geluid testen.
+// Instellingen voor de muziek, alleen op de gsm van de host: de bron kiezen
+// (Spotify of fragmenten zonder account), bij Spotify inloggen en een toestel
+// kiezen, bij fragmenten het geluid aanzetten, en het geluid testen.
 
 import { redirectUri } from '../spotify/index.js';
 
@@ -12,11 +13,97 @@ const STATUS = {
   wrong: '',
 };
 
-export function MusicPanel({ music }) {
+/**
+ * `onSource`: alleen in de wachtkamer, waar de host de bron kan wisselen (de
+ * wachtkamer past dan ook de lijst met nummers aan).
+ */
+export function MusicPanel({ music, onSource = null }) {
+  const chooser = onSource ? <SourceChooser music={music} onSource={onSource} /> : null;
+  if (music.source === 'fragment') return <FragmentPanel music={music} chooser={chooser} />;
+  return <SpotifyPanel music={music} chooser={chooser} />;
+}
+
+function SourceChooser({ music, onSource }) {
+  const options = [
+    { id: 'spotify', name: 'Spotify', hint: 'volledige nummers; Spotify Premium en een login nodig' },
+    { id: 'fragment', name: 'Fragmenten (30 seconden, zonder account)', hint: 'geen login, geen Premium: het geluid komt uit dit toestel' },
+  ];
+  return (
+    <div class="source-choice" role="group" aria-label="Waar komt de muziek vandaan?">
+      <p class="label">Waar komt de muziek vandaan?</p>
+      <ul class="devices">
+        {options.map((o) => (
+          <li key={o.id}>
+            <button
+              type="button"
+              class={`device${music.source === o.id ? ' on' : ''}`}
+              aria-pressed={music.source === o.id}
+              data-testid={`source-${o.id}`}
+              onClick={() => music.source !== o.id && onSource(o.id)}
+            >
+              <span class="device-name">{o.name}</span>
+              <span class="muted small">{o.hint}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Fragmenten van Deezer: geen login of toestel, wel één tik om het geluid aan te zetten. */
+function FragmentPanel({ music, chooser }) {
+  return (
+    <section class="card music" data-testid="music-panel" data-source="fragment">
+      <h2>Muziek</h2>
+      {chooser}
+      <p class="muted small">
+        Elke beurt speelt een fragment van 30 seconden van Deezer, steeds opnieuw tot de beurt voorbij is. Het geluid komt uit
+        dit toestel: hang het aan een box als je wil. Laat de site open op het scherm.
+      </p>
+      {music.local !== 'on' ? (
+        <>
+          <p class="notice" data-testid="fragment-locked">
+            Je browser speelt pas geluid na een tik. Tik één keer op de knop hieronder.
+          </p>
+          <button class="btn primary" onClick={music.chooseBrowser} disabled={music.local === 'starting'} data-testid="fragment-unlock">
+            {music.local === 'starting' ? 'Bezig…' : 'Zet het geluid aan'}
+          </button>
+        </>
+      ) : (
+        <div class="row gap">
+          <button class="btn" onClick={music.test} disabled={music.busy || music.inGame} data-testid="music-test">
+            Test het geluid
+          </button>
+        </div>
+      )}
+      <p class="music-status" data-testid="music-status" data-ready={music.ready ? 'yes' : 'no'}>
+        {music.ready ? 'Klaar: het geluid komt uit dit toestel. ' : 'Zet eerst het geluid aan. '}
+        {STATUS[music.status]}
+      </p>
+      {music.error && (
+        <p class="notice error" data-testid="music-error">
+          {music.error}
+        </p>
+      )}
+      <details class="tips">
+        <summary>Zo blijft de titel ook voor jou geheim</summary>
+        <ul>
+          <li>Het spel toont titel, artiest en jaar pas bij de onthulling, ook aan jou.</li>
+          <li>De mediabediening van je gsm (meldingen, vergrendelscherm) toont alleen «Muziek-tijdlijn».</li>
+          <li>Het spel houdt je scherm wakker. Open tijdens een beurt geen ontwikkelaarstools: daar staat het antwoord van Deezer.</li>
+        </ul>
+      </details>
+    </section>
+  );
+}
+
+function SpotifyPanel({ music, chooser }) {
   if (!music.configured) {
     return (
       <section class="card music" data-testid="music-panel">
         <h2>Muziek</h2>
+        {chooser}
         <p class="notice warn">
           De Client ID van de Spotify-app is nog niet ingevuld (<code>web/src/config.js</code>). Redirect URI voor het dashboard:{' '}
           <code>{redirectUri()}</code>
@@ -29,6 +116,7 @@ export function MusicPanel({ music }) {
     return (
       <section class="card music" data-testid="music-panel">
         <h2>Muziek</h2>
+        {chooser}
         <p class="muted small">
           Alleen jij als host logt in. Je hebt Spotify Premium nodig. Je wachtwoord of je gegevens komen niet bij het spel terecht.
         </p>
@@ -49,6 +137,7 @@ export function MusicPanel({ music }) {
           Log uit
         </button>
       </div>
+      {chooser}
 
       <p class="label">Op welk toestel speelt de muziek? Dit scherm maakt zelf geen geluid.</p>
       <ul class="devices">

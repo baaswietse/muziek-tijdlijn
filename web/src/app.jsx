@@ -3,7 +3,7 @@ import { Connection } from './lib/net.js';
 import { clearInvite, loadSession, saveSession } from './lib/session.js';
 import { useInvite } from './lib/useInvite.js';
 import { keepAwake } from './lib/wakelock.js';
-import { useMusic } from './lib/music.js';
+import { useHostMusic } from './lib/source.js';
 import { useDeck } from './lib/deck.js';
 import { APP_NAME } from './config.js';
 import { Home } from './screens/Home.jsx';
@@ -82,7 +82,7 @@ export function App({ loginResult }) {
   const { invite, submit, stepOver, cancel } = useInvite({ session, view, enter, notify });
 
   const isHost = Boolean(view && view.you === view.hostId);
-  const music = useMusic({ enabled: isHost, view });
+  const music = useHostMusic({ enabled: isHost, view });
   const deck = useDeck({ code, token, phase: view?.phase ?? null, players: view?.players.length ?? 1, target: view?.settings.target ?? 10 });
 
   useEffect(() => {
