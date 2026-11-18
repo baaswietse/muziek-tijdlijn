@@ -350,8 +350,9 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
             <circle cx="16" cy="10" r="1.6" fill="currentColor" />
           </svg>
         </button>
+        {/* Onder de balk, over de inhoud: zo verspringt niets als de verbinding wegvalt. */}
+        {net !== 'online' && <NetBanner />}
       </header>
-      {net !== 'online' && <NetBanner />}
 
       <Headline
         view={view}
@@ -611,7 +612,8 @@ function Chevron({ dir = 'down' }) {
 function Sheet({ open, onClose, title, testid, children }) {
   const box = useRef(null);
   const opener = useRef(null);
-  useEffect(() => {
+  // Meteen na het tekenen (niet pas later): ook een snelle Escape sluit het.
+  useLayoutEffect(() => {
     if (!open) return undefined;
     opener.current = document.activeElement;
     box.current?.focus();

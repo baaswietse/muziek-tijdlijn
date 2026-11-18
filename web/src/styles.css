@@ -751,6 +751,13 @@ details ul {
   gap: 8px;
 }
 
+.game-top .banner {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+}
+
 .stand-btn {
   appearance: none;
   flex: 1;

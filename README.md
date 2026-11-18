@@ -140,7 +140,8 @@ gsm host  ──┘        │
     niet, dan start het nog hoogstens twee keer opnieuw; bij storingen (502, 429, geen antwoord na 10 s) wacht het
     even (bij 429 zo lang als Spotify vraagt, hoogstens 10 s);
   - zet het, als het toch niet lukt, het verkeerde nummer stil en krijgt de host een waarschuwing met één knop
-    *Start het juiste nummer*. Die zegt nooit welk nummer er wel speelt;
+    *Start het juiste nummer*, op het spelscherm zelf (niet alleen in het menu). Die zegt nooit welk nummer er wel
+    speelt;
   - telt een nummer pas als gestart als dat bevestigd is (`mt.lastPlayed`); na een herlaad kijkt het spel één keer na
     of het nog klopt, en ook als de host terugkomt op het scherm;
   - gaat het herhalen («dit nummer») pas aan na een bevestigde start, en alleen voor dat nummer. Herhalen blijft: zonder
