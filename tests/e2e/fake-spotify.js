@@ -269,12 +269,17 @@ export async function hostAndLogin(page) {
  * gedeelde lijst. Met vaste ID's zou een tweede run (zeker tegen de echte
  * server, MT_LIVE=1) alles al gekend vinden, en een echt nummer mag een test
  * daar nooit raken.
+ *
+ * De lengte van het label staat mee in het ID: vroeger werd alleen met nullen
+ * aangevuld, en dan gaven 'M1' en 'M10' hetzelfde ID. De site laat een
+ * dubbel ID uit een playlist weg, dus had een playlist stilletjes een nummer
+ * minder dan de test dacht.
  */
 export function fakeIds() {
-  const run = randomBytes(8).toString('hex'); // 16 tekens, anders bij elke run
+  const run = randomBytes(8).toString('hex').slice(0, 15); // anders bij elke run
   return (label) => {
     if (!/^[A-Za-z0-9]{1,4}$/.test(label)) throw new Error(`label ${label}: 1 tot 4 letters of cijfers`);
-    return `zz${run}${label}`.padEnd(22, '0');
+    return `zz${run}${label.length}${label}`.padEnd(22, '0');
   };
 }
 

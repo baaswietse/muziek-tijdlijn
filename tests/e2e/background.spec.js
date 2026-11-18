@@ -28,6 +28,9 @@ function makePlaylist(name, n, id = fakeIds()) {
     ...SITE.map((t) => item(t.id, t.title, t.artist.split(', ')[0], '2019-01-01')),
     ...fake.map((t) => item(t.id, t.title, 'Band Z', `${t.year}-01-01`)),
   ];
+  // Elk ID één keer: de site laat een dubbel ID weg, en dan klopt de telling niet meer.
+  const ids = new Set([...SITE.map((t) => t.id), ...fake.map((t) => t.id)]);
+  if (ids.size !== SITE.length + n) throw new Error(`playlist ${name}: dubbele track-ID's`);
   const answers = Object.fromEntries(fake.map((t) => [t.title, { artist: 'Band Z', date: String(t.year) }]));
   return { name, items, fake, answers };
 }
@@ -349,7 +352,10 @@ test('vroeg starten: de gekende nummers trekken de greep niet scheef', async ({ 
   expect(sent.length).toBeGreaterThanOrEqual(10);
   // Van de gekende gaan er evenveel procent mee als er van de rest opgezocht
   // is, of net genoeg om aan 10 te komen; vroeger gingen ze alle 10 mee.
-  expect(known).toBeLessThanOrEqual(Math.max(Math.ceil((10 * looked) / 12), 10 - looked));
+  // Dat geldt hoeveel er bij de start ook al opgezocht waren (dat hangt af van
+  // de snelheid van het netwerk; tegen de echte server zijn het er vaak meer).
+  const rest = list.fake.length;
+  expect(known).toBeLessThanOrEqual(Math.max(Math.ceil((SITE.length * looked) / rest), 10 - looked));
   expect(known).toBeLessThan(10);
   await host.context.close();
 });
