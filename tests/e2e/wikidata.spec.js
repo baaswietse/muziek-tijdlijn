@@ -4,8 +4,8 @@
 // de spelserver is echt.
 //
 // Ook tegen de echte server (MT_LIVE=1) herhaalbaar: de verzonnen nummers
-// krijgen per run nieuwe ID's (fakeIds). Een run laat zo 12 rijen achter in de
-// gedeelde lijst (4 per test).
+// krijgen per run nieuwe ID's (fakeIds). Een run laat zo 16 rijen achter in de
+// gedeelde lijst (4 per host: 4 + 8 + 4).
 
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';

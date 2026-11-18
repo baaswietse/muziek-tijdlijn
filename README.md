@@ -543,7 +543,7 @@ Gedekt, automatisch:
   met twee bronnen), oude jaartallen met twijfel die opnieuw beoordeeld worden (zonder nieuw verzoek naar
   MusicBrainz waar dat kan), een handmatige verbetering die blijft, titel en artiest aanvullen, en de export voor de
   host (in pagina's; gasten en onbestaande spellen geweigerd). Het echte MusicBrainz en Wikidata worden in geen enkele
-  test aangesproken, ook niet met `npm run test:live`. Een run laat 12 rijen achter in de gedeelde lijst.
+  test aangesproken, ook niet met `npm run test:live`. Een run laat 16 rijen achter in de gedeelde lijst.
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script), ook met een nagebootste
   MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet, en met echte gevallen waar
   MusicBrainz te vroeg zat (fout gedateerde verzamelaars, een remix die als origineel telde, een losse fout
