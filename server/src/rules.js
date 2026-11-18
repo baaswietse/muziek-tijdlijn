@@ -2,6 +2,8 @@
 // geen opslag. De server (Node of Cloudflare) roept deze aan en is daarmee de
 // enige autoriteit over de spelstatus.
 
+import { deckSource } from './tracks.js';
+
 export const LIMITS = {
   maxPlayers: 12,
   maxNameLength: 16,
@@ -156,7 +158,9 @@ export function setDeck(state, actorId, { name, tracks }) {
     fail('DECK_TOO_LARGE', `Een lijst mag hoogstens ${LIMITS.maxDeck} nummers hebben.`);
   }
   const clean = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, LIMITS.maxDeckName) || 'Eigen lijst';
-  state.custom = { name: clean, tracks: tracks.map(toCard) };
+  // `source`: 'fragment' als alle nummers fragmenten van Deezer zijn (een
+  // ingebouwde lijst), anders 'spotify' (een playlist van de host).
+  state.custom = { name: clean, tracks: tracks.map(toCard), source: deckSource(tracks) };
 }
 
 /** Host: terug naar de standaardlijst. */
@@ -610,7 +614,14 @@ export function viewFor(state, playerId, online = new Set()) {
     })),
     deckLeft: state.deck.length,
     // Welke lijst er gespeeld wordt; de nummers zelf gaan niet mee.
-    playlist: state.custom ? { name: state.custom.name, count: state.custom.tracks.length } : null,
+    // Een ingebouwde lijst met fragmenten van Deezer krijgt `source: 'fragment'`.
+    playlist: state.custom
+      ? {
+          name: state.custom.name,
+          count: state.custom.tracks.length,
+          ...(state.custom.source === 'fragment' ? { source: 'fragment' } : {}),
+        }
+      : null,
     turn: state.turn
       ? {
           playerId: state.turn.playerId,

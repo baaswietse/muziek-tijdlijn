@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { Timeline, YearChips, slotLabel } from '../components/Timeline.jsx';
 import { step, useSlotDrag } from '../lib/drag.js';
 import { MusicPanel } from '../components/MusicPanel.jsx';
+import { deezerId, deezerLink } from '../fragment/deezer.js';
 import { Rules } from '../components/Rules.jsx';
 import { MockChip, NetBanner, NetDot } from '../components/Status.jsx';
 
@@ -383,7 +384,7 @@ export function Game({ view, send, music, deck, net = 'online', onLeave }) {
 
       {/* Vaste plek voor een probleem met de muziek: de host ziet het altijd,
           niet alleen in het menu. Staat het menu open, dan staat het daar. */}
-      {isHost && panel !== 'menu' && <MusicAlert music={music} onSettings={openSettings} />}
+      {isHost && panel !== 'menu' && <MusicAlert music={music} onSettings={openSettings} onSkip={() => send({ t: 'skipTrack' })} />}
 
       {views.length > 1 && (
         <div class="view-switch" role="group" aria-label="Welke tijdlijn">
@@ -944,7 +945,7 @@ function BuyCard({ tokens, cards, target, send }) {
  * het nummer van deze beurt speelt. Nooit welk nummer er wel speelt: ook de
  * host mag titel, artiest of jaar niet zien.
  */
-function MusicAlert({ music, onSettings }) {
+function MusicAlert({ music, onSettings, onSkip }) {
   const trackId = music.currentTrackId;
   if (!music.ready && music.device?.local && music.local !== 'on') {
     return (
@@ -960,7 +961,12 @@ function MusicAlert({ music, onSettings }) {
     return (
       <p class="host-alert" role="alert" data-testid="host-music-error">
         <span class="host-alert-text">{music.error}</span>
-        {music.ready && trackId ? (
+        {/* Fragmenten: bestaat het fragment niet (meer), dan helpt alleen een ander nummer. */}
+        {music.errorAction === 'skip' && trackId ? (
+          <button type="button" class="btn small-btn" onClick={onSkip} data-testid="alert-skip">
+            Ander nummer
+          </button>
+        ) : music.ready && trackId ? (
           <button type="button" class="btn small-btn" onClick={music.replay} data-testid="alert-replay">
             Opnieuw afspelen
           </button>
@@ -1154,9 +1160,15 @@ function Reveal({ reveal, name, own, tokenName, cardTo, myBet, myTokens, buyerTo
       <p class="reveal-year">{card.year}</p>
       <p class="reveal-title">{card.title}</p>
       <p class="reveal-artist">{card.artist}</p>
-      <a class="spotify-link" href={`https://open.spotify.com/track/${card.id}`} target="_blank" rel="noopener noreferrer">
-        Open in Spotify
-      </a>
+      {deezerId(card.id) ? (
+        <a class="spotify-link" href={deezerLink(card.id)} target="_blank" rel="noopener noreferrer" data-testid="reveal-link">
+          Open in Deezer
+        </a>
+      ) : (
+        <a class="spotify-link" href={`https://open.spotify.com/track/${card.id}`} target="_blank" rel="noopener noreferrer" data-testid="reveal-link">
+          Open in Spotify
+        </a>
+      )}
       {reveal.bets.length > 0 && !correct && (
         <p class="reveal-token" data-testid="reveal-card-to" data-player={reveal.cardTo ?? ''}>
           {cardTo ? `${cardTo} de kaart dankzij een token.` : 'Geen enkele inzet lag juist.'}

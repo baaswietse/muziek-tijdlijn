@@ -647,6 +647,25 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
     return !current.current && !run.current;
   }, [stopRun]);
 
+  /**
+   * Een ingebouwde lijst met fragmenten (al met jaartallen): een opzoeking
+   * die nog loopt, stopt, en de lijst gaat meteen naar de server.
+   */
+  const sendList = useCallback(
+    async (name, tracks) => {
+      await reset();
+      setError('');
+      try {
+        await post(`/api/rooms/${code}/deck`, { token, name, tracks });
+        return true;
+      } catch (err) {
+        setError(err.message);
+        return false;
+      }
+    },
+    [code, token, reset],
+  );
+
   const left = job?.phase === 'years' ? job.todo - job.done : 0;
   return {
     available,
@@ -668,5 +687,6 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
     flush,
     setYear,
     reset,
+    sendList,
   };
 }

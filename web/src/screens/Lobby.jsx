@@ -4,6 +4,7 @@ import { qrPath } from '../lib/qr.js';
 import { MusicPanel } from '../components/MusicPanel.jsx';
 import { DeckPanel } from '../components/DeckPanel.jsx';
 import { Rules } from '../components/Rules.jsx';
+import { deckMatches } from '../lib/source.js';
 
 export function Lobby({ view, send, music, deck, onLeave, notify }) {
   const isHost = view.you === view.hostId;
@@ -16,6 +17,15 @@ export function Lobby({ view, send, music, deck, onLeave, notify }) {
     await deck.flush();
     send({ t: 'start' });
   }
+
+  // Een andere bron: de lijst moet daarbij passen. Fragmenten spelen alleen
+  // een ingebouwde lijst (die kiest de host daarna); Spotify nooit.
+  async function changeSource(next) {
+    music.setSource(next);
+    if (next === 'fragment') await deck.reset();
+    else if (view.playlist?.source === 'fragment') send({ t: 'clearDeck' });
+  }
+  const deckOk = deckMatches(music.source, view.playlist);
 
   async function share() {
     try {
@@ -71,8 +81,8 @@ export function Lobby({ view, send, music, deck, onLeave, notify }) {
 
       {isHost ? (
         <>
-          <MusicPanel music={music} />
-          <DeckPanel view={view} send={send} deck={deck} loggedIn={music.loggedIn} />
+          <MusicPanel music={music} onSource={changeSource} />
+          <DeckPanel view={view} send={send} deck={deck} loggedIn={music.loggedIn} source={music.source} />
           <section class="card">
             <h2>Spel</h2>
             <div class="row between">
@@ -87,10 +97,15 @@ export function Lobby({ view, send, music, deck, onLeave, notify }) {
                 </button>
               </span>
             </div>
-            <button class="btn primary big" disabled={!music.ready || !deck.canStart} onClick={start} data-testid="start-game">
+            <button class="btn primary big" disabled={!music.ready || !deck.canStart || !deckOk} onClick={start} data-testid="start-game">
               Start het spel
             </button>
             {!music.ready && <p class="muted small center-text">Stel eerst de muziek in.</p>}
+            {music.ready && !deckOk && (
+              <p class="muted small center-text" data-testid="deck-mismatch">
+                {music.source === 'fragment' ? 'Kies eerst een lijst bij «Nummers».' : 'Kies de standaardlijst of een eigen playlist.'}
+              </p>
+            )}
             {music.ready && !deck.canStart && <p class="muted small center-text">Even wachten tot er genoeg jaartallen opgezocht zijn.</p>}
             {music.ready && deck.canStart && deck.job && (
               <p class="muted small center-text">Je start met de nummers die nu klaar zijn; de rest wordt intussen verder opgezocht.</p>
@@ -103,7 +118,7 @@ export function Lobby({ view, send, music, deck, onLeave, notify }) {
           <p class="muted small">Je speelt naar {target} kaarten.</p>
           {view.playlist && (
             <p class="muted small" data-testid="lobby-playlist">
-              Nummers: playlist «{view.playlist.name}» ({view.playlist.count})
+              Nummers: {view.playlist.source === 'fragment' ? 'lijst' : 'playlist'} «{view.playlist.name}» ({view.playlist.count})
             </p>
           )}
         </section>
