@@ -14,6 +14,9 @@ export const YEAR = new Map(TRACKS.map((t) => [t.id, t.year]));
 export async function openPhone(browser, { hash = '', name = '', viewport = null, touch = false } = {}) {
   // `touch`: een gsm met aanraakscherm (om met de vinger te slepen).
   const context = await browser.newContext({ ...(viewport ? { viewport } : {}), ...(touch ? { hasTouch: true } : {}) });
+  // Het echte Deezer nooit, ook niet met MT_LIVE=1: fakeDeezer (fake-deezer.js)
+  // antwoordt in de tests met fragmenten in de plaats.
+  await context.route(/^https:\/\/([^/]*\.)?(deezer\.com|dzcdn\.net)(\/|$)/, (route) => route.abort('blockedbyclient'));
   if (name) {
     await context.addInitScript((n) => {
       try {

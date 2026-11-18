@@ -145,7 +145,10 @@ def version_tier(candidate: str, wanted: str, wanted_artists: list[str]) -> int 
     # Gevraagd live: dan ook een live-opname (een studio-opname heeft een ander jaar).
     if T.is_live(wanted) and "live" not in words(candidate):
         return None
-    allowed = set(words(wanted)) | {w for a in wanted_artists for w in words(a)}
+    ww = words(wanted)
+    # Ook aaneengeschreven ("U.S.A." -> "u s a" -> "usa").
+    allowed = {"".join(ww[i:j]) for i in range(len(ww)) for j in range(i + 1, min(i + 5, len(ww) + 1))}
+    allowed |= {w for a in wanted_artists for w in words(a)}
     extra = [w for w in words(candidate) if w not in allowed]
     tier = 0
     for w in extra:

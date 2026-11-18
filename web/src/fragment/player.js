@@ -104,7 +104,7 @@ export function createFragmentPlayer({ audio = null, fetch = fetchPreview, onEve
     a.addEventListener('error', () => {
       // Alleen een fout van een fragment dat al speelde (niet van het stille
       // geluidje en niet tijdens een start: die handelt play() zelf af).
-      if (!current || a.__mtStarting) return;
+      if (!current?.started || a.__mtStarting) return;
       onEvent({ type: 'error', error: new FragmentError(MISSING, 'missing'), trackId: current.trackId });
     });
   }
@@ -202,6 +202,7 @@ export function createFragmentPlayer({ audio = null, fetch = fetchPreview, onEve
         current = { trackId, url };
       }
       neutralMedia();
+      current.started = false;
       try {
         await playUrl(a, current.url, gen);
       } catch (err) {
@@ -209,11 +210,12 @@ export function createFragmentPlayer({ audio = null, fetch = fetchPreview, onEve
         // Misschien verlopen: één keer een nieuw adres vragen.
         const url = await fetch(trackId);
         if (gen !== generation) throw new Superseded();
-        current = { trackId, url };
+        current = { trackId, url, started: false };
         a.removeAttribute('src');
         a.load();
         await playUrl(a, url, gen);
       }
+      current.started = true;
       unlocked = true;
       return true;
     },
