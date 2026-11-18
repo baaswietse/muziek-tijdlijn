@@ -5,7 +5,7 @@
 // (of een ander) spelen terwijl het spel een nieuw nummer verwachtte.
 
 import { test, expect } from '@playwright/test';
-import { TRACKS } from './helpers.js';
+import { TRACKS, hostAction } from './helpers.js';
 import { fakeSpotify, hostAndLogin } from './fake-spotify.js';
 
 test.describe.configure({ timeout: 90_000 });
@@ -53,7 +53,8 @@ async function startGame(browser, { device = 'dev-1' } = {}) {
 /** Host tikt «Ander nummer» en wacht tot de server een nieuw nummer koos. */
 async function nextTrack(page, turn) {
   const before = turn.trackId;
-  await page.getByTestId('skip-track').click();
+  // «Ander nummer» staat in het menu van de host.
+  await hostAction(page, 'skip-track');
   await expect.poll(() => turn.trackId).not.toBe(before);
   return before;
 }

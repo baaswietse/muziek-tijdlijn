@@ -11,6 +11,9 @@ import {
   lastPlayed,
   countOf,
   activeYears,
+  hostAction,
+  openMenu,
+  placeCard,
 } from './helpers.js';
 
 test('volledig spel met drie gsm\'s: binnenkomen, beurten, onthulling, winnaar, nieuw spel', async ({ browser }) => {
@@ -137,15 +140,15 @@ test('herverbinden na een weggevallen verbinding en na herladen', async ({ brows
   await bob.context().setOffline(true);
   await bob.evaluate(() => window.__mt.drop());
   await expect(bob.getByTestId('net-status')).not.toHaveAttribute('data-status', 'online');
-  await expect(host.locator(`[data-testid="board-row"][data-player="${ids[1]}"]`)).toContainText('offline');
+  await expect(host.locator(`[data-testid="board-row"][data-player="${ids[1]}"]`)).toContainText('niet verbonden');
 
   // Intussen gaat het spel verder: de host slaat beurten over tot hij zelf speelt.
   for (let i = 0; i < 3; i++) {
     if ((await host.getByTestId('turn-banner').getAttribute('data-mine')) === 'yes') break;
-    await host.getByTestId('skip-turn').click();
+    await hostAction(host, 'skip-turn');
     await expect(host.getByTestId('turn-banner')).toHaveAttribute('data-mine', 'yes');
   }
-  await host.getByTestId('slot-0').click();
+  await placeCard(host, 0);
   await host.getByTestId('confirm-place').click();
   // Bob heeft zijn 2 starttokens nog (ook offline): eerst de tussenfase.
   await expect(host.getByTestId('challenge-banner')).toBeVisible();
@@ -159,7 +162,7 @@ test('herverbinden na een weggevallen verbinding en na herladen', async ({ brows
   await bob.context().setOffline(false);
   await expect(bob.getByTestId('net-status')).toHaveAttribute('data-status', 'online', { timeout: 15_000 });
   await expect(bob.getByTestId('reveal')).toHaveAttribute('data-track', track);
-  await expect(host.locator(`[data-testid="board-row"][data-player="${ids[1]}"]`)).not.toContainText('offline');
+  await expect(host.locator(`[data-testid="board-row"][data-player="${ids[1]}"]`)).not.toContainText('niet verbonden');
 
   // Herladen: Bob zit nog in hetzelfde spel, zonder opnieuw binnen te komen.
   await bob.reload();
@@ -174,6 +177,7 @@ test('herverbinden na een weggevallen verbinding en na herladen', async ({ brows
   const playing = await lastPlayed(host);
   await host.reload();
   await expect(host.getByTestId('turn-banner')).toBeVisible();
+  await openMenu(host);
   await expect(host.getByTestId('host-music-status')).toBeVisible();
   await host.waitForTimeout(500);
   expect(await playCount(host)).toBe(0);
@@ -219,24 +223,27 @@ test('host-bediening: muziekfout, ander nummer, beurt overslaan, laat instappen,
     window.__mockSpotify.failNextPlay = 'Spotify vindt het toestel niet.';
   });
   await host.getByTestId('start-game').click();
+  // De melding staat op het spelscherm zelf, met de knop die het oplost.
   await expect(host.getByTestId('host-music-error')).toContainText('vindt het toestel niet');
+  await expect(host.getByTestId('host-music-error')).toBeVisible();
   expect(await playCount(host)).toBe(0);
-  await host.getByTestId('replay').click();
+  await host.getByTestId('alert-replay').click();
   await expect(host.getByTestId('host-music-error')).toHaveCount(0);
   await expect.poll(() => playCount(host)).toBe(1);
   const first = await lastPlayed(host);
 
   // Ander nummer: zelfde speler, nieuw nummer.
   const active = await host.getByTestId('turn-banner').getAttribute('data-active');
-  await host.getByTestId('skip-track').click();
+  await hostAction(host, 'skip-track');
   await expect.poll(() => playCount(host)).toBe(2);
   expect(await lastPlayed(host)).not.toBe(first);
   await expect(host.getByTestId('turn-banner')).toHaveAttribute('data-active', active);
 
   // Beurt overslaan: de andere speler is aan de beurt.
-  await host.getByTestId('skip-turn').click();
+  await hostAction(host, 'skip-turn');
   await expect(host.getByTestId('turn-banner')).not.toHaveAttribute('data-active', active);
   await expect(bob.getByTestId('skip-turn')).toHaveCount(0);
+  await expect(bob.getByTestId('host-controls')).toHaveCount(0);
 
   // Laat instappen: Cas krijgt meteen een startkaart en 2 tokens.
   const cas = await openPhone(browser);
@@ -250,7 +257,8 @@ test('host-bediening: muziekfout, ander nummer, beurt overslaan, laat instappen,
   for (const p of [host, cas]) await expect(p.locator(`[data-testid="board-row"][data-player="${casId}"]`)).toHaveAttribute('data-tokens', '2');
 
   // Speler verwijderen: Cas vliegt eruit en belandt op het startscherm.
-  await host.locator(`[data-testid="board-row"][data-player="${casId}"] .board-head`).click();
+  await openMenu(host);
+  await host.getByText('Een speler uit het spel halen').click();
   await host.getByRole('button', { name: 'Haal Cas uit het spel' }).click();
   await expect(host.getByTestId('board-row')).toHaveCount(2);
   await expect(cas.getByTestId('enter-button')).toBeVisible();

@@ -13,7 +13,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fakeIds, fakeMusicBrainz, fakeSpotify, hostAndLogin, playlistItem as item, watchYears } from './fake-spotify.js';
-import { setTarget } from './helpers.js';
+import { openMenu, setTarget } from './helpers.js';
 
 const SITE_TRACKS = JSON.parse(readFileSync(new URL('../../web/public/tracks.json', import.meta.url), 'utf8'));
 const SITE = SITE_TRACKS.slice(0, 10); // 10 gekende nummers: genoeg om meteen te kunnen starten
@@ -102,6 +102,7 @@ test('starten terwijl er nog opgezocht wordt; wat erbij komt, doet mee vanaf het
   await expect.poll(() => years.writes.flatMap((w) => w.body.entries.map((e) => e.id)).sort()).toEqual(list.fake.map((f) => f.id).sort());
 
   // Terug naar de wachtkamer: nu gaat de volledige lijst naar de server.
+  await openMenu(page);
   await page.getByRole('button', { name: 'Stop dit spel' }).click();
   await expect(page.getByTestId('deck-current')).toHaveText('Playlist «Achter» · 18 nummers');
   await expect.poll(() => decks.length).toBe(2);
@@ -316,10 +317,13 @@ test('opzoeken klaar tijdens het spel, daarna herladen: het volgende spel krijgt
   await expect(page.getByTestId('turn-banner')).toBeVisible();
   // Vroeger was de volledige lijst dan vergeten, en speelde het volgende spel
   // weer met de kleine lijst van het eerste: dezelfde nummers opnieuw.
+  await openMenu(page);
   await page.getByRole('button', { name: 'Stop dit spel' }).click();
   await expect(page.getByTestId('deck-current')).toHaveText('Playlist «Na» · 18 nummers', { timeout: 20_000 });
+  // Het verzoek wordt hier pas genoteerd als het helemaal binnen is; de stand
+  // via de WebSocket kan er net voor aankomen.
+  await expect.poll(() => decks.at(-1).body.tracks.length).toBe(18);
   expect(decks.at(-1).status).toBe(200);
-  expect(decks.at(-1).body.tracks).toHaveLength(18);
   expect(await page.evaluate(() => localStorage.getItem('mt.deckJob'))).toBeNull();
   await host.context.close();
 });

@@ -173,11 +173,6 @@ code {
   flex: 1;
 }
 
-/* Met een zwevende balk onderaan: de laatste inhoud is erboven uit te scrollen. */
-.page.game {
-  padding-bottom: calc(var(--bar-h, 0px) + 32px + env(safe-area-inset-bottom));
-}
-
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -322,7 +317,7 @@ h2 {
   line-height: 1;
 }
 
-:is(.btn, .tab, .slot-btn, .device, .board-head, .guess-btn, .input, summary, a):focus-visible {
+:is(.btn, .tab, .device, .board-head, .guess-btn, .input, summary, a):focus-visible {
   outline: 3px solid var(--amber);
   outline-offset: 2px;
 }
@@ -496,7 +491,8 @@ h2 {
   left: 16px;
   right: 16px;
   bottom: calc(18px + env(safe-area-inset-bottom));
-  z-index: 20;
+  /* Boven de panelen: een melding moet je altijd zien. */
+  z-index: 40;
   max-width: 528px;
   margin: 0 auto;
   padding: 14px 16px;
@@ -509,8 +505,16 @@ h2 {
 }
 
 /* Een melding verschijnt boven de zwevende balk, nooit over de knop. */
-html.has-bar .toast {
-  bottom: calc(var(--bar-h, 0px) + 10px);
+html.has-bar .toast,
+html.has-sheet .toast {
+  /* Boven de zwevende balk én boven de uitkomst: niet over hun knoppen. */
+  bottom: calc(var(--bar-h, 0px) + var(--sheet-h, 0px) + 10px);
+}
+
+/* Staat de stand of het menu open, dan bovenaan: het paneel vult de onderkant. */
+html.sheet-open .toast {
+  top: calc(8px + env(safe-area-inset-top));
+  bottom: auto;
 }
 
 @keyframes rise {
@@ -736,93 +740,225 @@ details ul {
 
 /* ---------- spel ---------- */
 
-.now {
+/* Drie vaste zones: de bovenbalk (stand en menu), één regel uitleg en één
+   tijdlijn; onderaan zweeft de balk met de hoofdknop. Alles is erop gemaakt
+   dat er op een gsm weinig tegelijk op het scherm staat. */
+
+/* Met een zwevende balk (en eventueel de uitkomst) onderaan: de laatste kaart is
+   erboven uit te scrollen. */
+.page.game {
+  padding-top: 0;
+  gap: 0;
+  padding-bottom: calc(var(--bar-h, 0px) + var(--sheet-h, 0px) + 24px + env(safe-area-inset-bottom));
+}
+
+/* Staat er een melding boven de balk, dan kan de pagina verder: zo kan ook de
+   onderste kaart boven de melding uit (de app schuift ze daarheen). */
+.app:has(> .toast) .page.game {
+  padding-bottom: calc(var(--bar-h, 0px) + var(--sheet-h, 0px) + 120px + env(safe-area-inset-bottom));
+}
+
+.game-top {
+  /* Over de hele breedte, ook al staat de pagina zelf in een smalle kolom. */
+  margin: 0 -16px;
+  padding: calc(8px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  gap: 8px;
+}
+
+/* «Verbinding kwijt» hoort bij de bovenbalk (die blijft staan) en ligt
+   nergens over: wat eronder staat, schuift mee naar onder. */
+.game-top {
+  flex-wrap: wrap;
+}
+
+.game-top .banner {
+  flex: 1 0 100%;
+  margin: 0 calc(-1 * max(12px, env(safe-area-inset-right))) -8px calc(-1 * max(12px, env(safe-area-inset-left)));
+}
+
+.stand-btn {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px;
-  border-radius: var(--radius);
-  background: var(--ink);
-  color: var(--bg);
-}
-
-.now.mine {
-  background: var(--amber);
-  color: #2a1d00;
-}
-
-.now-who {
-  font-family: var(--serif);
-  font-size: 1.3rem;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.now-what {
-  font-size: 0.9rem;
-  opacity: 0.85;
-}
-
-/* Tussenfase: de kaart ligt vast, anderen kunnen nog een token inzetten. */
-.now.challenge {
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
   background: var(--surface);
   color: var(--ink);
-  border: 2px dashed var(--amber);
-}
-
-.challenge-wait {
-  margin-top: 10px;
   font-size: 0.9rem;
   font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* In de bovenbalk van het spel is plaats schaars: de testmodus kort. */
+.game-top .chip.warn {
+  padding: 2px 6px;
+  font-size: 0.7rem;
+}
+
+.stand-mine {
+  font-variant-numeric: tabular-nums;
+}
+
+.stand-tokens {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Is de balk te smal (bv. met de testmodus erbij), dan krimpt het woord
+   "Stand" eerst: je eigen kaarten en tokens blijven leesbaar. */
+.stand-label {
+  margin-left: auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.stand-label svg {
+  flex: none;
+}
+
+.icon-btn {
+  appearance: none;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.icon-btn.soft {
+  border: 0;
+  background: var(--sunken);
+}
+
+:is(.stand-btn, .icon-btn, .menu-row, .outcome-toggle, .mv-btn, .drag-handle):focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: 2px;
+}
+
+/* De regel uitleg: een titel en hoogstens één zin. */
+.headline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 0 12px;
+}
+
+.headline-title {
+  font-size: clamp(1.4rem, 6.6vw, 1.65rem);
+  line-height: 1.15;
+}
+
+.headline-line {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.headline-line strong {
+  color: var(--ink);
 }
 
 /* Noodknop van de host: bewust ondergeschikt aan Onthul. */
 .challenge-force {
-  margin-top: 6px;
+  align-self: flex-start;
   font-size: 0.9rem;
 }
 
 .challenge-force-box {
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
 .challenge-force-box p {
   margin: 0 0 10px;
 }
 
-/* Kaart kopen: ondergeschikt aan gewoon leggen. */
+/* Kaart kopen: een kleine link, ondergeschikt aan gewoon leggen. */
 .buy-card {
   align-self: flex-start;
+  font-size: 0.95rem;
+}
+
+.buy-note {
+  margin-top: 2px;
+}
+
+.buy-box {
+  margin-top: 6px;
 }
 
 .buy-box p {
   margin: 0 0 10px;
 }
 
-.eq {
+/* Een probleem met de muziek: één regel met de knop die het oplost. */
+.host-alert {
   display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 34px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 10px;
+  border-left: 4px solid var(--bad);
+  background: var(--bad-soft);
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* Geen fout maar iets om na te kijken (er speelt een ander nummer). */
+.host-alert.warn {
+  border-left-color: var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber-ink);
+}
+
+.host-alert-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.btn.small-btn {
   flex: none;
+  min-height: 40px;
+  padding: 6px 12px;
+  font-size: 0.9rem;
 }
 
-.eq i {
-  width: 5px;
-  border-radius: 3px;
-  background: currentColor;
-  animation: eq 1.1s ease-in-out infinite;
+/* Tijdens andermans beurt: wiens tijdlijn je ziet. */
+.view-switch {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 4px;
+  background: var(--sunken);
+  border-radius: 12px;
 }
 
-.eq i:nth-child(1) { animation-delay: -0.2s; }
-.eq i:nth-child(2) { animation-delay: -0.7s; }
-.eq i:nth-child(3) { animation-delay: -0.4s; }
-.eq i:nth-child(4) { animation-delay: -0.9s; }
-.eq i:nth-child(5) { animation-delay: -0.1s; }
-
-@keyframes eq {
-  0%, 100% { height: 22%; }
-  50% { height: 100%; }
+.view-switch .tab {
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .score {
@@ -836,13 +972,22 @@ details ul {
   white-space: nowrap;
 }
 
-/* De meetlat: een lijn links met een maatstreepje per kaart. */
+/* De meetlat: een lijn links met een maatstreepje per kaart. Elke kaart is
+   even hoog (titel en artiest op één regel), zodat er niets verspringt als een
+   "?" een echte kaart wordt. Bij veel kaarten wordt alles compacter. */
 .timeline {
+  --row-h: 56px;
+  --row-gap: 8px;
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--row-gap);
   padding-left: 18px;
+}
+
+.timeline.compact {
+  --row-h: 46px;
+  --row-gap: 4px;
 }
 
 .timeline::before {
@@ -859,12 +1004,12 @@ details ul {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  min-height: 56px;
+  gap: 14px;
+  padding: 0 14px;
+  height: var(--row-h);
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--bg);
+  background: var(--surface);
 }
 
 .tl-card::before {
@@ -878,31 +1023,62 @@ details ul {
 }
 
 .tl-year {
+  flex: none;
   font-family: var(--serif);
-  font-size: 1.45rem;
+  font-size: 1.375rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  min-width: 3.1em;
+  min-width: 2.4em;
   line-height: 1;
 }
 
 .tl-text {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  line-height: 1.3;
+}
+
+.tl-title,
+.tl-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tl-title {
+  font-size: 0.95rem;
   font-weight: 600;
-  overflow-wrap: anywhere;
 }
 
 .tl-artist {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: var(--muted);
-  overflow-wrap: anywhere;
 }
 
+.compact .tl-card {
+  gap: 12px;
+  padding: 0 12px;
+}
+
+.compact .tl-year {
+  font-size: 1.2rem;
+}
+
+.compact .tl-title {
+  font-size: 0.875rem;
+}
+
+.compact .tl-artist {
+  font-size: 0.75rem;
+}
+
+.compact .tl-text {
+  line-height: 1.25;
+}
+
+/* Waar de speler aan beurt twijfelt of zijn kaart legde. */
 .tl-card.mystery {
   border: 2px dashed var(--amber);
   background: var(--amber-soft);
@@ -914,14 +1090,13 @@ details ul {
 }
 
 .tl-card.fresh {
-  border-color: var(--good);
+  border: 2px solid var(--good);
   background: var(--good-soft);
   animation: pop 0.4s ease-out;
 }
 
 .tl-card.wrong {
-  border-style: dashed;
-  border-color: var(--bad);
+  border: 2px dashed var(--bad);
   background: var(--bad-soft);
 }
 
@@ -936,18 +1111,14 @@ details ul {
   }
 }
 
-.tl-slot {
-  display: flex;
-}
-
-/* Een aangetikte plaats voor een token, nog niet bevestigd: in de kleur van de
-   plaatsknoppen (niet amber zoals de vastgelegde kaart), met de knop erbij. */
+/* Een gekozen plaats voor een token, nog niet bevestigd: in de kleur van de
+   keuzes (niet amber zoals de vastgelegde kaart), met de knop erbij. */
 .tl-pick {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px 12px 12px;
+  padding: 8px 12px 12px;
   border: 2px dashed var(--accent);
   border-radius: 12px;
   background: var(--accent-soft);
@@ -957,7 +1128,7 @@ details ul {
   content: '';
   position: absolute;
   left: -18px;
-  top: 28px;
+  top: 26px;
   width: 12px;
   height: 2px;
   background: var(--accent);
@@ -971,20 +1142,22 @@ details ul {
 
 .tl-pick-mark {
   font-family: var(--serif);
-  font-size: 1.45rem;
+  font-size: 1.375rem;
   font-weight: 700;
   line-height: 1;
-  min-width: 3.1em;
+  min-width: 2.4em;
   color: var(--accent);
 }
 
 .tl-pick .tl-title {
   color: var(--ink);
+  white-space: normal;
 }
 
 .tl-pick .tl-artist {
   color: var(--ink);
   opacity: 0.8;
+  white-space: normal;
 }
 
 /* Een ingezet token bij een gat op de tijdlijn van de speler aan beurt. */
@@ -1012,35 +1185,221 @@ details ul {
   color: var(--bad);
 }
 
-.slot-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 46px;
-  padding: 8px 12px;
-  border: 2px dashed var(--accent);
-  border-radius: 12px;
-  background: transparent;
+/* ---------- slepen ---------- */
+
+/* Het stuk dat je sleept (je kaart, je token): de vinger schuift hier de pagina
+   niet, overal elders wel. */
+.drag-handle {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  cursor: grab;
+}
+
+html.dragging,
+html.dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Je eigen kaart: in de kleur van de keuzes, niet amber zoals bij de anderen. */
+.tl-card.mine {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+  padding-right: 6px;
+}
+
+.tl-card.mine .tl-year {
   color: var(--accent);
-  font-weight: 700;
+}
+
+.tl-pick-row {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Omhoog/omlaag: voor wie niet sleept (toetsenbord, schermlezer, of het lukt niet). */
+.mv {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.mv-btn {
+  appearance: none;
+  width: 40px;
+  height: 40px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
   cursor: pointer;
   touch-action: manipulation;
 }
 
-.slot-btn:active {
-  background: var(--accent-soft);
+.mv-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
-.slot-plus {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
+.compact .mv-btn {
+  width: 38px;
+  height: 36px;
+}
+
+/* De houder boven de knop in de zwevende balk. */
+.holder {
+  --row-h: 56px;
+  margin-bottom: 10px;
+}
+
+/* Ligt het stuk op de tijdlijn, dan is de lege houder er alleen tijdens het
+   slepen (om terug te slepen): zo blijft er op een laag scherm plaats voor
+   het stuk en zijn knoppen. Omlaag met de knop brengt het ook terug. */
+html:not(.dragging) .holder.empty {
+  display: none;
+}
+
+.holder .tl-card::before {
+  display: none;
+}
+
+.holder-empty {
+  height: var(--row-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.holder.target .holder-empty,
+.holder.target > .drag-token,
+.holder.target > .tl-card {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.holder .lifted {
+  opacity: 0.35;
+}
+
+/* Je token. */
+.drag-token {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  padding: 0 6px 0 12px;
+  border: 2px solid var(--amber);
+  border-radius: 12px;
+  background: var(--amber-soft);
+  color: var(--ink);
+}
+
+.drag-token.placed {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.token-handle {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.token-handle .tl-title,
+.token-handle .tl-artist {
+  white-space: normal;
+}
+
+.coin {
+  flex: none;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-ink);
-  line-height: 1;
+  background: var(--amber);
+  box-shadow: inset 0 0 0 3px rgb(0 0 0 / 14%), inset 0 0 0 7px var(--amber), inset 0 0 0 8px rgb(0 0 0 / 14%);
+}
+
+/* De kopie die de vinger volgt. */
+.drag-ghost {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 22%);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.drag-ghost .tl-year {
+  color: var(--accent);
+}
+
+.drag-ghost.token {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  gap: 10px;
+}
+
+/* Tijdens het slepen schuiven de kaarten uit elkaar (alleen transform). */
+.timeline.is-dragging > [data-row] {
+  transition: transform 0.15s ease;
+}
+
+.tl-pick-row.lifted,
+.tl-pick.lifted {
+  visibility: hidden;
+}
+
+.tl-drop {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  color: var(--accent);
+  font-size: 0.875rem;
+  font-weight: 700;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tl-drop.on {
+  opacity: 1;
+}
+
+.is-dragging .tl-drop {
+  transition: transform 0.15s ease, opacity 0.1s ease;
 }
 
 .confirm-bar {
@@ -1051,64 +1410,241 @@ details ul {
   z-index: 10;
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
   background: var(--bg); /* voor browsers zonder color-mix() */
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   border-top: 1px solid var(--line);
 }
 
-.confirm-bar .btn {
+.confirm-bar > * {
   max-width: 528px;
-  margin: 0 auto;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.confirm-bar .btn {
   display: block;
 }
 
 .bar-note {
-  max-width: 528px;
-  margin: 0 auto 8px;
+  margin-bottom: 8px;
   font-size: 0.9rem;
   font-weight: 600;
   text-align: center;
 }
 
-/* onthulling */
-.reveal {
-  padding: 18px 16px;
-  border-radius: var(--radius);
-  text-align: center;
-  border: 2px solid var(--good);
-  background: var(--good-soft);
-  animation: pop 0.35s ease-out;
+/* ---------- panelen van onderaan ---------- */
+
+/* Stand en menu: over alles heen, met een donkere laag erachter. */
+.sheet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
-.reveal.bad {
-  border-color: var(--bad);
-  background: var(--bad-soft);
+.sheet-layer[hidden] {
+  display: none;
+}
+
+html.sheet-open {
+  overflow: hidden;
+}
+
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(31 29 43 / 28%);
+  animation: fade 0.2s ease-out;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.sheet {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100% - 56px - env(safe-area-inset-top));
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -8px 30px rgb(0 0 0 / 18%);
+  animation: rise-sheet 0.22s ease-out;
+  outline: none;
+}
+
+@keyframes rise-sheet {
+  from {
+    transform: translateY(40px);
+    opacity: 0.4;
+  }
+}
+
+.sheet-grip {
+  display: block;
+  align-self: center;
+  flex: none;
+  width: 40px;
+  height: 4px;
+  margin: 10px auto 0;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 16px 4px;
+}
+
+.sheet-title {
+  font-family: var(--serif);
+  font-size: 1.375rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.sheet-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px calc(20px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* De uitkomst van een beurt: net boven de zwevende balk, over de tijdlijn. */
+.outcome {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--bar-h, 0px);
+  z-index: 9;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -8px 30px rgb(31 29 43 / 14%);
+  animation: rise-sheet 0.25s ease-out;
+}
+
+html:not(.has-bar) .outcome {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.outcome-head {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  touch-action: none;
+  cursor: grab;
+}
+
+.outcome-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 40px;
+  padding: 2px 16px 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.outcome:not(.open) .outcome-toggle {
+  justify-content: space-between;
+  min-height: 48px;
+  color: var(--ink);
+}
+
+.outcome-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.outcome-show {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+}
+
+.outcome-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: calc(100dvh - var(--bar-h, 0px) - 210px - env(safe-area-inset-top));
+  padding: 0 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.outcome-body[hidden] {
+  display: none;
+}
+
+/* onthulling */
+.reveal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
 }
 
 .reveal-verdict {
+  padding: 4px 12px;
+  border-radius: 10px;
+  font-size: 0.95rem;
   font-weight: 700;
 }
 
 .reveal.good .reveal-verdict {
   color: var(--good);
+  background: var(--good-soft);
 }
 
 .reveal.bad .reveal-verdict {
   color: var(--bad);
+  background: var(--bad-soft);
 }
 
 .reveal-year {
   font-family: var(--serif);
-  font-size: clamp(3rem, 18vw, 4.4rem);
+  font-size: clamp(2.6rem, 14vw, 3.5rem);
   font-weight: 700;
-  line-height: 1.05;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 
 .reveal-title {
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-size: 1.125rem;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -1119,14 +1655,22 @@ details ul {
 
 .spotify-link {
   display: inline-block;
-  margin-top: 8px;
-  font-size: 0.875rem;
-  color: var(--ink);
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: var(--accent);
   text-underline-offset: 3px;
 }
 
 .reveal-token {
-  margin-top: 8px;
+  margin-top: 6px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.reveal-token[data-testid='reveal-card-to'],
+.reveal-token[data-testid='reveal-my-bet'],
+.reveal-token[data-testid='reveal-token'] {
+  color: var(--ink);
   font-weight: 700;
 }
 
@@ -1136,29 +1680,29 @@ details ul {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 .guess-title {
-  font-weight: 700;
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .guess-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .guess-btn {
   appearance: none;
-  min-height: 40px;
+  flex: 1 1 auto;
+  min-height: 44px;
   max-width: 100%;
-  padding: 6px 12px;
+  padding: 6px 14px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 22px;
   background: var(--bg);
   color: var(--ink);
   font: inherit;
@@ -1175,7 +1719,7 @@ details ul {
 }
 
 .winner {
-  padding: 20px 16px;
+  padding: 14px 16px;
   border-radius: var(--radius);
   background: var(--accent);
   color: var(--accent-ink);
@@ -1192,7 +1736,7 @@ details ul {
 
 .winner-name {
   font-family: var(--serif);
-  font-size: clamp(1.8rem, 9vw, 2.6rem);
+  font-size: clamp(1.6rem, 8vw, 2.2rem);
   font-weight: 700;
   line-height: 1.15;
   overflow-wrap: anywhere;
@@ -1204,68 +1748,70 @@ details ul {
   overflow-wrap: anywhere;
 }
 
-/* scorebord */
+/* stand */
 .board {
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
 .board-row {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 0;
-  border-top: 1px solid var(--line);
-}
-
-.board-row:first-child {
-  border-top: 0;
-}
-
-.board-row.active .person-name {
-  color: var(--accent);
-}
-
-.board-head .tokens {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--ink);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.board-head .tokens.none {
-  color: var(--muted);
-  font-weight: 400;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
 }
 
 .board-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
-  min-height: 36px;
-  padding: 0;
+  min-height: 52px;
+  padding: 0 4px;
   border: 0;
   background: none;
   text-align: left;
   cursor: pointer;
 }
 
-.meter {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--sunken);
-  overflow: hidden;
+.board-head:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: 2px;
 }
 
-.meter span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  transition: width 0.3s ease;
+.board-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.board-name .person-name {
+  font-size: 1.05rem;
+}
+
+.offline .board-name .person-name {
+  color: var(--muted);
+}
+
+.board-head .tokens {
+  font-size: 0.875rem;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-head .score {
+  font-size: 1.2rem;
+  min-width: 3.4em;
+  text-align: right;
+}
+
+.board-row .years {
+  padding: 0 4px;
 }
 
 .years {
@@ -1276,12 +1822,86 @@ details ul {
 
 .year-chip {
   font-family: var(--serif);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
-  padding: 1px 7px;
+  padding: 0 6px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg);
+  color: var(--muted);
+}
+
+/* menu */
+.menu-meta {
+  font-size: 0.875rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.menu-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.menu-row,
+.sheet details.rules > summary,
+.menu-remove > summary {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-row.danger {
+  color: var(--bad);
+  border-bottom: 0;
+}
+
+.sheet details.rules {
+  font-size: 0.9rem;
+}
+
+.sheet details.rules[open] > summary {
+  margin-bottom: 8px;
+}
+
+.menu-remove {
+  font-size: 0.95rem;
+}
+
+.menu-remove-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 4px 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .sheet-backdrop {
+    background: rgb(0 0 0 / 50%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1290,8 +1910,5 @@ details ul {
   *::after {
     animation: none !important;
     transition: none !important;
-  }
-  .eq i {
-    height: 60%;
   }
 }

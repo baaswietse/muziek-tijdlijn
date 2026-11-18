@@ -47,13 +47,34 @@ Details:
   plaats. Gelijke jaren mogen ook hier aan beide kanten. Krijgt een inzetter zo zijn laatste kaart, dan wint hij.
   *Ander nummer* of *Sla beurt over* tijdens het inzetten geeft de tokens terug, net als het verwijderen van de speler
   aan beurt. Het raad-token van een beurt kan je pas in een latere beurt inzetten.
+- Het spelscherm toont één ding per moment. Bovenaan een balk met links *Stand* (je eigen kaarten en tokens; een tik
+  toont alle spelers, wie aan de beurt is en wie niet verbonden is, het beurtnummer en hoeveel nummers er nog in de
+  stapel zitten) en rechts het menu (spelcode, spelregels, het spel verlaten, en voor de host de muziek, *Ander
+  nummer*, *Sla beurt over*, een speler verwijderen en *Stop dit spel*). Daaronder één regel uitleg en één tijdlijn:
+  die waarop nu gespeeld wordt. Tijdens andermans beurt wissel je tussen zijn tijdlijn en de jouwe; via de stand kan
+  je elke tijdlijn bekijken. Een probleem met de muziek ziet de host als één regel met een knop op het spelscherm
+  zelf, niet alleen in het menu.
 - De knop die je nodig hebt, staat altijd op dezelfde plek: in een zwevende balk onderaan, in beeld zonder scrollen,
   ook bij een lange tijdlijn. Na elkaar: *Leg het …* (aan beurt), *Ik zet geen token in* (wie nog moet kiezen; een
   host die moet kiezen, kiest eerst en krijgt daarna *Onthul*), *Onthul* (aan beurt en host; uitgeschakeld met op wie
-  er gewacht wordt) en *Volgende beurt*. Een nieuwe knop reageert even (0,9 s) niet, zodat een dubbele tik nooit twee
-  stappen doet. Meldingen verschijnen boven de balk. Na de onthulling schuift de uitkomst vanzelf in beeld.
-- Inzetten gaat in twee stappen: een plaats aantikken zet nog niets in (daar staat "Nog niet ingezet"), pas de knop
-  *Zet token …* bij die plaats doet het. Daarna zie je meteen hoeveel tokens je nog hebt. Lukt het versturen niet
+  er gewacht wordt), *Volgende beurt* en op het einde (host) *Nog een spel*. Een nieuwe knop reageert even (0,9 s)
+  niet, zodat een dubbele tik nooit twee stappen doet. Meldingen verschijnen boven de balk.
+- De onthulling (ook van een gekochte kaart, en op het einde met de winnaars) schuift als paneel van onderaan over de
+  tijdlijn, net boven de balk: oordeel, jaar, titel, artiest, wat er met de tokens gebeurde en wie het raad-token
+  krijgt. De tijdlijn eronder verspringt niet; de nieuwe kaart staat er gemarkeerd in. Veeg het paneel naar onder of
+  tik op *Verberg* om de tijdlijnen te bekijken; de strook die overblijft opent het weer. Bij de volgende beurt
+  verdwijnt het vanzelf.
+- Leggen gaat door te slepen: bij het begin van je beurt ligt de kaart met het vraagteken in een houder net boven de
+  zwevende balk. Sleep ze in je tijdlijn: de kaarten schuiven uit elkaar waar ze zou landen. Loslaten legt ze daar
+  als voorlopige keuze (pas dan gaat die naar de server, zodat de anderen zien waar je twijfelt); opnieuw slepen
+  verplaatst ze, terug naar de houder slepen (die verschijnt dan weer in de balk) maakt de keuze ongedaan, en
+  *Leg het …* in de balk bevestigt. Sleep je tot bij de boven- of onderrand, dan schuift de tijdlijn mee; bij veel
+  kaarten worden ze compacter. Zonder slepen
+  kan het ook: de knoppen omhoog/omlaag op de kaart (of de pijltjestoetsen) schuiven ze één plaats op, en elke plaats
+  heeft een naam voor schermlezers ("tussen 1984 en 1991"). Een afgebroken gebaar (scherm gedraaid, verbinding weg,
+  beurt voorbij) legt de kaart terug waar ze lag.
+- Inzetten gaat in twee stappen: je token naar een vrije plaats slepen zet nog niets in (daar staat "Nog niet
+  ingezet"; een bezette plaats neemt het token niet aan), pas de knop *Zet token hier* bij het token doet het. Daarna zie je meteen hoeveel tokens je nog hebt. Lukt het versturen niet
   (geen verbinding, of geen antwoord binnen enkele seconden), dan blijft je keuze staan en zegt het scherm dat je token
   nog niet ingezet is. Wordt er onthuld voor je bevestigde, dan zegt je scherm dat je token niet ingezet is en dat je
   het nog hebt (dat kan alleen nog na de noodknop van de host, of als je verbinding wegviel).
@@ -120,7 +141,8 @@ gsm host  ──┘        │
     niet, dan start het nog hoogstens twee keer opnieuw; bij storingen (502, 429, geen antwoord na 10 s) wacht het
     even (bij 429 zo lang als Spotify vraagt, hoogstens 10 s);
   - zet het, als het toch niet lukt, het verkeerde nummer stil en krijgt de host een waarschuwing met één knop
-    *Start het juiste nummer*. Die zegt nooit welk nummer er wel speelt;
+    *Start het juiste nummer*, op het spelscherm zelf (niet alleen in het menu). Die zegt nooit welk nummer er wel
+    speelt;
   - telt een nummer pas als gestart als dat bevestigd is (`mt.lastPlayed`); na een herlaad kijkt het spel één keer na
     of het nog klopt, en ook als de host terugkomt op het scherm;
   - gaat het herhalen («dit nummer») pas aan na een bevestigde start, en alleen voor dat nummer. Herhalen blijft: zonder
@@ -423,14 +445,20 @@ Gedekt, automatisch:
 - Tokens met drie browsers: geven, verplaatsen, opeisen en terugnemen, wie de knoppen ziet, tellers over beurten heen
   en na herverbinden, 2 tokens bij de start en weer 2 bij een nieuw spel, en een token inzetten (gewonnen en verloren,
   alle plaatsen bezet, zonder lek van het antwoord), en meteen onthullen zodra de anderen hun tokens op hebben. Ook
-  dat een aangetikte maar niet bevestigde plaats niets kost en dat het scherm dat zegt, dat de bevestigknop op een
+  dat een gekozen maar niet bevestigde plaats niets kost en dat het scherm dat zegt, dat de bevestigknop op een
   kleine gsm (390×600) in beeld en niet bedekt is, en wat je ziet als bevestigen mislukt (geen verbinding, of een
   verbinding die niets doorlaat). En dat *Onthul* uit blijft tot iedereen met een token koos (passen of inzetten), dat
   wie wegvalt niets blokkeert maar na zijn terugkeer weer moet kiezen, en de noodknop van de host. En een kaart kopen:
   een derde token verdienen, kopen in twee stappen, wat iedereen dan ziet, en niet voor de laatste kaart.
+- Slepen, met de muis en met de vinger (touch): de kaart van de houder naar een plaats, verplaatsen, terug naar de
+  houder, de kaarten die plaats maken, automatisch meeschuiven op een lange tijdlijn, en afgebroken gebaren
+  (`pointercancel`, scherm gedraaid, verbinding weg, beurt voorbij); de knoppen omhoog/omlaag en de pijltjestoetsen
+  met hun namen; een token slepen (niet op een bezette plaats) en bevestigen; dat de keuze pas bij het loslaten
+  naar de server gaat. De onthulling als paneel (de tijdlijn verspringt niet, wegvegen en weer openen, weg bij de
+  volgende beurt) en de stand en het menu openen en sluiten.
 - De zwevende balk: *Leg het*, *Onthul* en *Volgende beurt* op exact dezelfde plek, een dubbele tik doet geen twee
-  stappen, een melding bedekt de knop niet, en op een lage gsm (390×500) staat elke verplichte knop voor elke rol en
-  fase in beeld zonder scrollen, net als de uitkomst na de onthulling.
+  stappen, een melding bedekt de knop niet, en op een kleine gsm (390×600) met 9 kaarten staat elke verplichte knop
+  voor elke rol en fase in beeld, net als de uitkomst na de onthulling.
 - Een volledig spel met drie browsers: binnenkomen via code en via de QR-link, live tijdlijnen en scores, onthulling,
   winnaar, nog een spel.
 - Binnenkomen via de QR-link: met en zonder gekende naam, vanuit een ander spel als gast of als host (met de vraag
@@ -469,5 +497,7 @@ Niet gedekt, alleen in het echt te testen:
 - Inloggen bij de echte Spotify en het echte afspelen op een toestel; hoe snel een echte box of tv na een
   startcommando overschakelt en wat ze dan meldt (de controle wacht tot ongeveer 5 s per poging).
 - De echte Spotify-speler in de browser (*Dit toestel*), zeker op een gsm.
+- Slepen op een echte gsm: de tests slepen met een nagebootste muis en vinger in Chromium. Hoe het aanvoelt (vlot,
+  of het scrollen ernaast goed blijft werken) en het gedrag van Safari op iPhone zijn alleen in het echt te zien.
 - Het gedrag van de Spotify-app op jouw gsm (melding, vergrendelscherm) en van je box.
 - De app echt installeren op Android en iPhone, en inloggen bij Spotify vanuit de geïnstalleerde app.
