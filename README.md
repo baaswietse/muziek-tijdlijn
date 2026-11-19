@@ -51,7 +51,8 @@ Details:
   aan beurt. Het raad-token van een beurt kan je pas in een latere beurt inzetten.
 - Het spelscherm toont één ding per moment. Bovenaan een balk met links *Stand* (je eigen kaarten en tokens; een tik
   toont alle spelers, wie aan de beurt is en wie niet verbonden is, het beurtnummer en hoeveel nummers er nog in de
-  stapel zitten) en rechts het menu (spelcode, spelregels, het spel verlaten, bij fragmenten voor de andere spelers
+  stapel zitten), bij fragmenten voor de andere spelers een luidsprekerknop (*Geluid op dit toestel*, aan of uit) en
+  rechts het menu (spelcode, spelregels, het spel verlaten, bij fragmenten voor de andere spelers nog eens
   *Geluid op dit toestel*, en voor de host de muziek, *Ander
   nummer*, *Sla beurt over*, een speler verwijderen en *Stop dit spel*). Daaronder één regel uitleg en één tijdlijn:
   die waarop nu gespeeld wordt. Tijdens andermans beurt wissel je tussen zijn tijdlijn en de jouwe; via de stand kan
@@ -402,7 +403,11 @@ De keuze van de bron blijft bewaard op de gsm van de host. Wissel je terug naar 
 de standaardlijst (een fragmentenlijst kan Spotify niet spelen, en omgekeerd).
 
 **Op afstand spelen.** Zit niet iedereen bij dezelfde box, dan zet elke speler die ver weg zit *Geluid op dit toestel*
-aan: in de wachtkamer of in het menu (onder *Voor iedereen*). Dan speelt het fragment van de beurt ook op zijn gsm,
+aan. In de wachtkamer staat daarvoor bovenaan een blok (*Hoor je de muziek van de host niet?*) met de knop *Zet het
+geluid hier aan*; tijdens het spel is dat de luidsprekerknop in de bovenbalk (gevuld met golfjes: aan; leeg met een
+kruisje: uit), en ook in het menu (onder *Voor iedereen*). Staat het bij een speler uit terwijl er een fragment loopt,
+dan krijgt hij één keer per spel een korte tip met *Zet aan*; een tik op het kruisje of de volgende beurt doet die
+weer weg. Staat het aan, dan speelt het fragment van de beurt ook op zijn gsm,
 ongeveer gelijk met de host, en het volgt pauze, *Opnieuw afspelen* en *Ander nummer*. Zit je wel bij de box van de
 host, laat het dan uit: anders hoor je het dubbel. De keuze staat standaard uit en blijft bewaard op je gsm voor dit
 spel. Na een herlaad (of als de browser het geluid weigert) staat op je spelscherm *Zet het geluid aan*; speelt het

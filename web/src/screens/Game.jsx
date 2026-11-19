@@ -4,7 +4,7 @@ import { step, useSlotDrag } from '../lib/drag.js';
 import { MusicPanel } from '../components/MusicPanel.jsx';
 import { deezerId, deezerLink } from '../fragment/deezer.js';
 import { Rules } from '../components/Rules.jsx';
-import { ListenAlert, ListenToggle } from '../components/Listen.jsx';
+import { ListenAlert, ListenButton, ListenHint, ListenToggle } from '../components/Listen.jsx';
 import { MockChip, NetBanner, NetDot } from '../components/Status.jsx';
 
 // Het spelscherm: één ding per moment. Bovenaan een balk met de stand en het
@@ -334,15 +334,18 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
           data-testid="stand-open"
         >
           <span class="stand-mine">
-            {mine?.timeline.length ?? 0} / {target} kaarten
+            {mine?.timeline.length ?? 0} / {target}
+            <span class="stand-unit"> kaarten</span>
           </span>
           <span class="stand-tokens">{tokenText(myTokens)}</span>
           <span class="stand-label">
-            Stand <Chevron dir="down" />
+            <span class="stand-word">Stand</span> <Chevron dir="down" />
           </span>
         </button>
         <MockChip short />
         <NetDot net={net} />
+        {/* Geluid op dit toestel (alleen een speler die geen host is, bij fragmenten): altijd in beeld, één tik. */}
+        {!isHost && listen && <ListenButton listen={listen} />}
         <button
           type="button"
           class="icon-btn"
@@ -388,6 +391,10 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
       {isHost && panel !== 'menu' && <MusicAlert music={music} onSettings={openSettings} onSkip={() => send({ t: 'skipTrack' })} />}
       {/* Voor een speler met «Geluid op dit toestel»: alleen als het hier niet speelt. */}
       {!isHost && listen && <ListenAlert listen={listen} />}
+      {/* Eén keer per spel, als het geluid hier uit staat terwijl er een fragment loopt. */}
+      {!isHost && listen && (
+        <ListenHint key={`${view.code}:${view.game}`} listen={listen} code={view.code} game={view.game} turn={playing || challenge ? turnNo.current : null} />
+      )}
 
       {views.length > 1 && (
         <div class="view-switch" role="group" aria-label="Welke tijdlijn">

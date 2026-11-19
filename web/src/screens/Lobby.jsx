@@ -4,7 +4,7 @@ import { qrPath } from '../lib/qr.js';
 import { MusicPanel } from '../components/MusicPanel.jsx';
 import { DeckPanel } from '../components/DeckPanel.jsx';
 import { Rules } from '../components/Rules.jsx';
-import { ListenToggle } from '../components/Listen.jsx';
+import { ListenCard } from '../components/Listen.jsx';
 import { deckMatches } from '../lib/source.js';
 
 export function Lobby({ view, send, music, listen = null, deck, onLeave, notify }) {
@@ -42,6 +42,9 @@ export function Lobby({ view, send, music, listen = null, deck, onLeave, notify 
 
   return (
     <main class="page">
+      {/* Speelt de host met fragmenten, dan kan een speler het geluid ook hier
+          laten spelen (op afstand). Bovenaan: wie niets hoort, ziet het meteen. */}
+      {!isHost && listen?.available && <ListenCard listen={listen} />}
       <section class="card invite">
         <p class="label">Laat de anderen deze code scannen of intikken</p>
         <div class="invite-body">
@@ -121,12 +124,6 @@ export function Lobby({ view, send, music, listen = null, deck, onLeave, notify 
             <p class="muted small" data-testid="lobby-playlist">
               Nummers: {view.playlist.source === 'fragment' ? 'lijst' : 'playlist'} «{view.playlist.name}» ({view.playlist.count})
             </p>
-          )}
-          {/* Speelt de host met fragmenten, dan kan je het geluid ook hier laten spelen (op afstand). */}
-          {listen?.available && (
-            <div class="lobby-listen">
-              <ListenToggle listen={listen} />
-            </div>
           )}
         </section>
       )}

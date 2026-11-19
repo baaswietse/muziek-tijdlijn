@@ -19,6 +19,7 @@ import {
   passWaiting,
   othersHaveTokens,
   myId,
+  expectFullyVisible,
 } from './helpers.js';
 import { FRAGMENTS, FRAGMENT_SECONDS, audioState, fakeDeezer, fragmentOf } from './fake-deezer.js';
 import { drift } from '../../web/src/fragment/sync.js';
@@ -39,8 +40,19 @@ async function hostWithFragments(browser, { mute = false, list = 'oud' } = {}) {
 }
 
 /** Een gast; `listener`: met een eigen nagebootste Deezer, om te zien wat zijn browser opvraagt. */
-async function guest(browser, code, name, { listener = false, fake = {} } = {}) {
-  const page = await openPhone(browser);
+async function guest(browser, code, name, { listener = false, fake = {}, viewport = null, bigText = false } = {}) {
+  const page = await openPhone(browser, { viewport });
+  // Grotere letters, zoals iemand die de tekst op zijn gsm groter zette.
+  if (bigText) {
+    await page.context().addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = 'html, body, button, input { font-size: 21px; }';
+        document.head.append(style);
+      });
+    });
+    await page.reload();
+  }
   const deezer = listener ? await fakeDeezer(page.context(), fake) : null;
   page.requests_ = [];
   page.on('request', (r) => page.requests_.push(r.url()));
@@ -85,6 +97,50 @@ async function toggleListen(page, on) {
   await closePanel(page);
 }
 
+/** Ligt het midden van het element bovenaan (geen balk, melding of paneel erover)? */
+const onTop = (loc) =>
+  loc.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return el.contains(hit) ? true : `${hit?.className || hit?.tagName} over ${el.dataset.testid}`;
+  });
+
+/** Groot genoeg om met de vinger te raken (44 bij 44 px), helemaal in beeld en niet bedekt. */
+async function tappable(loc) {
+  await expectFullyVisible(loc);
+  const box = await loc.boundingBox();
+  expect(box.width, 'breedte').toBeGreaterThanOrEqual(44);
+  expect(box.height, 'hoogte').toBeGreaterThanOrEqual(44);
+  expect(await onTop(loc)).toBe(true);
+}
+
+/** De pagina schuift niet opzij (niets breder dan het scherm). */
+const noSideScroll = async (page) =>
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+
+/** De luidsprekerknop in de bovenbalk staat zichtbaar in stand `on`, met het menu dicht. */
+async function quickIs(page, on) {
+  await expect(page.getByTestId('menu')).toBeHidden();
+  const btn = page.getByTestId('listen-quick');
+  await expect(btn).toBeVisible();
+  await expect(btn).toHaveAttribute('aria-checked', on ? 'true' : 'false');
+  await expect(btn).toHaveAccessibleName('Geluid op dit toestel');
+  return btn;
+}
+
+/** Wacht tot `page` aan de beurt is (de host slaat beurten over). */
+async function turnOf(host, page) {
+  const id = await myId(page);
+  for (let i = 0; i < 6; i++) {
+    const banner = host.getByTestId('turn-banner');
+    const now = await banner.getAttribute('data-active');
+    if (now === id) return;
+    await hostAction(host, 'skip-turn');
+    await expect(banner).not.toHaveAttribute('data-active', now);
+  }
+  throw new Error('niet aan de beurt geraakt');
+}
+
 /** Het fragment van host en gast loopt ongeveer gelijk (binnen een paar tienden van een seconde). */
 async function inStep(host, page) {
   await expect
@@ -107,10 +163,11 @@ test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw e
   const ids = await Promise.all(pages.map(myId));
 
   // In de wachtkamer staat de keuze al, standaard uit, met de uitleg.
-  await expect(bob.getByTestId('listen-toggle')).toHaveAttribute('aria-checked', 'false');
-  await expect(bob.getByTestId('listen')).toContainText('op afstand');
-  await expect(bob.getByTestId('listen')).toContainText('dubbel');
+  await expect(bob.getByTestId('listen-card')).toHaveAttribute('data-on', 'no');
+  await expect(bob.getByTestId('listen-card')).toContainText('op afstand');
+  await expect(bob.getByTestId('listen-card')).toContainText('dubbel');
   // De host heeft de keuze niet (hij heeft zijn eigen geluid).
+  await expect(host.getByTestId('listen-card')).toHaveCount(0);
   await expect(host.getByTestId('listen-toggle')).toHaveCount(0);
 
   await host.getByTestId('start-game').click();
@@ -120,8 +177,12 @@ test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw e
   expect(await audioState(bob)).toBeNull();
   expect(soundFrames(bob)).toEqual([]);
 
-  // Bob zet het geluid aan (menu): hetzelfde fragment, gelijk met de host.
-  await toggleListen(bob, true);
+  // De host heeft geen luidsprekerknop bovenaan.
+  await expect(host.getByTestId('listen-quick')).toHaveCount(0);
+
+  // Bob zet het geluid aan (bovenaan, zonder menu): hetzelfde fragment, gelijk met de host.
+  await (await quickIs(bob, false)).click();
+  await quickIs(bob, true);
   await playing(bob, { id: first.id });
   await inStep(host, bob);
   await expect(bob.getByTestId('listen-alert')).toHaveCount(0);
@@ -156,7 +217,10 @@ test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw e
   await bob.reload();
   await expect(bob.getByTestId('turn-banner')).toBeVisible();
   await expect(bob.getByTestId('listen-alert')).toContainText('staat nog uit');
+  // Bovenaan: nog uit (er speelt hier niets), tot de tik.
+  await quickIs(bob, false);
   await bob.getByTestId('listen-unlock').click();
+  await quickIs(bob, true);
   await expect(bob.getByTestId('listen-alert')).toHaveCount(0);
   await playing(bob, { id: second.id });
   await inStep(host, bob);
@@ -197,8 +261,9 @@ test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw e
   await playing(bob, { id: third.id });
   expect(leaked(bob, third.id)).toBe(false);
 
-  // Uit: Bob is stil en krijgt geen adressen meer.
+  // Uit (via het menu): Bob is stil en krijgt geen adressen meer.
   await toggleListen(bob, false);
+  await quickIs(bob, false);
   await expect.poll(async () => (await audioState(bob)).paused).toBe(true);
   const count = soundFrames(bob).length;
   await hostAction(host, 'replay');
@@ -215,8 +280,8 @@ test('geluid op dit toestel: een host zonder geluid; de gast die meeluistert hoo
   await expect(host.getByTestId('music-status')).toContainText('blijft stil');
   const { page: bob } = await guest(browser, code, 'Bob', { listener: true });
   // In de wachtkamer aanzetten kan ook.
-  await bob.getByTestId('listen-toggle').click();
-  await expect(bob.getByTestId('listen-toggle')).toHaveAttribute('aria-checked', 'true');
+  await bob.getByTestId('listen-on').click();
+  await expect(bob.getByTestId('listen-card')).toHaveAttribute('data-on', 'yes');
   await host.getByTestId('start-game').click();
   await expect(bob.getByTestId('turn-banner')).toBeVisible();
 
@@ -326,8 +391,15 @@ test('geluid op dit toestel: met Spotify is de keuze er niet', async ({ browser 
   await joinGame(bob, code, 'Bob');
   await expect(bob.getByTestId('waiting')).toBeVisible();
   await expect(bob.getByTestId('listen-toggle')).toHaveCount(0);
+  await expect(bob.getByTestId('listen-card')).toHaveCount(0);
+  await expect(bob.locator('main')).not.toContainText('Hoor je');
   await host.getByTestId('start-game').click();
   await expect(bob.getByTestId('turn-banner')).toBeVisible();
+  // Geen knop bovenaan en geen tip.
+  await expect(bob.getByTestId('listen-quick')).toHaveCount(0);
+  await bob.waitForTimeout(500);
+  await expect(bob.getByTestId('listen-hint')).toHaveCount(0);
+  await expect(bob.getByTestId('listen-alert')).toHaveCount(0);
   await openMenu(bob);
   await expect(bob.getByTestId('menu')).toContainText('Spelregels');
   await expect(bob.getByTestId('listen-toggle')).toHaveCount(0);
@@ -335,4 +407,145 @@ test('geluid op dit toestel: met Spotify is de keuze er niet', async ({ browser 
   // Geen geluidsbericht en geen adres.
   expect(soundFrames(bob)).toEqual([]);
   expect(bob.frames_.some((f) => f.includes('dzcdn'))).toBe(false);
+});
+
+test('geluid op dit toestel: een duidelijk blok bovenaan de wachtkamer en een luidsprekerknop bovenaan het spel', async ({ browser }) => {
+  const { host, code } = await hostWithFragments(browser);
+  const { page: bob } = await guest(browser, code, 'Bob', { listener: true });
+  const card = bob.getByTestId('listen-card');
+
+  // Bovenaan (boven de uitnodiging), met een vraag in gewone taal en een echte knop.
+  await expect(card).toHaveAttribute('data-on', 'no');
+  await expect(card).toContainText('Hoor je de muziek van de host niet?');
+  expect(await bob.evaluate(() => document.querySelector('main.page > *')?.dataset.testid)).toBe('listen-card');
+  await expect(bob.getByRole('button', { name: 'Zet het geluid hier aan' })).toBeVisible();
+  await tappable(bob.getByTestId('listen-on'));
+
+  // Eén tik: aan, en dat staat er duidelijk.
+  await bob.getByTestId('listen-on').click();
+  await expect(card).toHaveAttribute('data-on', 'yes');
+  await expect(card).toContainText('Het geluid staat aan op deze gsm');
+  await expect(bob.getByTestId('listen-status')).toHaveText('Wacht op het fragment van de host…');
+  // Weer uit kan ook, en weer aan.
+  await tappable(bob.getByTestId('listen-off'));
+  await bob.getByTestId('listen-off').click();
+  await expect(card).toHaveAttribute('data-on', 'no');
+  await bob.getByTestId('listen-on').click();
+  await expect(card).toHaveAttribute('data-on', 'yes');
+
+  await host.getByTestId('start-game').click();
+  const first = await playing(host);
+  await playing(bob, { id: first.id });
+  // Op het spelscherm: «aan», zichtbaar zonder het menu te openen; geen tip (het staat al aan).
+  const quick = await quickIs(bob, true);
+  await tappable(quick);
+  await expect(bob.getByTestId('listen-hint')).toHaveCount(0);
+
+  // Eén tik: uit en stil.
+  await quick.click();
+  await quickIs(bob, false);
+  await expect.poll(async () => (await audioState(bob)).paused).toBe(true);
+  // Het menu zegt hetzelfde.
+  await openMenu(bob);
+  await expect(bob.getByTestId('listen-toggle')).toHaveAttribute('aria-checked', 'false');
+  await closePanel(bob);
+  // Ook nu geen tip: Bob zette het zelf uit.
+  await bob.waitForTimeout(300);
+  await expect(bob.getByTestId('listen-hint')).toHaveCount(0);
+
+  // Weer aan: het fragment speelt weer.
+  await quick.click();
+  await quickIs(bob, true);
+  await playing(bob, { id: first.id });
+});
+
+test('geluid op dit toestel: staat het uit terwijl er een fragment loopt, dan één keer per spel een tip die je wegtikt', async ({ browser }) => {
+  const { host, code } = await hostWithFragments(browser);
+  const { page: bob } = await guest(browser, code, 'Bob', { listener: true });
+  const { page: cas } = await guest(browser, code, 'Cas', { listener: true });
+  // In de wachtkamer nog geen tip (er loopt nog niets).
+  await expect(bob.getByTestId('listen-hint')).toHaveCount(0);
+  await host.getByTestId('start-game').click();
+  const first = await playing(host);
+
+  // Bob en Cas zien de tip; het geluid gaat er niet vanzelf van aan.
+  for (const p of [bob, cas]) {
+    await expect(p.getByTestId('listen-hint')).toContainText('Hoor je de muziek niet?');
+    await quickIs(p, false);
+  }
+  await expect(host.getByTestId('listen-hint')).toHaveCount(0);
+  expect(await audioState(bob)).toBeNull();
+
+  // Bob tikt de tip weg: weg, en nog altijd stil.
+  await tappable(bob.getByTestId('listen-hint-close'));
+  await bob.getByTestId('listen-hint-close').click();
+  await expect(bob.getByTestId('listen-hint')).toHaveCount(0);
+  await quickIs(bob, false);
+  expect(await audioState(bob)).toBeNull();
+
+  // Cas zet het geluid met één tik aan vanuit de tip.
+  await tappable(cas.getByTestId('listen-hint-on'));
+  await cas.getByTestId('listen-hint-on').click();
+  await expect(cas.getByTestId('listen-hint')).toHaveCount(0);
+  await quickIs(cas, true);
+  await playing(cas, { id: first.id });
+
+  // Niet opnieuw: niet na een herlaad, niet als Cas het weer uitzet, niet bij de volgende beurt.
+  await bob.reload();
+  await expect(bob.getByTestId('turn-banner')).toBeVisible();
+  await cas.getByTestId('listen-quick').click();
+  await quickIs(cas, false);
+  const turn = await host.getByTestId('turn-banner').getAttribute('data-active');
+  await hostAction(host, 'skip-turn');
+  await closePanel(host);
+  await expect(host.getByTestId('turn-banner')).not.toHaveAttribute('data-active', turn);
+  await playing(host, { not: first.id });
+  await bob.waitForTimeout(500);
+  for (const p of [bob, cas]) await expect(p.getByTestId('listen-hint')).toHaveCount(0);
+});
+
+test('geluid op dit toestel: op een smal scherm (320 px) met grotere letters blijft alles zichtbaar en vrij', async ({ browser }) => {
+  const { host, code } = await hostWithFragments(browser);
+  const { page: bob } = await guest(browser, code, 'Bob', { listener: true, viewport: { width: 320, height: 640 }, bigText: true });
+
+  // Wachtkamer: het blok en zijn knop, uit en aan, helemaal binnen de breedte van het scherm.
+  const card = bob.getByTestId('listen-card');
+  await expectFullyVisible(card);
+  await tappable(bob.getByTestId('listen-on'));
+  await bob.getByTestId('listen-on').click();
+  await expect(card).toHaveAttribute('data-on', 'yes');
+  await expectFullyVisible(card);
+  await tappable(bob.getByTestId('listen-off'));
+  await bob.getByTestId('listen-off').click();
+  await expect(bob.getByTestId('listen-card')).toHaveAttribute('data-on', 'no');
+
+  await host.getByTestId('start-game').click();
+  await expect(bob.getByTestId('turn-banner')).toBeVisible();
+  await playing(host);
+  // De bovenbalk en de tip.
+  await expect(bob.getByTestId('listen-hint')).toBeVisible();
+  await expectFullyVisible(bob.getByTestId('listen-hint'));
+  for (const id of ['stand-open', 'listen-quick', 'menu-open', 'listen-hint-on', 'listen-hint-close']) await tappable(bob.getByTestId(id));
+  await noSideScroll(bob);
+
+  // Bob aan de beurt, met een gekozen plaats: de zwevende balk staat onderaan.
+  // De tip opnieuw (alsof hij hem nog niet zag), om te zien dat ook dan niets bedekt raakt.
+  await turnOf(host, bob);
+  await closePanel(host);
+  await bob.evaluate(() => {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('mt.listenHint.')) localStorage.removeItem(k);
+  });
+  await bob.reload();
+  await expect(bob.getByTestId('listen-hint')).toBeVisible();
+  await placeCard(bob, 0);
+  await expect(bob.getByTestId('action-bar')).toBeVisible();
+  for (const id of ['stand-open', 'listen-quick', 'menu-open', 'listen-hint-on', 'listen-hint-close', 'confirm-place']) await tappable(bob.getByTestId(id));
+  await noSideScroll(bob);
+
+  // Aan met de knop bovenaan: de tip gaat weg, de rest blijft vrij.
+  await bob.getByTestId('listen-quick').click();
+  await quickIs(bob, true);
+  await expect(bob.getByTestId('listen-hint')).toHaveCount(0);
+  for (const id of ['stand-open', 'listen-quick', 'menu-open', 'confirm-place']) await tappable(bob.getByTestId(id));
+  await noSideScroll(bob);
 });
