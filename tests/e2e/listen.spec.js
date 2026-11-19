@@ -21,13 +21,16 @@ import {
   myId,
   expectFullyVisible,
 } from './helpers.js';
-import { FRAGMENTS, FRAGMENT_SECONDS, audioState, fakeDeezer, fragmentOf } from './fake-deezer.js';
+import { FRAGMENTS, FRAGMENT_SECONDS, LONG_FRAGMENT_SECONDS, audioState, fakeDeezer, fragmentOf } from './fake-deezer.js';
 import { drift } from '../../web/src/fragment/sync.js';
 
-/** Host met fragmenten en een lijst; `mute`: zonder geluid op zijn eigen toestel. */
-async function hostWithFragments(browser, { mute = false, list = 'oud' } = {}) {
+/**
+ * Host met fragmenten en een lijst; `mute`: zonder geluid op zijn eigen
+ * toestel; `long`: met het testfragment van 20 s (zie fake-deezer.js).
+ */
+async function hostWithFragments(browser, { mute = false, list = 'oud', long = false } = {}) {
   const host = await openPhone(browser);
-  const deezer = await fakeDeezer(host.context());
+  const deezer = await fakeDeezer(host.context(), { long });
   const code = await hostGame(host, 'Hanne');
   await host.getByTestId('source-fragment').click();
   await expect(host.getByTestId('music-status')).toHaveAttribute('data-ready', 'no');
@@ -141,18 +144,33 @@ async function turnOf(host, page) {
   throw new Error('niet aan de beurt geraakt');
 }
 
-/** Het fragment van host en gast loopt ongeveer gelijk (binnen een paar tienden van een seconde). */
-async function inStep(host, page) {
-  await expect
-    .poll(
-      async () => {
-        const [a, b] = await Promise.all([audioState(host), audioState(page)]);
-        if (!a || !b || a.paused || b.paused) return 99;
-        return drift(a.time, b.time, FRAGMENT_SECONDS);
-      },
-      { timeout: 12_000 },
-    )
-    .toBeLessThan(0.45);
+/** Hoe ver het fragment van host en gast uit elkaar ligt (s); 99 als er een niet speelt. */
+async function gap(host, page, duration) {
+  const [a, b] = await Promise.all([audioState(host), audioState(page)]);
+  if (!a || !b || a.paused || b.paused) return 99;
+  return drift(a.time, b.time, duration);
+}
+
+/**
+ * Het fragment van host en gast loopt ongeveer gelijk (binnen een paar
+ * tienden van een seconde). Let op: bij het fragment van 1,5 s zegt dit niet
+ * veel. Het verschil telt modulo 1,5 s (meer dan 0,75 s kan het niet zijn),
+ * en de host verliest bij elke herhaling zo'n 0,1 s tegenover de klok van de
+ * server (zie fake-deezer.js). Om echt te meten: `long` en
+ * `LONG_FRAGMENT_SECONDS`.
+ */
+async function inStep(host, page, duration = FRAGMENT_SECONDS, { timeout = 12_000 } = {}) {
+  await expect.poll(() => gap(host, page, duration), { timeout }).toBeLessThan(0.45);
+}
+
+/** Blijft het `ms` lang gelijk (binnen de gewone marge), ook na de controle om de 5 s? */
+async function staysInStep(host, page, duration, ms) {
+  const gaps = [];
+  for (const end = Date.now() + ms; Date.now() < end; ) {
+    gaps.push(Math.round((await gap(host, page, duration)) * 100) / 100);
+    await host.waitForTimeout(250);
+  }
+  expect(Math.max(...gaps), `verschil host en gast: ${gaps.join(' ')}`).toBeLessThan(0.45);
 }
 
 test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw en ander nummer, en haakt na een herlaad weer aan', async ({ browser }) => {
@@ -272,6 +290,49 @@ test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw e
   await host.waitForTimeout(500);
   expect(soundFrames(bob).length).toBe(count);
   expect((await audioState(bob)).paused).toBe(true);
+});
+
+test('geluid op dit toestel: uit en weer aan in dezelfde beurt, en het loopt weer gelijk met de host', async ({ browser }) => {
+  // Met het testfragment van 20 s: zo meet het echt hoe gelijk het loopt (zie inStep).
+  const { host, code } = await hostWithFragments(browser, { long: true });
+  const { page: bob } = await guest(browser, code, 'Bob', { listener: true, fake: { long: true } });
+  const D = LONG_FRAGMENT_SECONDS;
+  await host.getByTestId('start-game').click();
+  await expect(bob.getByTestId('turn-banner')).toBeVisible();
+  const first = await playing(host);
+  const turn = await host.getByTestId('turn-banner').getAttribute('data-active');
+
+  // Aan: gelijk met de host.
+  await (await quickIs(bob, false)).click();
+  await playing(bob, { id: first.id });
+  await inStep(host, bob, D);
+  const n = parsed(soundFrames(bob).at(-1)).n;
+
+  // Uit, even wachten (de host speelt verder), en weer aan: hetzelfde fragment,
+  // niet van voren maar waar de host nu is, en dat blijft zo (ook na de controle om de 5 s).
+  await (await quickIs(bob, true)).click();
+  await quickIs(bob, false);
+  await expect.poll(async () => (await audioState(bob)).paused).toBe(true);
+  await host.waitForTimeout(1000);
+  await (await quickIs(bob, false)).click();
+  await quickIs(bob, true);
+  await playing(bob, { id: first.id });
+  // Meteen, niet pas bij de controle om de 5 s.
+  await inStep(host, bob, D, { timeout: 3000 });
+  expect((await audioState(bob)).time).toBeGreaterThan(1);
+  await staysInStep(host, bob, D, 6000);
+
+  // Meteen uit en weer aan (via het menu): ook dan.
+  await toggleListen(bob, false);
+  await toggleListen(bob, true);
+  await playing(bob, { id: first.id });
+  await inStep(host, bob, D, { timeout: 3000 });
+  await staysInStep(host, bob, D, 3000);
+
+  // Nog altijd dezelfde beurt en dezelfde start: niets begon opnieuw.
+  await expect(host.getByTestId('turn-banner')).toHaveAttribute('data-active', turn);
+  expect(parsed(soundFrames(bob).at(-1)).n).toBe(n);
+  await expect(bob.getByTestId('listen-alert')).toHaveCount(0);
 });
 
 test('geluid op dit toestel: een host zonder geluid; de gast die meeluistert hoort het toch', async ({ browser }) => {

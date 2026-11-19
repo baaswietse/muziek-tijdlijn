@@ -13,6 +13,14 @@ import { createHash } from 'node:crypto';
 export const FRAGMENTS = JSON.parse(readFileSync(new URL('../fixtures/fragmenten.json', import.meta.url), 'utf8'));
 const MP3 = readFileSync(new URL('../fixtures/fragment.mp3', import.meta.url));
 export const FRAGMENT_SECONDS = 1.5; // zo lang duurt het testfragment
+// Een langer testfragment (20 s, met `long: true`), om te meten hoe gelijk
+// het loopt. Bij elke herhaling verliest een <audio>-element in Chromium zo'n
+// 0,1 s tegenover de klok (de sprong naar het begin). Bij het fragment van
+// 1,5 s is dat 0,1 s per 1,5 s: na tien seconden loopt de host al zo'n 0,7 s
+// achter op de klok van de server, terwijl een gast die dan pas aanzet zich
+// op die klok zet. Bij een echt fragment van 30 s is het 0,1 s per 30 s.
+const MP3_LONG = readFileSync(new URL('../fixtures/fragment-lang.mp3', import.meta.url));
+export const LONG_FRAGMENT_SECONDS = 20;
 
 // Zoals bij het echte Deezer staat het ID van het nummer niet in het adres van
 // de mp3: alleen een hash. Hier onthouden we welk nummer erbij hoort (voor
@@ -42,8 +50,11 @@ export const fragmentOf = (id) => FRAGMENTS.tracks.find((t) => `dz-${t.deezer}` 
  * `noPreview`: ID's zonder fragment (preview leeg).
  * `expired`: ID's waarvan het eerste adres niet meer speelt (403), zoals
  * een verlopen handtekening; een tweede opvraging geeft een geldig adres.
+ * `long`: het fragment van 20 s, met stukken op verzoek (Range), zoals een
+ * echte server van fragmenten: zonder dat kan Chromium in een langer bestand
+ * niet springen. Geef het dan aan host en gasten.
  */
-export async function fakeDeezer(context, { missing = [], noPreview = [], expired = [] } = {}) {
+export async function fakeDeezer(context, { missing = [], noPreview = [], expired = [], long = false } = {}) {
   const deezer = {
     api: [], // { id, callback }
     media: [], // { id, version, status }
@@ -93,6 +104,18 @@ export async function fakeDeezer(context, { missing = [], noPreview = [], expire
     const status = !media ? 404 : deezer.expired.has(id) && version === 1 ? 403 : 200;
     deezer.media.push({ id, version, status });
     if (status !== 200) return route.fulfill({ status, body: '' });
+    if (long) {
+      const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range || '');
+      if (!range) return route.fulfill({ status: 200, contentType: 'audio/mpeg', body: MP3_LONG, headers: { 'accept-ranges': 'bytes' } });
+      const from = Math.min(Number(range[1]), MP3_LONG.length - 1);
+      const to = Math.min(range[2] ? Number(range[2]) : MP3_LONG.length - 1, MP3_LONG.length - 1);
+      return route.fulfill({
+        status: 206,
+        contentType: 'audio/mpeg',
+        body: MP3_LONG.subarray(from, to + 1),
+        headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${from}-${to}/${MP3_LONG.length}` },
+      });
+    }
     return route.fulfill({ status: 200, contentType: 'audio/mpeg', body: MP3, headers: { 'accept-ranges': 'none' } });
   });
 

@@ -791,7 +791,11 @@ Gedekt, automatisch:
 - Spelen op afstand (`tests/e2e/listen.spec.js`, drie gsm's): een gast zet *Geluid op dit toestel* aan en hoort het
   fragment van de host (in zijn eigen nagebootste Deezer te zien), gelijk met de host (binnen 0,45 s); hij volgt
   pauze, verder spelen, opnieuw afspelen, ander nummer, de onthulling en de volgende beurt, en haakt na een herlaad
-  met één tik weer aan op de juiste plaats; uitzetten stopt het en er komen geen adressen meer. Zijn browser spreekt
+  met één tik weer aan op de juiste plaats; uitzetten stopt het en er komen geen adressen meer. Uit en weer aan in
+  dezelfde beurt (na een pauze en meteen): hij speelt weer waar de host is en blijft binnen 0,45 s, ook na de
+  controle om de 5 s; dat meet de test met een testfragment van 20 s (`long` in `fake-deezer.js`, met
+  Range-verzoeken), want bij dat van 1,5 s telt het verschil modulo 1,5 s en verliest de host bij elke herhaling
+  zo'n 0,1 s tegenover de klok van de server. Zijn browser spreekt
   de API van Deezer nooit aan; een gast met geluid uit krijgt geen geluidsbericht en geen adres; geen enkele gast
   krijgt titel, artiest, jaar of ID's voor de onthulling. Een host zonder geluid (*Geen geluid op dit toestel*, ook
   na een herlaad, zonder dat het bij de gast opnieuw begint). Fouten bij één gast: een verlopen adres (de host
@@ -820,6 +824,9 @@ Niet gedekt, alleen in het echt te testen:
 - Spelen op afstand in het echt: getest is met Chromium op één machine, tegen een nagebootste Deezer en een mp3 van
   1,5 s. Of het echte geluid op echte gsm's (Safari op iPhone, Chrome op Android, ook met vergrendeld scherm of de
   site op de achtergrond) speelt, hoe gelijk het loopt over echte netwerken met wisselende vertraging (gerekend is
-  met een halve ping; enkele tienden van een seconde verschil zijn verwacht), en of het echte adres van Deezer echt
+  met een halve ping; enkele tienden van een seconde verschil zijn verwacht), hoeveel een echte gsm bij elke
+  herhaling van het fragment verliest (Chromium hier: zo'n 0,1 s; de gsm's die meeluisteren volgen de klok van de
+  server, de host niet, dus wie na enkele herhalingen van hetzelfde fragment aanzet, kan enkele tienden naast de host
+  zitten), en of het echte adres van Deezer echt
   geen ID bevat en op een andere gsm (ander IP-adres) speelt, is niet nagekeken.
 - De voorwaarden van Deezer voor het gebruik van de API en de fragmenten in een spel zijn niet nagekeken.
