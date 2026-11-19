@@ -52,9 +52,12 @@ Details:
 - Het spelscherm toont één ding per moment. Bovenaan een balk met links *Stand* (je eigen kaarten en tokens; een tik
   toont alle spelers, wie aan de beurt is en wie niet verbonden is, het beurtnummer en hoeveel nummers er nog in de
   stapel zitten), bij fragmenten voor de andere spelers een luidsprekerknop (*Geluid op dit toestel*, aan of uit) en
-  rechts het menu (spelcode, spelregels, het spel verlaten, bij fragmenten voor de andere spelers nog eens
+  rechts het menu (spelcode, spelregels, voor de andere spelers *Verlaat het spel* en bij fragmenten nog eens
   *Geluid op dit toestel*, en voor de host de muziek, *Ander
-  nummer*, *Sla beurt over*, een speler verwijderen en *Stop dit spel*). Daaronder één regel uitleg en één tijdlijn:
+  nummer*, *Sla beurt over*, een speler verwijderen en *Stop dit spel*; na afloop *Terug naar de wachtkamer*). De
+  host heeft tijdens het spel geen *Verlaat het spel*: zonder hem zat de rest midden in een beurt zonder muziek en
+  zonder host. Hij stopt het spel en kan in de wachtkamer nog altijd vertrekken; zitten er dan nog anderen, dan zegt
+  de vraag dat zij zonder host achterblijven en zelf een nieuw spel moeten maken. Daaronder één regel uitleg en één tijdlijn:
   die waarop nu gespeeld wordt. Tijdens andermans beurt wissel je tussen zijn tijdlijn en de jouwe; via de stand kan
   je elke tijdlijn bekijken. Een probleem met de muziek ziet de host als één regel met een knop op het spelscherm
   zelf, niet alleen in het menu.

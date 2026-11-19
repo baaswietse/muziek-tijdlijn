@@ -451,6 +451,11 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
       {finished && !reveal && (
         <OutcomeSheet outcomeKey={`${view.game}:end`} summary="Spel afgelopen">
           <Winners view={view} byId={byId} />
+          {isHost && (
+            <button type="button" class="btn link" onClick={() => send({ t: 'lobby' })} data-testid="to-lobby">
+              Terug naar de wachtkamer
+            </button>
+          )}
         </OutcomeSheet>
       )}
 
@@ -509,9 +514,14 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
           <p class="menu-label">Voor iedereen</p>
           {!isHost && listen && <ListenToggle listen={listen} />}
           <Rules target={target} />
-          <button type="button" class="menu-row danger" onClick={() => confirm('Dit spel verlaten?') && onLeave()}>
-            Verlaat het spel
-          </button>
+          {/* De host verlaat een lopend spel niet: dan zat de rest zonder muziek en
+              zonder host. Hij stopt het (of gaat na afloop terug naar de wachtkamer)
+              en kan daar nog altijd vertrekken. */}
+          {!isHost && (
+            <button type="button" class="menu-row danger" onClick={() => confirm('Dit spel verlaten?') && onLeave()}>
+              Verlaat het spel
+            </button>
+          )}
         </div>
       </Sheet>
 
@@ -1421,7 +1431,19 @@ function HostMenu({ view, send, music, deck, open, settings, setSettings, close 
           </div>
         </details>
       )}
-      {view.phase !== 'finished' && (
+      {view.phase === 'finished' ? (
+        <button
+          type="button"
+          class="menu-row"
+          onClick={() => {
+            send({ t: 'lobby' });
+            close();
+          }}
+          data-testid="menu-to-lobby"
+        >
+          Terug naar de wachtkamer
+        </button>
+      ) : (
         <button
           type="button"
           class="menu-row danger"
@@ -1430,6 +1452,7 @@ function HostMenu({ view, send, music, deck, open, settings, setSettings, close 
             send({ t: 'lobby' });
             close();
           }}
+          data-testid="stop-game"
         >
           Stop dit spel
         </button>
