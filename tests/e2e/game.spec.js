@@ -13,6 +13,7 @@ import {
   activeYears,
   hostAction,
   openMenu,
+  closePanel,
   placeCard,
 } from './helpers.js';
 
@@ -113,6 +114,19 @@ test('volledig spel met drie gsm\'s: binnenkomen, beurten, onthulling, winnaar, 
   for (const e of log) expect(e.deviceId).toBe('mock-box');
   // De gsm's van de andere spelers sturen nooit iets naar Spotify.
   for (const p of [bob, cas]) expect(await p.evaluate(() => window.__mockSpotify.log.length)).toBe(0);
+
+  // Afgelopen: de host heeft in het menu een weg terug naar de wachtkamer, maar
+  // geen «Verlaat het spel» en geen «Stop dit spel»; een gast kan nog verlaten.
+  await openMenu(host);
+  const hostMenu = host.getByTestId('menu');
+  await expect(hostMenu.getByTestId('menu-to-lobby')).toBeVisible();
+  await expect(hostMenu.getByRole('button', { name: 'Verlaat het spel' })).toHaveCount(0);
+  await expect(hostMenu.getByRole('button', { name: 'Stop dit spel' })).toHaveCount(0);
+  await closePanel(host);
+  await openMenu(bob);
+  await expect(bob.getByTestId('menu').getByRole('button', { name: 'Verlaat het spel' })).toBeVisible();
+  await expect(bob.getByTestId('menu-to-lobby')).toHaveCount(0);
+  await closePanel(bob);
 
   // Nog een spel in dezelfde kamer.
   await expect(bob.getByTestId('play-again')).toHaveCount(0);
@@ -264,4 +278,82 @@ test('host-bediening: muziekfout, ander nummer, beurt overslaan, laat instappen,
   await expect(cas.getByTestId('enter-button')).toBeVisible();
   await expect(cas.getByTestId('toast')).toContainText('uit het spel gehaald');
   for (const p of [host, bob, cas]) await p.context().close();
+});
+
+test('host stopt het spel in plaats van het te verlaten; verlaten kan in de wachtkamer', async ({ browser }) => {
+  const host = await openPhone(browser);
+  const code = await hostGame(host, 'Hanne');
+  await setupMusic(host);
+  const bob = await openPhone(browser);
+  await joinGame(bob, code, 'Bob');
+  await expect(host.getByTestId('lobby-player')).toHaveCount(2);
+  await host.getByTestId('start-game').click();
+  for (const p of [host, bob]) await expect(p.getByTestId('turn-banner')).toBeVisible();
+
+  // Tijdens het spel: de host alleen «Stop dit spel», een gast alleen «Verlaat het spel».
+  await openMenu(host);
+  const hostMenu = host.getByTestId('menu');
+  await expect(hostMenu.getByRole('button', { name: 'Stop dit spel' })).toBeVisible();
+  await expect(hostMenu.getByRole('button', { name: 'Verlaat het spel' })).toHaveCount(0);
+  await openMenu(bob);
+  const bobMenu = bob.getByTestId('menu');
+  await expect(bobMenu.getByRole('button', { name: 'Verlaat het spel' })).toBeVisible();
+  await expect(bobMenu.getByRole('button', { name: 'Stop dit spel' })).toHaveCount(0);
+  await closePanel(bob);
+
+  // Stoppen brengt iedereen terug naar de wachtkamer; de host blijft host.
+  await hostMenu.getByRole('button', { name: 'Stop dit spel' }).click();
+  for (const p of [host, bob]) await expect(p.getByTestId('big-code')).toHaveText(code);
+  await expect(host.getByTestId('start-game')).toBeVisible();
+
+  // In de wachtkamer kan de host nog vertrekken, maar de vraag zegt wat dat
+  // betekent voor wie achterblijft. Eerst «Annuleer»: er verandert niets.
+  const asked = [];
+  host.removeAllListeners('dialog');
+  host.on('dialog', (d) => {
+    asked.push(d.message());
+    d.dismiss();
+  });
+  await host.getByRole('button', { name: 'Verlaat het spel' }).click();
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toContain('Je bent de host');
+  expect(asked[0]).toContain('zonder host');
+  expect(asked[0]).toContain('nieuw spel');
+  await expect(host.getByTestId('big-code')).toHaveText(code);
+
+  // Een gast krijgt de gewone vraag.
+  const bobAsked = [];
+  bob.removeAllListeners('dialog');
+  bob.on('dialog', (d) => {
+    bobAsked.push(d.message());
+    d.dismiss();
+  });
+  await bob.getByRole('button', { name: 'Verlaat het spel' }).click();
+  await expect.poll(() => bobAsked.length).toBe(1);
+  expect(bobAsked[0]).toBe('Dit spel verlaten?');
+  await expect(bob.getByTestId('big-code')).toHaveText(code);
+
+  // Nu echt: de host staat terug op het startscherm.
+  host.removeAllListeners('dialog');
+  host.on('dialog', (d) => d.accept());
+  await host.getByRole('button', { name: 'Verlaat het spel' }).click();
+  await expect(host.getByRole('tab', { name: 'Nieuw spel' })).toBeVisible();
+  await expect(bob.getByTestId('big-code')).toHaveText(code);
+  for (const p of [host, bob]) await p.context().close();
+});
+
+test('host alleen in de wachtkamer: bij verlaten de gewone vraag', async ({ browser }) => {
+  const host = await openPhone(browser);
+  await hostGame(host, 'Hanne');
+  const asked = [];
+  host.removeAllListeners('dialog');
+  host.on('dialog', (d) => {
+    asked.push(d.message());
+    d.accept();
+  });
+  await host.getByRole('button', { name: 'Verlaat het spel' }).click();
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toBe('Dit spel verlaten?');
+  await expect(host.getByRole('tab', { name: 'Nieuw spel' })).toBeVisible();
+  await host.context().close();
 });

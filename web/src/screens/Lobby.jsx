@@ -129,9 +129,20 @@ export function Lobby({ view, send, music, listen = null, deck, onLeave, notify 
       )}
 
       <Rules target={target} />
-      <button class="btn link danger" onClick={() => confirm('Dit spel verlaten?') && onLeave()}>
+      <button class="btn link danger" onClick={() => confirm(leaveQuestion(view, isHost)) && onLeave()}>
         Verlaat het spel
       </button>
     </main>
   );
+}
+
+/**
+ * De vraag bij «Verlaat het spel». Een host die vertrekt terwijl er nog anderen
+ * zijn, laat hen zonder host achter: niemand kan dan nog starten.
+ */
+function leaveQuestion(view, isHost) {
+  const others = view.players.filter((p) => p.id !== view.you).length;
+  if (!isHost || others === 0) return 'Dit spel verlaten?';
+  const wie = others === 1 ? 'De andere speler blijft' : `De ${others} andere spelers blijven`;
+  return `Dit spel verlaten? Je bent de host: ${wie} dan zonder host achter en ${others === 1 ? 'moet' : 'moeten'} zelf een nieuw spel maken.`;
 }

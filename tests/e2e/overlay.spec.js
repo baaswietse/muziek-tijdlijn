@@ -194,7 +194,7 @@ test('een melding tijdens de onthulling of met het menu open bedekt geen knoppen
       await host.getByRole('button', { name: 'Haal Bob uit het spel' }).click();
       await expect(host.getByTestId('toast')).toBeVisible();
       const menu = host.getByTestId('menu');
-      for (const name of ['Verlaat het spel', 'Opnieuw afspelen', 'Haal Bob uit het spel']) {
+      for (const name of ['Stop dit spel', 'Opnieuw afspelen', 'Haal Bob uit het spel']) {
         const loc = menu.getByRole('button', { name });
         // In het midden van het paneel (niet tegen de rand, zoals scrollIntoViewIfNeeded).
         await loc.evaluate((el) => el.scrollIntoView({ block: 'center' }));
