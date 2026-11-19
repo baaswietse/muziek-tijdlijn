@@ -796,6 +796,50 @@ details ul {
   white-space: nowrap;
 }
 
+/* Wat niet past, valt weg in plaats van over de rest van de balk te lopen
+   (smal scherm, grote letters, de luidsprekerknop erbij). */
+.stand-btn {
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.stand-tokens {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Te smal voor het woord «Stand»: dan alleen het pijltje (het woord blijft voor schermlezers). */
+@container (max-width: 15em) {
+  .stand-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Nog smaller: alleen je kaarten (de tokens staan ook in de stand), en op
+   het smalst zonder het woord «kaarten» (ook dat blijft voor schermlezers). */
+@container (max-width: 10.5em) {
+  .stand-tokens {
+    display: none;
+  }
+}
+
+@container (max-width: 7.5em) {
+  .stand-unit {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
 /* In de bovenbalk van het spel is plaats schaars: de testmodus kort. */
 .game-top .chip.warn {
   padding: 2px 6px;
@@ -1928,7 +1972,92 @@ html:not(.has-bar) .outcome {
   margin: 0;
 }
 
-.lobby-listen {
-  margin-top: 12px;
-  text-align: left;
+/* Wachtkamer: een eigen blok bovenaan, met een rand die opvalt. */
+.listen-card {
+  border: 2px solid var(--accent);
+}
+
+.listen-card.on {
+  background: var(--accent-soft);
+}
+
+.listen-card p {
+  margin: 0;
+}
+
+.listen-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.listen-card-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.listen-card.on .listen-card-icon {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.listen-card-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.speaker-icon {
+  flex: none;
+}
+
+/* Bovenbalk van het spel: aan is gevuld (en heeft golfjes), uit is een lege knop met een kruisje. */
+.listen-btn {
+  color: var(--muted);
+}
+
+.listen-btn.on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* De tip (één keer per spel): één regel met een knop, zoals een melding van de muziek. */
+.listen-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 10px;
+  border-left: 4px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.listen-hint {
+  flex-wrap: wrap;
+}
+
+/* Is de regel te smal (smal scherm, grote letters), dan komen de knoppen eronder. */
+.listen-hint-text {
+  flex: 1 1 11em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.listen-hint .btn.small-btn {
+  min-height: 44px;
 }
