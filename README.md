@@ -625,17 +625,18 @@ fragmenten speelt, haalt het op. Eén nummer per regel:
   heeft minstens 10 nummers nodig om mee te spelen.
 - `npm test` kijkt het bestand na (geldige nummers, geen dubbels, de afgesproken lijsten, "2000 tot nu" klopt).
 
-Nu (november 2026) staan er 616 nummers in, uit de 644 nagekeken nummers van de eigenaar:
+Nu (november 2026) staan er 758 nummers in: 616 uit de 644 nagekeken nummers van de eigenaar, en 142 die voor de
+lijsten Nederlandstalig en Rustige pop en ballads met de hand zijn toegevoegd:
 
 | Lijst | Nummers | Wat |
 | --- | --- | --- |
-| Alle hits | 616 | alles met een Deezer-ID (dubbels eruit) |
-| 2000 tot nu | 281 | jaar 2000 of later |
-| Pop | 258 | genre Pop |
+| Alle hits | 758 | alles met een Deezer-ID (dubbels eruit) |
+| 2000 tot nu | 384 | jaar 2000 of later |
+| Pop | 341 | genre Pop, plus de toegevoegde nummers van Rustige pop en ballads |
 | Rock | 272 | genres Rock, Alternative en Indie Rock, plus de 54 bekendste nummers met Metal of Hard Rock (hoogstens een vijfde) |
 | Dance | 51 | genres Dance, Electro, Techno/House, Dancefloor of Disco |
-| Nederlandstalig | 0 | nog te vullen |
-| Rustige pop en ballads | 0 | nog te vullen |
+| Nederlandstalig | 102 | met de hand samengesteld; jaartal vergeleken met MusicBrainz en Wikidata |
+| Rustige pop en ballads | 104 | met de hand samengesteld (Adele, Lewis Capaldi en dergelijke); zelfde controle |
 
 De genres zijn die van het album bij Deezer. Voor Rock telt een nummer met ook Metal of Hard Rock als metal; daarvan
 gaan er zoveel mee als een vijfde van de lijst toelaat, de bekendste eerst (`rank` van Deezer, bij gelijke rank het
