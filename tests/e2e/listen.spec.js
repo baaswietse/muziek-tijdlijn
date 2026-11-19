@@ -549,3 +549,40 @@ test('geluid op dit toestel: op een smal scherm (320 px) met grotere letters bli
   for (const id of ['stand-open', 'listen-quick', 'menu-open', 'confirm-place']) await tappable(bob.getByTestId(id));
   await noSideScroll(bob);
 });
+
+test('geluid op dit toestel: uit en meteen weer aan in dezelfde beurt loopt weer gelijk met de host', async ({ browser }) => {
+  const { host, code } = await hostWithFragments(browser);
+  const { page: bob } = await guest(browser, code, 'Bob', { listener: true });
+  // Aan in de wachtkamer; het spel start en het fragment speelt gelijk.
+  await bob.getByTestId('listen-on').click();
+  await expect(bob.getByTestId('listen-card')).toHaveAttribute('data-on', 'yes');
+  await host.getByTestId('start-game').click();
+  const first = await playing(host);
+  await playing(bob, { id: first.id });
+  await inStep(host, bob);
+
+  // Uit en meteen weer aan, met de knop bovenaan en via het menu: telkens weer gelijk.
+  for (const how of ['knop', 'menu', 'knop']) {
+    if (how === 'knop') {
+      const quick = await quickIs(bob, true);
+      await quick.click();
+      await quick.click();
+      await quickIs(bob, true);
+    } else {
+      await openMenu(bob);
+      const toggle = bob.getByTestId('listen-toggle');
+      await toggle.click();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-checked', 'true');
+      await closePanel(bob);
+    }
+    await playing(bob, { id: first.id });
+    // Bijspringen kan alleen als de browser in het fragment kan zoeken (de nagebootste Deezer geeft bereiken).
+    await expect.poll(async () => (await audioState(bob)).seekable, 'het fragment is doorzoekbaar').toBeGreaterThan(1);
+    await inStep(host, bob);
+    // En het blijft gelijk (niet toevallig één keer).
+    await bob.waitForTimeout(700);
+    await inStep(host, bob);
+    await expect(bob.getByTestId('listen-alert')).toHaveCount(0);
+  }
+});

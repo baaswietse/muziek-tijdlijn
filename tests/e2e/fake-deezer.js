@@ -93,7 +93,25 @@ export async function fakeDeezer(context, { missing = [], noPreview = [], expire
     const status = !media ? 404 : deezer.expired.has(id) && version === 1 ? 403 : 200;
     deezer.media.push({ id, version, status });
     if (status !== 200) return route.fulfill({ status, body: '' });
-    return route.fulfill({ status: 200, contentType: 'audio/mpeg', body: MP3, headers: { 'accept-ranges': 'none' } });
+    // Zoals het echte CDN: met bereiken (Range). Zonder kan de browser niet in
+    // het fragment springen (`seekable` blijft leeg en elke sprong landt op 0),
+    // en loopt een gast die midden in een fragment inhaakt nooit gelijk.
+    const range = /^bytes=(\d*)-(\d*)$/.exec(route.request().headers().range || '');
+    if (!range || (!range[1] && !range[2])) {
+      return route.fulfill({ status: 200, contentType: 'audio/mpeg', body: MP3, headers: { 'accept-ranges': 'bytes' } });
+    }
+    const size = MP3.length;
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start >= size || start > end) {
+      return route.fulfill({ status: 416, body: '', headers: { 'content-range': `bytes */${size}` } });
+    }
+    return route.fulfill({
+      status: 206,
+      contentType: 'audio/mpeg',
+      body: MP3.subarray(start, end + 1),
+      headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${size}` },
+    });
   });
 
   return deezer;
@@ -104,7 +122,7 @@ export async function audioState(page) {
   const s = await page.evaluate(() => {
     const a = document.querySelector('[data-testid="fragment-audio"]');
     if (!a) return null;
-    return { src: a.currentSrc || a.src || '', paused: a.paused, loop: a.loop, time: a.currentTime, duration: a.duration, seeks: a.__seeks || 0 };
+    return { src: a.currentSrc || a.src || '', paused: a.paused, loop: a.loop, time: a.currentTime, duration: a.duration, seeks: a.__seeks || 0, seekable: a.seekable.length ? a.seekable.end(a.seekable.length - 1) : 0 };
   });
   if (!s) return null;
   const media = mediaOf(s.src);
