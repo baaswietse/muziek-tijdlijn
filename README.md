@@ -33,6 +33,8 @@ Details:
 
 - Hetzelfde jaar als een buurkaart mag ervoor of erna liggen.
 - Is de stapel op voor iemand het doel haalt, dan wint wie de meeste kaarten heeft (gelijkspel kan).
+- Na afloop toont het eindscherm een overzicht: winnaar, eindstand, per speler een paar cijfers, prijzen, hoe lang
+  het duurde en hoeveel beurten, en *Deel het resultaat* als afbeelding (zie *Het eindscherm*).
 - Later instappen kan: je krijgt een startkaart en sluit achteraan aan.
 - De host kan een ander nummer vragen (als er een niet afspeelt), een beurt overslaan en een speler verwijderen.
 - De host kan zijn rol doorgeven aan een andere speler die verbonden is: in de wachtkamer met *Maak host* bij die
@@ -145,7 +147,8 @@ gsm host  ──┘        │
   `skipTrack`, `skipTurn`, `remove`, `lobby` (met `why: 'music'` als de muziek niet verder kon; de wachtkamer zegt
   dat dan aan iedereen), `setHost` (met `playerId`: de host geeft zijn rol door) en `takeHost` (de host is lang
   genoeg weg: word host). De server antwoordt met `{ t: 'state' }` of `{ t: 'error', code, message }`. In de stand
-  staat ook `hostAway: { ms, grace } | null` en `note`. Zie `server/src/room.js`.
+  staat ook `hostAway: { ms, grace } | null`, `note`, en voor het eindscherm `players[].stats` en `summary` (zie
+  *Het eindscherm*). Zie `server/src/room.js`.
 - **Geluid op afstand (alleen met fragmenten).** De host stuurt `sound` (`{ action: 'play' | 'url' | 'pause' |
   'resume', trackId, url? }`); een andere speler stuurt `listen` (`{ on: true | false }`, per verbinding) en
   `soundFail` (`{ n }`: het adres speelt hier niet). Wie `listen` aan heeft, krijgt naast de stand een apart bericht
@@ -308,6 +311,44 @@ gsm host  ──┘        │
     aan.
   - Een verzoek naar Deezer per beurt, zoals voordien (ook zonder geluid bij de host), plus hoogstens 3 voor een vers
     adres als een speler erom vraagt.
+- **Het eindscherm** (`web/src/components/Summary.jsx`, `web/src/lib/summary.js`, `web/src/lib/shareimage.js`):
+  - **Wat erop staat.** Na de beslissende kaart schuift zoals altijd de onthulling op met de winnaar, de laatste
+    kaart en het raad-token (dat kan dan nog gegeven worden). Daarin staat *Bekijk het overzicht*: dat klapt het
+    paneel in en toont het overzicht bovenaan de pagina: de winnaar in een groen blok (*Jij wint!* bij de winnaar),
+    één regel met hoe lang het spel duurde, hoeveel beurten en naar hoeveel kaarten, de prijzen, de eindstand en
+    *Deel het resultaat*. Daaronder blijft de tijdlijn staan; een tik op een naam in de eindstand of in *Stand*
+    toont die tijdlijn en schuift ze in beeld. *Nog een spel* (host) blijft in de zwevende balk, *Terug naar de
+    wachtkamer* onderaan de onthulling en in het menu, *Verlaat het spel* (gast) in het menu: wie meteen opnieuw
+    wil, hoeft niets van het overzicht aan te raken.
+  - **Eindstand.** De winnaar(s) eerst, dan meeste kaarten, dan meeste tokens, dan de beurtvolgorde; gelijke
+    kaarten en tokens delen een plaats, winnaars van een gelijkspel staan allebei op 1. Per speler kaarten en
+    tokens, en één regel cijfers met alleen wat iets zegt: «7 van 9 juist gelegd», «reeks van 4» (vanaf 2),
+    «3× geraden», «1 kaart met een token», «2 tokens verloren», «1 kaart gekocht». Een teller op 0 staat er niet.
+  - **Prijzen**, elk op één regel en alleen vanaf een minimum: *Langste reeks* (vanaf 3 juist na elkaar), *Beste
+    rader* (vanaf 2 keer artiest en titel), *Scherpste inzetter* (vanaf 2 kaarten gewonnen met een token) en
+    *Grootste gokker* (vanaf 3 ingezette tokens). Bij een gelijke stand delen twee spelers de prijs; staan er meer
+    gelijk, dan valt ze weg. Nooit een willekeurige winnaar. Met één speler zijn er geen prijzen.
+  - **Wat de server bijhoudt** (`server/src/rules.js`, beide servervarianten, want die delen de spelregels): per
+    speler `stats` met `placed` (zelf gelegd), `correct`, `bestStreak` (en de lopende reeks, alleen op de server),
+    `guessed` (raad-tokens; verplaatsen of terugnemen telt mee), `betsWon`, `betsLost` en `bought`; per spel het
+    aantal onthulde beurten (een gekochte kaart telt mee, een overgeslagen beurt of ander nummer niet) en begin
+    en einde volgens de klok van de server. In de stand staan `players[].stats` en `summary: { turns, ms }`
+    (`ms` pas als het spel afgelopen is). De tellers veranderen alleen bij de onthulling van een beurt, een
+    gekochte kaart en het raad-token, dingen die iedereen op dat moment toch ziet: tijdens een beurt (leggen,
+    inzetten, passen) verandert er niets, dus ze verklappen niets over het lopende nummer of de stapel. Geen log
+    per beurt. Elk spel begint met lege tellers (ook *Nog een spel*), wie laat instapt ook; een verwijderde speler
+    verdwijnt gewoon uit het overzicht, een wissel van host verandert niets.
+  - **Een spel dat al liep bij de uitrol** heeft geen cijfers: dan zijn `stats` en `summary` `null` en toont het
+    overzicht de winnaar en de eindstand met kaarten en tokens, zonder cijfers, prijzen of duur, met een zin die
+    zegt waarom.
+  - **Delen.** De gsm tekent het overzicht zelf op een canvas (geen externe dienst of bibliotheek): 1080 px breed,
+    zo hoog als nodig (2 spelers ongeveer 1200 px, 10 spelers ongeveer 1950 px), altijd in de lichte kleuren van
+    het spel, met de naam «Muziek-tijdlijn», de winnaar, de eindstand, de prijzen en duur en beurten. Geen
+    spelcode of iets anders om binnen te komen. Een te lange naam wordt kleiner gezet en daarna ingekort met «…»
+    (per teken zoals je het ziet, dus nooit midden in een emoji); bij een gedeelde prijs elke naam apart. De PNG
+    wordt al gemaakt zodra het overzicht er staat, zodat het deelmenu meteen na de tik kan openen. Kan het
+    toestel bestanden delen (`navigator.canShare({ files })`), dan gaat ze naar het deelmenu; anders, of als
+    delen mislukt, komt ze als download (`muziek-tijdlijn-uitslag.png`). Zelf het deelmenu wegtikken doet niets.
 - **Wat de browsers zien.**
   - Een gast krijgt van de server tot de onthulling niets van het lopende nummer: geen ID (ook geen Deezer-ID),
     titel, artiest of jaar, bij Spotify en bij fragmenten. Zijn browser spreekt Deezer en Spotify niet aan en haalt
@@ -989,6 +1030,17 @@ Gedekt, automatisch:
   de beurt verder, of stopt hij en speelt hij met fragmenten verder (met de uitleg in de wachtkamer). Unit-tests
   voor de regels (doorgeven, overnemen pas na de wachttijd, niet kapen, rechten daarna, het geluid voor wie
   meeluistert) en voor wanneer een stille verbinding als weg telt.
+- Het eindscherm. Unit-tests (`tests/unit/summary.test.js`): de tellers (leggen, reeks, raden met geven,
+  verplaatsen en terugnemen, inzetten gewonnen en verloren, kopen), dat ze tijdens een beurt niet veranderen,
+  dat overslaan en een ander nummer niet tellen, lege tellers bij een nieuw spel en in de wachtkamer, begin en
+  einde via de server, een speler die halverwege verwijderd wordt of laat instapt, een oud spel zonder cijfers;
+  de prijzen (minimum, gedeeld door twee, weg bij drie, een spel zonder tokens), de volgorde van de eindstand,
+  de cijfers per speler en de duur. E2e (`tests/e2e/summary.spec.js`): een volledig kort spel met drie gsm's met
+  een gewonnen en een verloren inzet en raad-tokens, waarna het overzicht bij iedereen hetzelfde is en klopt met
+  wat de test bijhield; tijdlijnen bekijken vanuit het overzicht en de stand; *Deel het resultaat* zonder
+  deelmenu (een download: PNG, 1080 px breed, niet leeg) en met een nagebootst deelmenu (het bestand gaat naar
+  `navigator.share`, geen download, geen spelcode), en weggetikt; *Nog een spel* met lege tellers; en op 320 px
+  met grotere letters en namen met emoji en 16 brede letters: niets buiten beeld of onder een balk.
 - Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.
 
 Niet gedekt, alleen in het echt te testen:
@@ -1012,6 +1064,9 @@ Niet gedekt, alleen in het echt te testen:
   server, de host niet, dus wie na enkele herhalingen van hetzelfde fragment aanzet, kan enkele tienden naast de host
   zitten), en of het echte adres van Deezer echt
   geen ID bevat en op een andere gsm (ander IP-adres) speelt, is niet nagekeken.
+- Delen van het resultaat op een echte gsm: het echte deelmenu van Android en iPhone (getest is met een
+  nagebootst `navigator.share` in Chromium), en hoe de afbeelding eruitziet met de letters van dat toestel (het
+  canvas gebruikt de systeemletters; zonder emoji-lettertype wordt een emoji een vakje).
 - De voorwaarden van Deezer voor het gebruik van de API en de fragmenten in een spel zijn niet nagekeken.
 - De host-rol in het echt: hoe snel een echte gsm met een lege batterij of zonder netwerk als weg telt (verwacht:
   hoogstens 45 s zonder ping, plus de wachttijd van 30 s), hoe een vergrendelde gsm zich gedraagt (een pagina op

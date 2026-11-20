@@ -7,6 +7,7 @@ import { Rules } from '../components/Rules.jsx';
 import { ListenAlert, ListenButton, ListenHint, ListenToggle } from '../components/Listen.jsx';
 import { MockChip, NetBanner, NetDot } from '../components/Status.jsx';
 import { HandOver, HostAway } from '../components/Host.jsx';
+import { Summary } from '../components/Summary.jsx';
 
 // Het spelscherm: één ding per moment. Bovenaan een balk met de stand en het
 // menu, daaronder één regel uitleg, dan één tijdlijn, en onderaan de zwevende
@@ -38,6 +39,32 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
   const [settings, setSettings] = useState(false);
   // Wiens tijdlijn je bekijkt (null = die waarop nu gespeeld wordt).
   const [viewId, setViewId] = useState(null);
+
+  // Het paneel met de uitkomst: «Bekijk het overzicht» klapt het in.
+  const outcome = useRef(null);
+  // Na afloop: een tijdlijn kiezen (vanuit het overzicht of de stand) toont ze
+  // onder het overzicht en schuift ze in beeld.
+  const scrollToTimeline = useRef(false);
+  function showTimeline(id) {
+    setViewId(id === mainId ? null : id);
+    if (finished) {
+      scrollToTimeline.current = true;
+      outcome.current?.collapse();
+    }
+  }
+  useEffect(() => {
+    if (!scrollToTimeline.current) return;
+    scrollToTimeline.current = false;
+    document.querySelector('[data-testid="timeline-section"]')?.scrollIntoView({ block: 'start' });
+  });
+  // Het spel is net afgelopen: het overzicht staat bovenaan de pagina.
+  useEffect(() => {
+    if (finished) window.scrollTo(0, 0);
+  }, [finished, view.game]);
+  function openSummary() {
+    outcome.current?.collapse();
+    window.scrollTo(0, 0);
+  }
 
   // Wat er tijdens het spel bij de eigen playlist bijkwam, eerst naar de server.
   async function playAgain() {
@@ -388,7 +415,7 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
         tokens={myTokens}
         waitText={blocked && !waitInBar ? waitText : null}
         canContinue={canContinue}
-        holdKey={turnNo.current}
+        holdKey={finished ? `${view.game}:end` : turnNo.current}
       >
         {myTurn && !placing && <BuyCard key={turnKey} tokens={myTokens} cards={mine.timeline.length} target={target} send={send} />}
         {challenge && isHost && blocked && (
@@ -410,6 +437,8 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
         <ListenHint key={`${view.code}:${view.game}`} listen={listen} code={view.code} game={view.game} turn={playing || challenge ? turnNo.current : null} />
       )}
 
+      {finished && <Summary view={view} onShow={showTimeline} />}
+
       {views.length > 1 && (
         <div class="view-switch" role="group" aria-label="Welke tijdlijn">
           {views.map((v) => (
@@ -427,6 +456,12 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
         </div>
       )}
 
+      {/* Na afloop staat de tijdlijn onder het overzicht: zeg dan wiens het is. */}
+      {finished && shown && views.length < 2 && (
+        <h3 class="summary-head timeline-head" data-testid="timeline-head">
+          {shown.id === me ? 'Jouw tijdlijn' : `Tijdlijn van ${shown.name}`}
+        </h3>
+      )}
       {shown && (
         <section class="tl-zone" data-testid="timeline-section" data-player={shown.id} aria-label={views.find((v) => v.id === shownId)?.label ?? 'Tijdlijn'}>
           <Timeline {...timelineProps} />
@@ -434,8 +469,12 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
       )}
 
       {reveal && (
-        <OutcomeSheet outcomeKey={`${view.game}:${reveal.card.id}:${view.phase}`} summary={`${reveal.card.year} · ${reveal.card.title}`}>
-          {finished && <Winners view={view} byId={byId} />}
+        <OutcomeSheet
+          outcomeKey={`${view.game}:${reveal.card.id}:${view.phase}`}
+          summary={finished ? 'Spel afgelopen · laatste kaart' : `${reveal.card.year} · ${reveal.card.title}`}
+          api={outcome}
+        >
+          {finished && <Winners view={view} byId={byId} onSummary={openSummary} />}
           <Reveal
             reveal={reveal}
             name={reveal.playerId === me ? 'Jij' : byId.get(reveal.playerId)?.name ?? 'Iemand'}
@@ -463,8 +502,8 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
         </OutcomeSheet>
       )}
       {finished && !reveal && (
-        <OutcomeSheet outcomeKey={`${view.game}:end`} summary="Spel afgelopen">
-          <Winners view={view} byId={byId} />
+        <OutcomeSheet outcomeKey={`${view.game}:end`} summary="Spel afgelopen" api={outcome}>
+          <Winners view={view} byId={byId} onSummary={openSummary} />
           {isHost && (
             <button type="button" class="btn link" onClick={() => send({ t: 'lobby' })} data-testid="to-lobby">
               Terug naar de wachtkamer
@@ -485,7 +524,7 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
                 view={view}
                 isActive={p.id === activeId && (playing || challenge)}
                 onShow={() => {
-                  setViewId(p.id === mainId ? null : p.id);
+                  showTimeline(p.id);
                   setPanel(null);
                 }}
               />
@@ -736,9 +775,10 @@ const SWIPE = 56;
  * tot een smalle strook; tikken of omhoog vegen opent het weer. Bij een nieuwe
  * uitkomst staat het vanzelf open.
  */
-function OutcomeSheet({ outcomeKey, summary, children }) {
+function OutcomeSheet({ outcomeKey, summary, api = null, children }) {
   const [open, setOpen] = useState(true);
   useEffect(() => setOpen(true), [outcomeKey]);
+  if (api) api.current = { collapse: () => setOpen(false) };
   const box = useRef(null);
   useHeightVar(box, '--sheet-h', 'has-sheet');
   // Een veeg over de kop: het paneel volgt de vinger (alleen transform), bij
@@ -1338,7 +1378,7 @@ function Tokens({ n }) {
   );
 }
 
-function Winners({ view, byId }) {
+function Winners({ view, byId, onSummary }) {
   const names = view.winnerIds.map((id) => (id === view.you ? 'Jij' : byId.get(id)?.name)).filter(Boolean);
   const iWon = view.winnerIds.includes(view.you);
   let text;
@@ -1350,6 +1390,9 @@ function Winners({ view, byId }) {
       <p class="winner-label">Spel afgelopen</p>
       <p class="winner-name">{text}</p>
       <TokenSummary view={view} />
+      <button type="button" class="btn winner-more" onClick={onSummary} data-testid="summary-open">
+        Bekijk het overzicht
+      </button>
     </section>
   );
 }

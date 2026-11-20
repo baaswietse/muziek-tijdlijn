@@ -2233,3 +2233,245 @@ html:not(.has-bar) .outcome {
 .listen-hint .btn.small-btn {
   min-height: 44px;
 }
+
+/* ---------- eindscherm: het overzicht van het spel ---------- */
+
+/* In het groene blok van de winnaar (paneel met de uitkomst). */
+.winner .winner-more {
+  margin-top: 10px;
+  border-color: transparent;
+  background: rgb(255 255 255 / 92%);
+  color: #0b5e4e;
+  font-weight: 600;
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.summary-winner {
+  position: relative;
+  padding: 16px 16px 18px;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-ink);
+  text-align: center;
+  overflow: hidden;
+}
+
+/* Maatstreepjes zoals op de tijdlijn: een sobere versiering. */
+.summary-winner::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  background: repeating-linear-gradient(90deg, rgb(255 255 255 / 22%) 0 2px, transparent 2px 18px);
+}
+
+.summary-star {
+  display: block;
+  margin: 0 auto 2px;
+  color: var(--amber);
+}
+
+.summary-winner-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.summary-winner-name {
+  font-family: var(--serif);
+  font-size: clamp(1.5rem, 7.5vw, 2.1rem);
+  font-weight: 700;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.summary-winner-sub {
+  margin-top: 2px;
+  font-size: 0.95rem;
+  opacity: 0.9;
+}
+
+.summary-meta {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.summary-prizes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--amber-soft);
+  color: var(--amber-ink);
+}
+
+.summary-prize {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.summary-star.small {
+  flex: none;
+  margin: 1px 0 0;
+  color: #c98a14;
+}
+
+/* Het detail breekt als geheel naar de volgende regel, niet midden in. */
+.summary-prize-detail {
+  display: inline-block;
+  opacity: 0.85;
+}
+
+.summary-head {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.timeline-head {
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.summary-row {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.summary-row.won .summary-rank,
+.summary-row.won .summary-cards {
+  color: var(--accent);
+}
+
+.summary-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.summary-row-head:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.summary-rank {
+  flex: none;
+  min-width: 1.6em;
+  font-family: var(--serif);
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.summary-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.05rem;
+}
+
+.summary-name .person-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.summary-row.won .summary-name .person-name {
+  font-weight: 700;
+}
+
+.summary-tokens {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-tokens .coin {
+  width: 16px;
+  height: 16px;
+  box-shadow: inset 0 0 0 2px rgb(0 0 0 / 14%);
+}
+
+.summary-cards {
+  flex: none;
+  min-width: 3.2em;
+  text-align: right;
+  font-family: var(--serif);
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-of {
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.summary-stats {
+  padding: 0 4px 0 calc(1.6em + 14px);
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.summary-share {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.summary-share .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  font-weight: 600;
+}
+
+/* Smal scherm of grote letters: de cijfers niet meer inspringen. */
+@media (max-width: 360px) {
+  .summary-stats {
+    padding-left: 4px;
+  }
+}

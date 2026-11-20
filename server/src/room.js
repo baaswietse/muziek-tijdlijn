@@ -130,6 +130,8 @@ export async function applyAction(
   }
   // Een nieuwe beurt, een ander nummer of het einde: het geluid van het vorige nummer vervalt.
   sound.tidySound(state);
+  // Begin en einde van het spel, voor het eindscherm.
+  rules.markTimes(state, now);
   if (online) rules.trackHost(state, online, now);
   state.updatedAt = now;
 }

@@ -119,8 +119,11 @@ test('volledig spel met fragmenten: lijst kiezen, afspelen, herhalen, ander numm
 
   // Ook de host ziet titel en artiest niet; het spelscherm toont ze nergens.
   const t = fragmentOf(trackId);
-  expect(await host.locator('body').innerText()).not.toContain(t.title);
-  expect(await host.locator('body').innerText()).not.toContain(t.artist);
+  // Per regel vergelijken: in de testlijst past de ene naam in de andere
+  // ("Fragmentgroep J" in "Fragmentgroep J3" van de startkaart).
+  const shown = (await host.locator('body').innerText()).split('\n').map((line) => line.trim());
+  expect(shown).not.toContain(t.title);
+  expect(shown).not.toContain(t.artist);
 
   // Pauze en verder spelen.
   await openMenu(host);
