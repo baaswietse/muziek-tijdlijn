@@ -11,9 +11,15 @@
 // De keuze: { lists: [id, …], from: jaar | null, to: jaar | null }. Het spel
 // speelt met elk nummer dat in minstens één van de lijsten zit (elk één keer)
 // en waarvan het jaar tussen `from` en `to` ligt (grenzen inbegrepen; null =
-// geen grens). Een lijst waarin álle nummers zitten (nu «Alle hits») is een
-// keuze op zich: samen met andere lijsten voegt ze niets toe, dus het een zet
-// het ander uit. Welke lijst dat is, volgt uit de nummers, niet uit haar id.
+// geen grens).
+//
+// De hoofdlijst («Alle hits») staat in het bronbestand met `"main": true` bij
+// de lijst; is er geen enkele zo aangeduid, dan is het een lijst waarin álle
+// nummers zitten. Ze bevat niet per se alles: kinderliedjes zitten er niet
+// in, zodat een gewoon spel geen «Bumba» speelt. Een lijst die helemaal in
+// de hoofdlijst zit (Rock, Disco …), voegt er niets aan toe: de ene aanvinken
+// zet de andere uit. Een lijst met nummers buiten de hoofdlijst («Kinderen en
+// tekenfilms») kan je er wel bij aanvinken.
 
 import { MAX_DECK, pickTracks, shuffled } from '../lib/deckplan.js';
 
@@ -27,7 +33,7 @@ export const YEAR_STEP = 5;
 export function cleanFragments(raw) {
   const lists = (Array.isArray(raw?.lists) ? raw.lists : [])
     .filter((l) => l && typeof l.id === 'string' && l.id && typeof l.name === 'string' && l.name.trim())
-    .map((l) => ({ id: l.id, name: l.name.trim().slice(0, 60) }));
+    .map((l) => ({ id: l.id, name: l.name.trim().slice(0, 60), ...(l.main === true ? { main: true } : {}) }));
   const known = new Set(lists.map((l) => l.id));
   const seen = new Set();
   const tracks = [];
@@ -48,19 +54,42 @@ export function cleanFragments(raw) {
 
 const inPeriod = (t, { from = null, to = null } = {}) => (from == null || t.year >= from) && (to == null || t.year <= to);
 
+/** Het id van de hoofdlijst (zie bovenaan), of null. Alleen een lijst met nummers telt. */
+export function mainListId(data) {
+  const used = (id) => data.tracks.some((t) => t.lists.includes(id));
+  const marked = data.lists.find((l) => l.main && used(l.id));
+  if (marked) return marked.id;
+  if (data.tracks.length === 0) return null;
+  const full = data.lists.find((l) => data.tracks.every((t) => t.lists.includes(l.id)));
+  return full ? full.id : null;
+}
+
 /**
  * De lijsten die de host kan kiezen; lege lijsten niet. `count`: hoeveel
- * nummers ze heeft binnen de periode (zonder periode: alle). `all`: alle
- * nummers zitten erin. Zo'n lijst staat vooraan.
+ * nummers ze heeft binnen de periode (zonder periode: alle). `main`: de
+ * hoofdlijst; die staat vooraan. `inMain`: alle nummers van de lijst zitten
+ * ook in de hoofdlijst (samen aanvinken voegt dan niets toe).
  */
 export function listsOf(data, period = {}) {
+  const mainId = mainListId(data);
+  const inMainList = (t) => mainId != null && t.lists.includes(mainId);
   const shown = [];
   for (const l of data.lists) {
     const mine = data.tracks.filter((t) => t.lists.includes(l.id));
     if (mine.length === 0) continue;
-    shown.push({ ...l, count: mine.filter((t) => inPeriod(t, period)).length, all: mine.length === data.tracks.length });
+    const { main: _marked, ...rest } = l;
+    const main = l.id === mainId;
+    shown.push({ ...rest, count: mine.filter((t) => inPeriod(t, period)).length, main, inMain: !main && mainId != null && mine.every(inMainList) });
   }
-  return [...shown.filter((l) => l.all), ...shown.filter((l) => !l.all)];
+  return [...shown.filter((l) => l.main), ...shown.filter((l) => !l.main)];
+}
+
+/** Laat lijsten weg die niets toevoegen omdat de hoofdlijst ook gekozen is. */
+function withoutRedundant(shown, ids) {
+  const main = shown.find((l) => l.main);
+  if (!main || !ids.includes(main.id)) return ids;
+  const redundant = new Set(shown.filter((l) => l.inMain).map((l) => l.id));
+  return ids.filter((id) => !redundant.has(id));
 }
 
 /** Het vroegste en het laatste jaar van alle nummers, of null zonder nummers. */
@@ -100,17 +129,17 @@ export function periodText({ from = null, to = null } = {}) {
  * Maakt van een (bewaarde, misschien verouderde) keuze een geldige: alleen
  * lijsten die er (nog) zijn en niet leeg zijn, in de volgorde van het scherm;
  * een lijst met alle nummers alleen; een periode binnen de jaren die er zijn,
- * met «van» niet na «tot». Zonder bewaarde keuze, of als geen enkele bewaarde
- * lijst nog bestaat: de lijst met alle nummers (als die er is). Een bewaarde
- * lege keuze (de host vinkte alles uit) blijft leeg.
+ * met «van» niet na «tot». Naast de hoofdlijst alleen lijsten die er iets aan
+ * toevoegen. Zonder bewaarde keuze, of als geen enkele bewaarde lijst nog
+ * bestaat: de hoofdlijst (als die er is). Een bewaarde lege keuze (de host
+ * vinkte alles uit) blijft leeg.
  */
 export function normaliseChoice(data, raw) {
   const shown = listsOf(data);
   const asked = Array.isArray(raw?.lists) ? raw.lists : null;
   let lists = asked ? shown.filter((l) => asked.includes(l.id)) : [];
-  if (!asked || (asked.length > 0 && lists.length === 0)) lists = shown.filter((l) => l.all).slice(0, 1);
-  const all = lists.find((l) => l.all);
-  if (all) lists = [all];
+  if (!asked || (asked.length > 0 && lists.length === 0)) lists = shown.filter((l) => l.main);
+  const ids = withoutRedundant(shown, lists.map((l) => l.id));
 
   // «Van» het vroegste jaar of vroeger, of «tot» het laatste of later, is geen beperking.
   const bounds = yearBounds(data);
@@ -121,12 +150,13 @@ export function normaliseChoice(data, raw) {
     from = null;
     to = null;
   }
-  return { lists: lists.map((l) => l.id), from, to };
+  return { lists: ids, from, to };
 }
 
 /**
- * Een lijst aan- of uitvinken. De lijst met alle nummers aanvinken zet de
- * andere uit; een andere lijst aanvinken zet die met alle nummers uit.
+ * Een lijst aan- of uitvinken. De hoofdlijst aanvinken zet de lijsten uit die
+ * erin zitten; zo'n lijst aanvinken zet de hoofdlijst uit. Een lijst met
+ * nummers buiten de hoofdlijst blijft er gewoon naast staan.
  */
 export function toggleList(data, choice, id) {
   const shown = listsOf(data);
@@ -134,11 +164,10 @@ export function toggleList(data, choice, id) {
   if (!list) return choice;
   let lists;
   if (choice.lists.includes(id)) lists = choice.lists.filter((x) => x !== id);
-  else if (list.all) lists = [id];
-  else {
-    const allIds = new Set(shown.filter((l) => l.all).map((l) => l.id));
-    lists = [...choice.lists.filter((x) => !allIds.has(x)), id];
-  }
+  else if (list.inMain) {
+    const mainIds = new Set(shown.filter((l) => l.main).map((l) => l.id));
+    lists = [...choice.lists.filter((x) => !mainIds.has(x)), id];
+  } else lists = withoutRedundant(shown, [...choice.lists, id]);
   return { ...choice, lists: shown.map((l) => l.id).filter((x) => lists.includes(x)) };
 }
 

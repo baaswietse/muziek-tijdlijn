@@ -10,6 +10,7 @@ import {
   deckForChoice,
   describeChoice,
   listsOf,
+  mainListId,
   normaliseChoice,
   periodOptions,
   periodText,
@@ -60,12 +61,12 @@ test('lijsten: alleen geldige nummers, elk ID één keer, als dz-ID', () => {
   assert.deepEqual(data.tracks[0], { id: 'dz-1', artist: 'A', title: 'Een', year: 1990, lists: ['alles', 'pop'] });
 });
 
-test('lijsten: met hun aantal, een lege lijst niet; de lijst met alles vooraan', () => {
+test('lijsten: met hun aantal, een lege lijst niet; de hoofdlijst vooraan', () => {
   assert.deepEqual(listsOf(cleanFragments(sample)), [
-    { id: 'alles', name: 'Alle hits', count: 2, all: true },
-    { id: 'pop', name: 'Pop', count: 1, all: false },
+    { id: 'alles', name: 'Alle hits', count: 2, main: true, inMain: false },
+    { id: 'pop', name: 'Pop', count: 1, main: false, inMain: true },
   ]);
-  // Welke lijst alles bevat, volgt uit de nummers, niet uit het id of de volgorde.
+  // Zonder `main` in het bestand: de lijst met alle nummers, los van het id of de volgorde.
   const other = cleanFragments({
     lists: [
       { id: 'a', name: 'A' },
@@ -77,12 +78,38 @@ test('lijsten: met hun aantal, een lege lijst niet; de lijst met alles vooraan',
     ],
   });
   assert.deepEqual(
-    listsOf(other).map((l) => [l.id, l.all]),
+    listsOf(other).map((l) => [l.id, l.main]),
     [
       ['b', true],
       ['a', false],
     ],
   );
+  assert.equal(mainListId(other), 'b');
+  // `main: true` in het bestand gaat voor, ook als er nummers buiten zitten.
+  const marked = cleanFragments({
+    lists: [
+      { id: 'a', name: 'A' },
+      { id: 'b', name: 'Alle hits', main: true },
+      { id: 'k', name: 'Kinderen' },
+    ],
+    tracks: [
+      { deezer: 1, artist: 'A', title: 'Een', year: 1990, lists: ['a', 'b'] },
+      { deezer: 2, artist: 'B', title: 'Twee', year: 2001, lists: ['b', 'k'] },
+      { deezer: 3, artist: 'C', title: 'Drie', year: 2002, lists: ['k'] },
+    ],
+  });
+  assert.deepEqual(marked.lists[1], { id: 'b', name: 'Alle hits', main: true });
+  assert.deepEqual(
+    listsOf(marked).map((l) => [l.id, l.main, l.inMain]),
+    [
+      ['b', true, false],
+      ['a', false, true],
+      ['k', false, false],
+    ],
+  );
+  // Een aangeduide maar lege lijst telt niet; zonder lijst met alles is er geen hoofdlijst.
+  const empty = cleanFragments({ ...marked, lists: [{ id: 'z', name: 'Z', main: true }, ...marked.lists.filter((l) => l.id !== 'b')] });
+  assert.equal(mainListId(empty), null);
 });
 
 /**
@@ -169,6 +196,51 @@ test('keuze: «Alle hits» aanvinken zet de rest uit, een andere lijst zet «All
   const mixed = normaliseChoice(BIG, { lists: ['oud', 'alles', 'nieuw'], from: null, to: null });
   assert.deepEqual(mixed.lists, ['alles']);
   assert.equal(tracksOf(BIG, { lists: ['oud', 'alles'], from: null, to: null }).length, 40);
+});
+
+/**
+ * Zoals in het echte bronbestand: «Alle hits» is met `main` aangeduid en bevat
+ * de kinderliedjes niet. «Kind» heeft 2 nummers die ook in «alles» zitten en 10
+ * die er niet in zitten; «oud» zit helemaal in «alles».
+ */
+const KIDS = cleanFragments({
+  lists: [
+    { id: 'alles', name: 'Alle hits', main: true },
+    { id: 'oud', name: 'Oud' },
+    { id: 'kind', name: 'Kinderen' },
+  ],
+  tracks: [
+    ...Array.from({ length: 20 }, (_, i) => ({ deezer: 1 + i, artist: `A${i}`, title: `T${i}`, year: 1970 + i, lists: i < 2 ? ['alles', 'oud', 'kind'] : i < 12 ? ['alles', 'oud'] : ['alles'] })),
+    ...Array.from({ length: 10 }, (_, i) => ({ deezer: 100 + i, artist: `K${i}`, title: `Kind ${i}`, year: 2000 + i, lists: ['kind'] })),
+  ],
+});
+
+test('keuze: een lijst met nummers buiten «Alle hits» kan je erbij aanvinken', () => {
+  assert.deepEqual(
+    listsOf(KIDS).map((l) => [l.id, l.count, l.main, l.inMain]),
+    [
+      ['alles', 20, true, false],
+      ['oud', 12, false, true],
+      ['kind', 12, false, false],
+    ],
+  );
+  let c = normaliseChoice(KIDS, null);
+  assert.deepEqual(c.lists, ['alles']);
+  // Kinderen erbij: «Alle hits» blijft aan, samen 30 nummers.
+  c = toggleList(KIDS, c, 'kind');
+  assert.deepEqual(c.lists, ['alles', 'kind']);
+  assert.equal(tracksOf(KIDS, c).length, 30);
+  assert.equal(describeChoice(KIDS, c), 'Alle hits + Kinderen');
+  // «Oud» zit in «Alle hits»: aanvinken zet «Alle hits» uit, «Kinderen» blijft.
+  c = toggleList(KIDS, c, 'oud');
+  assert.deepEqual(c.lists, ['oud', 'kind']);
+  // «Alle hits» weer aan: «Oud» gaat uit, «Kinderen» blijft.
+  c = toggleList(KIDS, c, 'alles');
+  assert.deepEqual(c.lists, ['alles', 'kind']);
+  // Alleen «Kinderen»: geen gewone hits behalve de twee die er ook in zitten.
+  assert.deepEqual(toggleList(KIDS, c, 'alles').lists, ['kind']);
+  // Een bewaarde keuze met «Alle hits» en «Oud»: «Oud» valt weg, «Kinderen» niet.
+  assert.deepEqual(normaliseChoice(KIDS, { lists: ['oud', 'alles', 'kind'] }).lists, ['alles', 'kind']);
 });
 
 test('keuze: een bewaarde keuze wordt nagekeken', () => {
@@ -270,19 +342,33 @@ test('keuze: de omschrijving gaat ongeschonden door de server', () => {
 
 test('bronbestand web/public/fragmenten.json: geldig, met de afgesproken lijsten', () => {
   const ids = SOURCE.lists.map((l) => l.id);
-  assert.deepEqual(ids, ['alles', '2000', 'pop', 'rock', 'dance', 'nl', 'rustig']);
+  assert.deepEqual(ids, [
+    'alles', '2000', 'pop', 'rock', 'dance', 'nl', 'rustig',
+    'feest', 'fout', 'eendag', 'zomer', 'disco', 'hiphop', 'belpop', 'bands', 'meezing', 'kind',
+  ]);
+  // «Alle hits» is uitdrukkelijk de hoofdlijst, en de enige.
+  assert.deepEqual(SOURCE.lists.filter((l) => l.main).map((l) => l.id), ['alles']);
+  for (const l of SOURCE.lists) assert.ok(l.main === undefined || l.main === true, `${l.id}: main is true of ontbreekt`);
   const data = cleanFragments(SOURCE);
-  // Elk nummer in het bestand is geldig (niets valt weg) en zit in «Alle hits».
+  assert.equal(mainListId(data), 'alles');
+  // Elk nummer in het bestand is geldig (niets valt weg). Alles zit in «Alle
+  // hits», behalve nummers die alleen in «Kinderen en tekenfilms» zitten.
   assert.equal(data.tracks.length, SOURCE.tracks.length);
-  for (const t of data.tracks) assert.ok(t.lists.includes('alles'), `${t.title} zit niet in Alle hits`);
-  for (const t of data.tracks) assert.equal(t.lists.includes('2000'), t.year >= 2000, `${t.title}: 2000 tot nu`);
+  for (const t of data.tracks) {
+    const kidsOnly = t.lists.every((x) => x === 'kind');
+    assert.equal(t.lists.includes('alles'), !kidsOnly, `${t.title}: Alle hits`);
+    assert.equal(t.lists.includes('2000'), !kidsOnly && t.year >= 2000, `${t.title}: 2000 tot nu`);
+  }
+  assert.ok(data.tracks.some((t) => t.lists.join() === 'kind'), 'er zijn kinderliedjes buiten Alle hits');
   const shown = listsOf(data);
   for (const l of shown) assert.ok(l.count >= rules.LIMITS.minDeck, `${l.name} heeft te weinig nummers`);
-  // Nederlandstalig en Rustige pop en ballads zijn nog leeg en worden dus niet getoond.
-  for (const id of ['nl', 'rustig']) {
-    const n = data.tracks.filter((t) => t.lists.includes(id)).length;
-    assert.equal(shown.some((l) => l.id === id), n > 0);
-  }
+  // Elke lijst heeft nummers en wordt getoond; alleen «Kinderen en tekenfilms» kan naast «Alle hits».
+  assert.deepEqual(shown.map((l) => l.id), ids);
+  assert.deepEqual(shown.filter((l) => !l.main && !l.inMain).map((l) => l.id), ['kind']);
+  // Standaard speelt een host met «Alle hits», zonder kinderliedjes.
+  const choice = normaliseChoice(data, null);
+  assert.deepEqual(choice.lists, ['alles']);
+  assert.ok(tracksOf(data, choice).every((t) => !t.lists.every((x) => x === 'kind')));
   // Geen dubbels: hetzelfde nummer van dezelfde artiest maar één keer.
   const songs = data.tracks.map((t) => `${t.artist.toLowerCase()}|${t.title.toLowerCase()}`);
   assert.equal(new Set(songs).size, songs.length);
