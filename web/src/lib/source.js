@@ -2,7 +2,7 @@
 // Premium) of fragmenten van Deezer (30 seconden, zonder account, uit de
 // browser van de host). De keuze blijft bewaard op deze gsm.
 
-import { useCallback, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { useMusic } from './music.js';
 import { useFragmentMusic } from './fragments.js';
 import { storage } from './session.js';
@@ -54,5 +54,9 @@ export function useHostMusic({ enabled, view, send = () => false }) {
     setSourceState(next);
   }, []);
   const active = effective === 'fragment' ? fragment : spotify;
+  // Staat de muziek klaar, dan hoeft het scherm niet meer te zeggen dat hij net host werd.
+  useEffect(() => {
+    if (handover && active.ready) setHandover(false);
+  }, [handover, active.ready]);
   return { ...active, source: effective, setSource, spotifyLoggedIn: spotify.loggedIn, handover };
 }
