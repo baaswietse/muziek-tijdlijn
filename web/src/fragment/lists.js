@@ -1,14 +1,27 @@
-// De ingebouwde lijsten met fragmenten (web/public/fragmenten.json). Zuivere
-// functies, zodat ze met gewone unit-tests na te kijken zijn.
+// De ingebouwde lijsten met fragmenten (web/public/fragmenten.json) en de
+// keuze van de host daaruit: een of meer lijsten samen, eventueel beperkt tot
+// een periode. Zuivere functies, zodat ze met gewone unit-tests na te kijken
+// zijn.
 //
 // Het bronbestand: { lists: [{ id, name }], tracks: [{ deezer, artist, title,
 // year, lists: [id, …] }] }. Een lijst toevoegen = een item in `lists` en het
 // id bij de nummers die erin horen; een nummer wijzigen = die ene regel.
 // Een lege lijst wordt niet getoond.
+//
+// De keuze: { lists: [id, …], from: jaar | null, to: jaar | null }. Het spel
+// speelt met elk nummer dat in minstens één van de lijsten zit (elk één keer)
+// en waarvan het jaar tussen `from` en `to` ligt (grenzen inbegrepen; null =
+// geen grens). Een lijst waarin álle nummers zitten (nu «Alle hits») is een
+// keuze op zich: samen met andere lijsten voegt ze niets toe, dus het een zet
+// het ander uit. Welke lijst dat is, volgt uit de nummers, niet uit haar id.
 
 import { MAX_DECK, pickTracks, shuffled } from '../lib/deckplan.js';
 
 const MAX_TEXT = 120;
+/** Zo lang mag de naam van een lijst op de server zijn (LIMITS.maxDeckName in server/src/rules.js). */
+export const MAX_NAME = 60;
+/** De stappen in de keuzes «van» en «tot». */
+export const YEAR_STEP = 5;
 
 /** Houdt alleen geldige nummers over, elk Deezer-ID één keer: [{ id: 'dz-…', artist, title, year, lists }]. */
 export function cleanFragments(raw) {
@@ -33,22 +46,150 @@ export function cleanFragments(raw) {
   return { lists, tracks };
 }
 
-/** De lijsten die de host kan kiezen, met hun aantal nummers; lege lijsten niet. */
-export function listsOf(data) {
-  return data.lists
-    .map((l) => ({ ...l, count: data.tracks.filter((t) => t.lists.includes(l.id)).length }))
-    .filter((l) => l.count > 0);
+const inPeriod = (t, { from = null, to = null } = {}) => (from == null || t.year >= from) && (to == null || t.year <= to);
+
+/**
+ * De lijsten die de host kan kiezen; lege lijsten niet. `count`: hoeveel
+ * nummers ze heeft binnen de periode (zonder periode: alle). `all`: alle
+ * nummers zitten erin. Zo'n lijst staat vooraan.
+ */
+export function listsOf(data, period = {}) {
+  const shown = [];
+  for (const l of data.lists) {
+    const mine = data.tracks.filter((t) => t.lists.includes(l.id));
+    if (mine.length === 0) continue;
+    shown.push({ ...l, count: mine.filter((t) => inPeriod(t, period)).length, all: mine.length === data.tracks.length });
+  }
+  return [...shown.filter((l) => l.all), ...shown.filter((l) => !l.all)];
+}
+
+/** Het vroegste en het laatste jaar van alle nummers, of null zonder nummers. */
+export function yearBounds(data) {
+  if (data.tracks.length === 0) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const t of data.tracks) {
+    min = Math.min(min, t.year);
+    max = Math.max(max, t.year);
+  }
+  return { min, max };
 }
 
 /**
- * De nummers van één lijst zoals ze naar de server gaan ({ id, artist, title,
- * year }), in willekeurige volgorde. Meer dan `max` (wat de server toelaat):
- * dan een willekeurige greep, zoals bij een grote playlist.
+ * De jaren in de keuzes «van» en «tot», in stappen van `step` (1960, 1965,
+ * …). «Van het begin» en «tot nu» (geen grens) staan er niet bij: dat is null.
+ * Bij «van» alleen jaren na het vroegste jaar, bij «tot» alleen jaren voor het
+ * laatste; anders is het geen beperking.
  */
-export function deckFor(data, listId, { max = MAX_DECK, random = Math.random } = {}) {
-  const all = data.tracks
-    .filter((t) => t.lists.includes(listId))
-    .map(({ id, artist, title, year }) => ({ id, artist, title, year }));
+export function periodOptions(bounds, step = YEAR_STEP) {
+  if (!bounds) return { from: [], to: [] };
+  const years = [];
+  for (let y = Math.ceil(bounds.min / step) * step; y <= bounds.max; y += step) years.push(y);
+  return { from: years.filter((y) => y > bounds.min), to: years.filter((y) => y < bounds.max) };
+}
+
+/** De periode in gewone taal: «1980–2000», «vanaf 1980», «tot 2000», «1985», of '' zonder beperking. */
+export function periodText({ from = null, to = null } = {}) {
+  if (from != null && to != null) return from === to ? String(from) : `${from}–${to}`;
+  if (from != null) return `vanaf ${from}`;
+  if (to != null) return `tot ${to}`;
+  return '';
+}
+
+/**
+ * Maakt van een (bewaarde, misschien verouderde) keuze een geldige: alleen
+ * lijsten die er (nog) zijn en niet leeg zijn, in de volgorde van het scherm;
+ * een lijst met alle nummers alleen; een periode binnen de jaren die er zijn,
+ * met «van» niet na «tot». Zonder bewaarde keuze, of als geen enkele bewaarde
+ * lijst nog bestaat: de lijst met alle nummers (als die er is). Een bewaarde
+ * lege keuze (de host vinkte alles uit) blijft leeg.
+ */
+export function normaliseChoice(data, raw) {
+  const shown = listsOf(data);
+  const asked = Array.isArray(raw?.lists) ? raw.lists : null;
+  let lists = asked ? shown.filter((l) => asked.includes(l.id)) : [];
+  if (!asked || (asked.length > 0 && lists.length === 0)) lists = shown.filter((l) => l.all).slice(0, 1);
+  const all = lists.find((l) => l.all);
+  if (all) lists = [all];
+
+  // «Van» het vroegste jaar of vroeger, of «tot» het laatste of later, is geen beperking.
+  const bounds = yearBounds(data);
+  const ok = (v) => Number.isInteger(v) && bounds != null;
+  let from = ok(raw?.from) && raw.from > bounds.min && raw.from <= bounds.max ? raw.from : null;
+  let to = ok(raw?.to) && raw.to >= bounds.min && raw.to < bounds.max ? raw.to : null;
+  if (from != null && to != null && from > to) {
+    from = null;
+    to = null;
+  }
+  return { lists: lists.map((l) => l.id), from, to };
+}
+
+/**
+ * Een lijst aan- of uitvinken. De lijst met alle nummers aanvinken zet de
+ * andere uit; een andere lijst aanvinken zet die met alle nummers uit.
+ */
+export function toggleList(data, choice, id) {
+  const shown = listsOf(data);
+  const list = shown.find((l) => l.id === id);
+  if (!list) return choice;
+  let lists;
+  if (choice.lists.includes(id)) lists = choice.lists.filter((x) => x !== id);
+  else if (list.all) lists = [id];
+  else {
+    const allIds = new Set(shown.filter((l) => l.all).map((l) => l.id));
+    lists = [...choice.lists.filter((x) => !allIds.has(x)), id];
+  }
+  return { ...choice, lists: shown.map((l) => l.id).filter((x) => lists.includes(x)) };
+}
+
+/** Een nieuwe grens «van» (`which` = 'from') of «tot» ('to'); null = geen grens. Kruisen ze, dan valt de andere weg. */
+export function setPeriod(data, choice, which, value) {
+  const v = value == null || value === '' ? null : Number(value);
+  const next = { ...choice, [which]: Number.isInteger(v) ? v : null };
+  if (next.from != null && next.to != null && next.from > next.to) next[which === 'from' ? 'to' : 'from'] = null;
+  return normaliseChoice(data, next);
+}
+
+/** De nummers van de keuze: in minstens één gekozen lijst, binnen de periode, elk één keer (in de volgorde van het bestand). */
+export function tracksOf(data, choice) {
+  const lists = new Set(choice?.lists ?? []);
+  if (lists.size === 0) return [];
+  return data.tracks.filter((t) => t.lists.some((x) => lists.has(x)) && inPeriod(t, choice));
+}
+
+/**
+ * De keuze in gewone taal, hoogstens `max` tekens (zoveel bewaart de server):
+ * «Rock + Nederlandstalig, 1980–2000». Te lang, dan «Rock + 3 andere lijsten,
+ * 1980–2000». Zonder lijsten: ''.
+ */
+export function describeChoice(data, choice, max = MAX_NAME) {
+  const byId = new Map(data.lists.map((l) => [l.id, l.name]));
+  const names = (choice?.lists ?? []).map((id) => byId.get(id)).filter(Boolean);
+  if (names.length === 0) return '';
+  const period = periodText(choice ?? {});
+  const tail = period ? `, ${period}` : '';
+  const fits = (s) => (s + tail).length <= max;
+  let lists = names.join(' + ');
+  if (!fits(lists)) {
+    lists = '';
+    for (let k = names.length - 1; k >= 1 && !lists; k--) {
+      const rest = names.length - k;
+      const s = `${names.slice(0, k).join(' + ')} + ${rest} ${rest === 1 ? 'andere lijst' : 'andere lijsten'}`;
+      if (fits(s)) lists = s;
+    }
+    if (!lists) lists = `${names.length} lijsten`;
+  }
+  return (lists + tail).slice(0, max);
+}
+
+/**
+ * De stapel voor de server ({ id, artist, title, year }, zonder lijsten), in
+ * willekeurige volgorde, met de naam. Meer dan `max` nummers (wat de server
+ * toelaat): een willekeurige greep, zoals bij een grote playlist. `total`:
+ * hoeveel nummers de keuze heeft.
+ */
+export function deckForChoice(data, choice, { max = MAX_DECK, random = Math.random } = {}) {
+  const all = tracksOf(data, choice).map(({ id, artist, title, year }) => ({ id, artist, title, year }));
   const { tracks, sampled, total } = pickTracks(all, max, random);
-  return { tracks: shuffled(tracks, random), sampled, total };
+  return { name: describeChoice(data, choice), tracks: shuffled(tracks, random), sampled, total };
 }

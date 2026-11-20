@@ -5,7 +5,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cleanFragments, deckFor, listsOf } from '../../web/src/fragment/lists.js';
+import {
+  cleanFragments,
+  deckForChoice,
+  describeChoice,
+  listsOf,
+  normaliseChoice,
+  periodOptions,
+  periodText,
+  setPeriod,
+  toggleList,
+  tracksOf,
+  yearBounds,
+} from '../../web/src/fragment/lists.js';
+import { MIN_DECK, deckNeed } from '../../web/src/lib/deckplan.js';
 import { FragmentError, deezerId, deezerLink, fetchPreview } from '../../web/src/fragment/deezer.js';
 import { createFragmentPlayer, silentWav } from '../../web/src/fragment/player.js';
 import { deckSource, normaliseTracks } from '../../server/src/tracks.js';
@@ -47,37 +60,212 @@ test('lijsten: alleen geldige nummers, elk ID één keer, als dz-ID', () => {
   assert.deepEqual(data.tracks[0], { id: 'dz-1', artist: 'A', title: 'Een', year: 1990, lists: ['alles', 'pop'] });
 });
 
-test('lijsten: met hun aantal, een lege lijst niet', () => {
+test('lijsten: met hun aantal, een lege lijst niet; de lijst met alles vooraan', () => {
   assert.deepEqual(listsOf(cleanFragments(sample)), [
-    { id: 'alles', name: 'Alle hits', count: 2 },
-    { id: 'pop', name: 'Pop', count: 1 },
+    { id: 'alles', name: 'Alle hits', count: 2, all: true },
+    { id: 'pop', name: 'Pop', count: 1, all: false },
   ]);
+  // Welke lijst alles bevat, volgt uit de nummers, niet uit het id of de volgorde.
+  const other = cleanFragments({
+    lists: [
+      { id: 'a', name: 'A' },
+      { id: 'b', name: 'Alles' },
+    ],
+    tracks: [
+      { deezer: 1, artist: 'A', title: 'Een', year: 1990, lists: ['a', 'b'] },
+      { deezer: 2, artist: 'B', title: 'Twee', year: 2001, lists: ['b'] },
+    ],
+  });
+  assert.deepEqual(
+    listsOf(other).map((l) => [l.id, l.all]),
+    [
+      ['b', true],
+      ['a', false],
+    ],
+  );
 });
 
-test('lijsten: een stapel is een willekeurige volgorde zonder dubbels, groot genoeg een greep van max', () => {
-  const big = {
-    lists: [{ id: 'alles', name: 'Alles' }],
-    tracks: Array.from({ length: 30 }, (_, i) => ({ deezer: 100 + i, artist: 'A', title: `T${i}`, year: 1960 + i, lists: ['alles'] })),
-  };
-  const data = cleanFragments(big);
-  const all = deckFor(data, 'alles', { random: seeded(3) });
-  assert.equal(all.sampled, false);
-  assert.equal(all.tracks.length, 30);
-  assert.equal(new Set(all.tracks.map((t) => t.id)).size, 30);
+/**
+ * Een testbestand: 40 nummers (1961–2000) in «alles»; «oud» 1961–1980 (20),
+ * «nieuw» 1975–1995 (21, overlapt met «oud»), «klein» 3 nummers, «leeg» niets.
+ */
+const BIG = cleanFragments({
+  lists: [
+    { id: 'alles', name: 'Alle hits' },
+    { id: 'oud', name: 'Oud' },
+    { id: 'nieuw', name: 'Nieuw' },
+    { id: 'klein', name: 'Klein' },
+    { id: 'leeg', name: 'Leeg' },
+  ],
+  tracks: Array.from({ length: 40 }, (_, i) => {
+    const year = 1961 + i;
+    const lists = ['alles'];
+    if (year <= 1980) lists.push('oud');
+    if (year >= 1975 && year <= 1995) lists.push('nieuw');
+    if (year >= 1998) lists.push('klein');
+    return { deezer: 100 + i, artist: `A${i}`, title: `T${i}`, year, lists };
+  }),
+});
+
+test('keuze: lijsten samen, zonder dubbels', () => {
+  const both = { lists: ['oud', 'nieuw'], from: null, to: null };
+  const tracks = tracksOf(BIG, both);
+  // 1961–1995: 20 + 21 - 6 die in beide zitten.
+  assert.equal(tracks.length, 35);
+  assert.equal(new Set(tracks.map((t) => t.id)).size, 35);
+  assert.deepEqual([tracks[0].year, tracks.at(-1).year], [1961, 1995]);
+  assert.equal(tracksOf(BIG, { lists: ['oud'], from: null, to: null }).length, 20);
+  // Een lege keuze geeft niets.
+  assert.deepEqual(tracksOf(BIG, { lists: [], from: null, to: null }), []);
+  assert.deepEqual(tracksOf(BIG, null), []);
+});
+
+test('keuze: een periode, los van de lijsten, grenzen inbegrepen', () => {
+  const tracks = tracksOf(BIG, { lists: ['oud', 'nieuw'], from: 1970, to: 1985 });
+  assert.equal(tracks.length, 16);
+  assert.ok(tracks.every((t) => t.year >= 1970 && t.year <= 1985));
+  assert.equal(tracksOf(BIG, { lists: ['alles'], from: 1990, to: null }).length, 11);
+  assert.equal(tracksOf(BIG, { lists: ['alles'], from: null, to: 1965 }).length, 5);
+  // Een periode zonder nummers in die lijst.
+  assert.equal(tracksOf(BIG, { lists: ['oud'], from: 1990, to: 1995 }).length, 0);
+  // De aantallen per lijst volgen de periode; een lijst met 0 blijft staan.
+  const counts = Object.fromEntries(listsOf(BIG, { from: 1990, to: 1995 }).map((l) => [l.id, l.count]));
+  assert.deepEqual(counts, { alles: 6, oud: 0, nieuw: 6, klein: 0 });
+});
+
+test('keuze: de grenzen en stappen van de periode volgen uit de nummers', () => {
+  assert.deepEqual(yearBounds(BIG), { min: 1961, max: 2000 });
+  assert.equal(yearBounds({ lists: [], tracks: [] }), null);
+  const o = periodOptions({ min: 1961, max: 2000 });
+  assert.deepEqual(o.from, [1965, 1970, 1975, 1980, 1985, 1990, 1995, 2000]);
+  assert.deepEqual(o.to, [1965, 1970, 1975, 1980, 1985, 1990, 1995]);
+  // Begint het precies op een stap, dan is die stap bij «van» geen beperking.
+  assert.deepEqual(periodOptions({ min: 1960, max: 1972 }), { from: [1965, 1970], to: [1960, 1965, 1970] });
+  assert.deepEqual(periodOptions(null), { from: [], to: [] });
+  assert.equal(periodText({ from: 1980, to: 2000 }), '1980–2000');
+  assert.equal(periodText({ from: 1980, to: null }), 'vanaf 1980');
+  assert.equal(periodText({ from: null, to: 2000 }), 'tot 2000');
+  assert.equal(periodText({ from: 1985, to: 1985 }), '1985');
+  assert.equal(periodText({}), '');
+});
+
+test('keuze: «Alle hits» aanvinken zet de rest uit, een andere lijst zet «Alle hits» uit', () => {
+  let c = normaliseChoice(BIG, null);
+  // Standaard: de lijst met alles, zonder periode.
+  assert.deepEqual(c, { lists: ['alles'], from: null, to: null });
+  c = toggleList(BIG, c, 'nieuw');
+  assert.deepEqual(c.lists, ['nieuw']);
+  c = toggleList(BIG, c, 'oud');
+  // In de volgorde van het scherm.
+  assert.deepEqual(c.lists, ['oud', 'nieuw']);
+  c = toggleList(BIG, c, 'alles');
+  assert.deepEqual(c.lists, ['alles']);
+  // Uitvinken: niets meer gekozen (geen stille terugval).
+  assert.deepEqual(toggleList(BIG, c, 'alles').lists, []);
+  // Een lege of onbekende lijst kan je niet aanvinken.
+  assert.equal(toggleList(BIG, c, 'leeg'), c);
+  assert.equal(toggleList(BIG, c, 'bestaat-niet'), c);
+  // Samen met andere (bv. een oude bewaarde keuze): alleen «Alle hits», en dat telt alles één keer.
+  const mixed = normaliseChoice(BIG, { lists: ['oud', 'alles', 'nieuw'], from: null, to: null });
+  assert.deepEqual(mixed.lists, ['alles']);
+  assert.equal(tracksOf(BIG, { lists: ['oud', 'alles'], from: null, to: null }).length, 40);
+});
+
+test('keuze: een bewaarde keuze wordt nagekeken', () => {
+  // Verdwenen lijsten vallen weg; blijft er niets over, dan de standaard.
+  assert.deepEqual(normaliseChoice(BIG, { lists: ['weg', 'oud'], from: null, to: null }).lists, ['oud']);
+  assert.deepEqual(normaliseChoice(BIG, { lists: ['weg'], from: 1970, to: null }), { lists: ['alles'], from: 1970, to: null });
+  assert.deepEqual(normaliseChoice(BIG, { lists: ['leeg'] }).lists, ['alles']);
+  // Een bewaarde lege keuze blijft leeg.
+  assert.deepEqual(normaliseChoice(BIG, { lists: [] }).lists, []);
+  // Rommel.
+  assert.deepEqual(normaliseChoice(BIG, 'onzin'), { lists: ['alles'], from: null, to: null });
+  assert.deepEqual(normaliseChoice(BIG, { lists: [3, null], from: '1980', to: 1990.5 }), { lists: ['alles'], from: null, to: null });
+  // Buiten de jaren die er zijn, of op de rand: geen beperking.
+  assert.deepEqual(normaliseChoice(BIG, { lists: ['oud'], from: 1961, to: 2000 }), { lists: ['oud'], from: null, to: null });
+  assert.deepEqual(normaliseChoice(BIG, { lists: ['oud'], from: 1900, to: 2050 }), { lists: ['oud'], from: null, to: null });
+  // «Van» na «tot»: geen periode.
+  assert.deepEqual(normaliseChoice(BIG, { lists: ['oud'], from: 1990, to: 1980 }), { lists: ['oud'], from: null, to: null });
+  // Zonder lijst met alles en zonder bewaarde keuze: niets gekozen.
+  const noAll = cleanFragments({ lists: [{ id: 'x', name: 'X' }, { id: 'y', name: 'Y' }], tracks: [
+    { deezer: 1, artist: 'A', title: 'T', year: 1990, lists: ['x'] },
+    { deezer: 2, artist: 'B', title: 'U', year: 1991, lists: ['y'] },
+  ] });
+  assert.deepEqual(normaliseChoice(noAll, null).lists, []);
+});
+
+test('keuze: «van» en «tot» instellen; kruisen ze, dan valt de andere grens weg', () => {
+  let c = { lists: ['alles'], from: null, to: null };
+  c = setPeriod(BIG, c, 'from', '1980');
+  assert.deepEqual([c.from, c.to], [1980, null]);
+  c = setPeriod(BIG, c, 'to', '1990');
+  assert.deepEqual([c.from, c.to], [1980, 1990]);
+  c = setPeriod(BIG, c, 'from', '1995');
+  assert.deepEqual([c.from, c.to], [1995, null]);
+  c = setPeriod(BIG, c, 'to', '1970');
+  assert.deepEqual([c.from, c.to], [null, 1970]);
+  c = setPeriod(BIG, c, 'to', '');
+  assert.deepEqual([c.from, c.to], [null, null]);
+});
+
+test('keuze: de omschrijving in gewone taal past in wat de server bewaart', () => {
+  assert.equal(describeChoice(BIG, { lists: ['oud', 'nieuw'], from: 1980, to: 2000 }), 'Oud + Nieuw, 1980–2000');
+  assert.equal(describeChoice(BIG, { lists: ['alles'], from: null, to: null }), 'Alle hits');
+  assert.equal(describeChoice(BIG, { lists: [], from: 1980, to: null }), '');
+  const long = cleanFragments({
+    lists: ['Rock', 'Nederlandstalig', 'Rustige pop en ballads', 'Dance', 'Pop'].map((name, i) => ({ id: `l${i}`, name })),
+    tracks: [{ deezer: 1, artist: 'A', title: 'T', year: 1990, lists: ['l0', 'l1', 'l2', 'l3', 'l4'] }],
+  });
+  const all5 = { lists: ['l0', 'l1', 'l2', 'l3', 'l4'], from: 1980, to: 2000 };
+  const text = describeChoice(long, all5);
+  assert.ok(text.length <= 60, text);
+  assert.equal(text, 'Rock + Nederlandstalig + 3 andere lijsten, 1980–2000');
+  assert.equal(describeChoice(long, { lists: ['l0', 'l1'], from: null, to: null }), 'Rock + Nederlandstalig');
+  assert.equal(describeChoice(long, all5, 35), 'Rock + 4 andere lijsten, 1980–2000');
+  assert.ok(describeChoice(long, all5, 20).length <= 20);
+});
+
+test('keuze: genoeg voor een spel volgt deckNeed (spelers en doel)', () => {
+  // 2 spelers naar 10 kaarten: 40 nodig; «Oud + Nieuw» (35) is te weinig, «Alle hits» (40) genoeg.
+  assert.equal(deckNeed(2, 10), 40);
+  assert.ok(tracksOf(BIG, { lists: ['oud', 'nieuw'], from: null, to: null }).length < deckNeed(2, 10));
+  assert.ok(tracksOf(BIG, { lists: ['alles'], from: null, to: null }).length >= deckNeed(2, 10));
+  // «Klein» (3) haalt zelfs het minimum van de server niet.
+  assert.ok(tracksOf(BIG, { lists: ['klein'], from: null, to: null }).length < MIN_DECK);
+});
+
+test('keuze: de stapel is een willekeurige volgorde zonder dubbels, groot genoeg een greep van max', () => {
+  const c = { lists: ['oud', 'nieuw'], from: null, to: null };
+  const deck = deckForChoice(BIG, c, { random: seeded(3) });
+  assert.equal(deck.name, 'Oud + Nieuw');
+  assert.equal(deck.sampled, false);
+  assert.equal(deck.total, 35);
+  assert.equal(deck.tracks.length, 35);
+  assert.equal(new Set(deck.tracks.map((t) => t.id)).size, 35);
   assert.notDeepEqual(
-    all.tracks.map((t) => t.id),
-    data.tracks.map((t) => t.id),
+    deck.tracks.map((t) => t.id),
+    tracksOf(BIG, c).map((t) => t.id),
   );
   // Wat naar de server gaat: geen lijst-tags.
-  assert.deepEqual(Object.keys(all.tracks[0]).sort(), ['artist', 'id', 'title', 'year']);
-  const part = deckFor(data, 'alles', { max: 12, random: seeded(5) });
+  assert.deepEqual(Object.keys(deck.tracks[0]).sort(), ['artist', 'id', 'title', 'year']);
+  const part = deckForChoice(BIG, { lists: ['alles'], from: null, to: null }, { max: 12, random: seeded(5) });
   assert.equal(part.sampled, true);
-  assert.equal(part.total, 30);
+  assert.equal(part.total, 40);
   assert.equal(part.tracks.length, 12);
   assert.equal(new Set(part.tracks.map((t) => t.id)).size, 12);
   // De server neemt ze zo aan, en herkent ze als fragmenten.
   assert.equal(normaliseTracks(part.tracks).length, 12);
   assert.equal(deckSource(part.tracks), 'fragment');
+  // Een lege keuze geeft een lege stapel.
+  assert.deepEqual(deckForChoice(BIG, { lists: [], from: null, to: null }), { name: '', tracks: [], sampled: false, total: 0 });
+});
+
+test('keuze: de omschrijving gaat ongeschonden door de server', () => {
+  const state = rules.createRoom({ code: 'ABCD', now: 0 });
+  rules.addPlayer(state, { id: 'p0', token: 't0', name: 'Hanne' });
+  const { name, tracks } = deckForChoice(BIG, { lists: ['oud', 'nieuw'], from: 1965, to: 1990 });
+  rules.setDeck(state, 'p0', { name, tracks: normaliseTracks(tracks) });
+  assert.deepEqual(rules.viewFor(state, 'p0').playlist, { name: 'Oud + Nieuw, 1965–1990', count: 26, source: 'fragment' });
 });
 
 test('bronbestand web/public/fragmenten.json: geldig, met de afgesproken lijsten', () => {

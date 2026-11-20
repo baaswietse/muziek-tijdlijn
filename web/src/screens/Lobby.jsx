@@ -7,15 +7,17 @@ import { Rules } from '../components/Rules.jsx';
 import { ListenCard } from '../components/Listen.jsx';
 import { deckMatches } from '../lib/source.js';
 
-export function Lobby({ view, send, music, listen = null, deck, onLeave, notify }) {
+export function Lobby({ view, send, music, listen = null, deck, choice = null, onLeave, notify }) {
   const isHost = view.you === view.hostId;
   const url = inviteUrl(view.code);
   const qr = useMemo(() => qrPath(url), [url]);
   const target = view.settings.target;
 
   // Eerst de lijst met alles wat nu klaar is naar de server, dan pas starten.
+  // Met fragmenten ook eerst de laatste wijziging aan de keuze.
   async function start() {
     await deck.flush();
+    if (fragment && !(await choice.flush())) return;
     send({ t: 'start' });
   }
 
@@ -27,6 +29,9 @@ export function Lobby({ view, send, music, listen = null, deck, onLeave, notify 
     else if (view.playlist?.source === 'fragment') send({ t: 'clearDeck' });
   }
   const deckOk = deckMatches(music.source, view.playlist);
+  const fragment = music.source === 'fragment' && choice != null;
+  // Met fragmenten: genoeg nummers voor dit aantal spelers en dit doel (zie deckNeed).
+  const choiceOk = !fragment || (choice.data != null && choice.enough);
 
   async function share() {
     try {
@@ -86,7 +91,7 @@ export function Lobby({ view, send, music, listen = null, deck, onLeave, notify 
       {isHost ? (
         <>
           <MusicPanel music={music} onSource={changeSource} />
-          <DeckPanel view={view} send={send} deck={deck} loggedIn={music.loggedIn} source={music.source} />
+          <DeckPanel view={view} send={send} deck={deck} choice={choice} loggedIn={music.loggedIn} source={music.source} />
           <section class="card">
             <h2>Spel</h2>
             <div class="row between">
@@ -101,13 +106,18 @@ export function Lobby({ view, send, music, listen = null, deck, onLeave, notify 
                 </button>
               </span>
             </div>
-            <button class="btn primary big" disabled={!music.ready || !deck.canStart || !deckOk} onClick={start} data-testid="start-game">
+            <button class="btn primary big" disabled={!music.ready || !deck.canStart || !deckOk || !choiceOk} onClick={start} data-testid="start-game">
               Start het spel
             </button>
             {!music.ready && <p class="muted small center-text">Stel eerst de muziek in.</p>}
-            {music.ready && !deckOk && (
+            {music.ready && fragment && choice.data && !choiceOk && (
               <p class="muted small center-text" data-testid="deck-mismatch">
-                {music.source === 'fragment' ? 'Kies eerst een lijst bij «Nummers».' : 'Kies de standaardlijst of een eigen playlist.'}
+                {choice.total === 0 ? 'Kies eerst nummers bij «Nummers».' : 'Te weinig nummers: kies er meer bij «Nummers».'}
+              </p>
+            )}
+            {music.ready && choiceOk && !deckOk && (
+              <p class="muted small center-text" data-testid="deck-mismatch">
+                {music.source === 'fragment' ? 'De nummers gaan naar het spel…' : 'Kies de standaardlijst of een eigen playlist.'}
               </p>
             )}
             {music.ready && !deck.canStart && <p class="muted small center-text">Even wachten tot er genoeg jaartallen opgezocht zijn.</p>}
@@ -122,7 +132,9 @@ export function Lobby({ view, send, music, listen = null, deck, onLeave, notify 
           <p class="muted small">Je speelt naar {target} kaarten.</p>
           {view.playlist && (
             <p class="muted small" data-testid="lobby-playlist">
-              Nummers: {view.playlist.source === 'fragment' ? 'lijst' : 'playlist'} «{view.playlist.name}» ({view.playlist.count})
+              {view.playlist.source === 'fragment'
+                ? `Nummers: ${view.playlist.name} · ${view.playlist.count} nummers`
+                : `Nummers: playlist «${view.playlist.name}» (${view.playlist.count})`}
             </p>
           )}
         </section>

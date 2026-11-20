@@ -37,7 +37,7 @@ Details:
 - De host kan een ander nummer vragen (als er een niet afspeelt), een beurt overslaan en een speler verwijderen.
 - Een tweede spel in dezelfde kamer herhaalt geen nummers zolang er genoeg ongespeelde zijn.
 - De host kiest de nummers: met Spotify de standaardlijst van het spel of een van zijn eigen Spotify-playlists; met
-  fragmenten een van de lijsten van het spel (zie *Spelen met fragmenten*).
+  fragmenten een of meer lijsten van het spel, eventueel binnen een periode (zie *Spelen met fragmenten*).
 - Tokens: hoogstens één per beurt, ook nog bij de kaart die het spel beslist. De host en de speler aan beurt kunnen
   het aan eender wie geven, verplaatsen of terugnemen; een andere speler kan het alleen voor zichzelf opeisen zolang
   niemand het heeft, en het weer teruggeven. Iedereen ziet de tellers op het bord en op het eindscherm. Elk spel
@@ -176,10 +176,18 @@ gsm host  ──┘        │
     streepje, dus de twee lopen nooit door elkaar. De server kijkt alleen na dat er na `dz-` cijfers staan, en noemt
     een lijst met alleen fragmenten in de stand `source: 'fragment'` (zodat de wachtkamer weet dat ze bij fragmenten
     past). Verder weet de server niets van Deezer.
-  - Kiest de host een lijst, dan haalt zijn browser `fragmenten.json` van de site, neemt de nummers van die lijst
-    (meer dan 500: een willekeurige greep van 500, zoals bij een grote playlist) en stuurt ze met de bestaande route
-    `POST /api/rooms/:code/deck` naar de server, net als een eigen playlist. De lijst blijft op de server; de andere
-    spelers zien alleen de naam en het aantal.
+  - De browser van de host haalt `fragmenten.json` van de site, neemt de nummers van de keuze (alle nummers die in
+    minstens één aangevinkte lijst zitten, elk één keer, binnen de periode; meer dan 500: een willekeurige greep van
+    500, zoals bij een grote playlist) en stuurt ze met de bestaande route `POST /api/rooms/:code/deck` naar de
+    server, net als een eigen playlist, met als naam de keuze in gewone taal («Rock + Nederlandstalig, 1980–2000»,
+    hoogstens 60 tekens zoals elke naam; te lang wordt het «Rock + 3 andere lijsten, 1980–2000»). Welke lijsten het
+    waren, weet de server niet; aan de server is niets veranderd. Na elke wijziging gaat de stapel na 0,3 s opnieuw
+    (een paar tikken na elkaar geven één verzoek); *Start* stuurt een wijziging die nog wacht eerst. Heeft de keuze
+    minder dan 10 nummers, dan haalt de host de oude stapel weg (`clearDeck`), zodat de anderen niets anders zien
+    dan wat hij koos. Na een herlaad stuurt hij niets opnieuw als de server al dezelfde naam en hetzelfde aantal
+    heeft. Het rekenwerk staat in `web/src/fragment/lists.js`, het bewaren en versturen in
+    `web/src/lib/fragmentchoice.js`. De lijst blijft op de server; de andere spelers zien alleen de naam en het
+    aantal.
   - Elke beurt krijgt de gsm van de host, zoals bij Spotify, alleen het ID van het nummer. Vlak voor het afspelen
     vraagt zijn browser `https://api.deezer.com/track/<id>` op, met JSONP (een `<script>`; de API stuurt geen
     CORS-kop). Het adres van de mp3 (`cdnt-preview.dzcdn.net`) draagt een handtekening die na enkele uren verloopt,
@@ -411,9 +419,26 @@ hang die aan een box als je wil. Op afstand spelen kan ook: zie hieronder.
 1. **Host:** open de site en kies *Nieuw spel*.
 2. **Host:** kies onder *Muziek* de bron *Fragmenten (30 seconden, zonder account)* en tik op *Zet het geluid aan*
    (een browser speelt pas geluid na een tik).
-3. **Host:** kies onder *Nummers* een van de lijsten van het spel. Bij elke lijst staat hoeveel nummers ze heeft; een
-   lege lijst staat er niet bij. Heeft een lijst meer dan 500 nummers, dan kiest het spel er willekeurig 500 uit
-   (kies ze later opnieuw voor een andere greep). Daarna gaat het zoals altijd: spelers komen binnen, de host start.
+3. **Host:** kies onder *Nummers* welke nummers meedoen (standaard *Alle hits*: dan hoef je niets te doen).
+   - **Lijsten:** vink er een of meer aan. Het spel speelt met alle nummers die in minstens één ervan zitten, elk
+     één keer. *Alle hits* bevat alles: aanvinken zet de andere uit, en een andere lijst aanvinken zet *Alle hits*
+     uit (samen zou het toch gewoon alles zijn). Alles uitvinken mag, maar dan kan je niet starten. Een lege lijst
+     staat er niet bij.
+   - **Periode:** *Van* en *tot en met*, twee keuzelijsten in stappen van 5 jaar (1965, 1970, …), standaard *het
+     begin* en *nu*: geen beperking. De grenzen volgen uit de jaren van de nummers in het bestand. Kruisen ze (van
+     na tot), dan valt de andere grens weg. *Alle jaren* haalt de beperking weer weg. De periode geldt voor alle
+     aangevinkte lijsten; bij elke lijst staat dan hoeveel nummers ze binnen de periode heeft.
+   - Daaronder staat het totaal van de keuze, met de omschrijving die ook de anderen zien. Is het minder dan
+     nodig voor een volledig spel met het huidige aantal spelers en het doel (twee keer spelers × kaarten, minstens
+     10; zoals bij een eigen playlist), dan zegt het dat, met wat je kan doen (meer lijsten, een ruimere periode of
+     naar minder kaarten spelen), en blijft *Start* uit. Komen er spelers bij of verander je het doel, dan rekent
+     het opnieuw. Heeft de keuze meer dan 500 nummers, dan kiest het spel er willekeurig 500 uit.
+   - De keuze blijft bewaard op de gsm van de host, ook na een herlaad en voor een volgend spel. Bestaat een
+     bewaarde lijst niet meer, dan valt ze weg; blijft er niets over, dan is het weer *Alle hits*.
+   - De andere spelers zien in de wachtkamer waarmee gespeeld wordt, bv. «Nummers: Rock + Nederlandstalig,
+     1980–2000 · 155 nummers», nooit titels.
+
+   Daarna gaat het zoals altijd: spelers komen binnen, de host start.
 
 *Opnieuw afspelen*, *Pauze* en *Ander nummer* werken zoals bij Spotify. Herlaadt de host de pagina, of weigert de
 browser het geluid, dan staat op het spelscherm *Zet het geluid aan*: één tik en het fragment van de beurt begint
@@ -643,7 +668,8 @@ fragmenten speelt, haalt het op. Eén nummer per regel:
 ```
 
 - Een lijst toevoegen: een item in `lists` (de volgorde is die op het scherm) en het `id` bij de nummers die erin
-  horen. Een lijst zonder nummers wordt niet getoond: zo staan *Nederlandstalig* (`nl`) en *Rustige pop en ballads*
+  horen. Er hangt niets af van welke lijsten er zijn: een lijst waarin alle nummers zitten (nu *Alle hits*), staat
+  vooraan en zet bij aanvinken de andere uit; dat volgt uit de nummers, niet uit het `id`. Een lijst zonder nummers wordt niet getoond: zo staan *Nederlandstalig* (`nl`) en *Rustige pop en ballads*
   (`rustig`) er al klaar.
 - Een nummer wijzigen of toevoegen: die ene regel. `deezer` is het ID uit het adres bij Deezer
   (`deezer.com/track/<ID>`), `year` het jaar dat bij de onthulling verschijnt. Elk nummer zit in minstens één lijst;
@@ -817,6 +843,18 @@ Gedekt, automatisch:
   niet aanspreekt en geen lijst ophaalt, en dat de host Spotify niet aanspreekt. Het echte Deezer (`deezer.com`,
   `dzcdn.net`) is in alle tests geblokkeerd, ook met `npm run test:live`. De nagebootste Deezer geeft, zoals de
   echte, mp3-adressen met een hash in plaats van het ID.
+- De lijstkeuze met fragmenten (`tests/e2e/fragments.spec.js`, testlijst met 90 nummers in drie lijsten die
+  overlappen): standaard de lijst met alles, die meteen naar de server gaat; twee lijsten samen (zonder dubbels) en
+  een periode, met de aantallen per lijst; dat precies het getoonde totaal naar de server gaat (aantal, ID's, jaren,
+  naam, geen lijsten erbij); te weinig nummers voor het aantal spelers en het doel houdt *Start* tegen met uitleg,
+  minder kaarten maakt het weer genoeg; een keuze onder het minimum van de server haalt de oude stapel weg; een
+  periode zonder nummers, niets aangevinkt, en de lijst met alles samen met een andere; de keuze na een herlaad
+  (zonder iets opnieuw te sturen) en in een volgend spel; een gast ziet de omschrijving maar geen titel, artiest of
+  ID en haalt geen lijsten op; een volledig kort spel (naar 3 kaarten) met twee lijsten en een periode, waarin elk
+  fragment uit de keuze komt; en op 320 px breed met grotere letters valt niets buiten beeld of onder iets anders
+  (de wachtkamer heeft geen zwevende balk; de bovenbalk loopt daar over twee regels). Unit-tests
+  (`tests/unit/fragments.test.js`): samenvoegen, de periode en haar stappen, de aantallen, de omschrijving en haar
+  lengte, het nakijken van een bewaarde keuze, en de randgevallen.
 - Spelen op afstand (`tests/e2e/listen.spec.js`, drie gsm's): een gast zet *Geluid op dit toestel* aan en hoort het
   fragment van de host (in zijn eigen nagebootste Deezer te zien), gelijk met de host (binnen 0,45 s); hij volgt
   pauze, verder spelen, opnieuw afspelen, ander nummer, de onthulling en de volgende beurt, en haakt na een herlaad

@@ -118,7 +118,9 @@ code {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  /* Op een smal scherm met grote letters: de spelcode en de status op een tweede regel. */
+  flex-wrap: wrap;
+  gap: 6px 12px;
   /* Links en rechts: in liggende stand valt de rand anders onder de notch. */
   padding: calc(10px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px
     max(16px, env(safe-area-inset-left));
@@ -155,6 +157,7 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .page {
@@ -683,6 +686,126 @@ details ul {
 }
 
 /* ---------- nummers ---------- */
+
+/* Met fragmenten: lijsten aanvinken, een periode, en wat dat samen geeft. */
+.device.pick {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+}
+
+.pick-box {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--accent-ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.device.pick.on .pick-box {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.devices.picks {
+  gap: 6px;
+}
+
+.device.pick {
+  min-height: 48px;
+  padding: 8px 14px;
+}
+
+/* Naam links, aantal rechts; op een smal scherm het aantal eronder. */
+.pick-text {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pick-count {
+  white-space: nowrap;
+}
+
+.period {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.period legend {
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.period-row {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.period-field {
+  flex: 1 1 8.5rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.period-field select {
+  min-width: 0;
+}
+
+.deck-total {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.deck-total.short {
+  background: var(--sunken);
+  border-left-color: var(--amber);
+}
+
+.deck-total p + p {
+  margin-top: 2px;
+}
+
+.deck-total-line {
+  font-size: 1.05rem;
+}
+
+.deck-total-n {
+  font-family: var(--serif);
+  font-size: 1.6rem;
+}
+
+.deck-total-name {
+  font-weight: 600;
+}
 
 .deck-current {
   font-weight: 600;
