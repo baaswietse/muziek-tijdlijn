@@ -187,6 +187,9 @@ export function trackHost(state, online, now = Date.now()) {
  */
 export const STALE_MS = 45_000;
 
+/** Zo lang (ms) moet de host weg zijn voor een ander host kan worden (zie rules.js). */
+export const HOST_GRACE_MS = rules.HOST_GRACE_MS;
+
 /** Leeft een verbinding nog? `seen`: tijdstip (ms) van het laatste bericht. */
 export function alive(seen, now = Date.now(), stale = STALE_MS) {
   return Number.isFinite(seen) && now - seen <= stale;

@@ -233,4 +233,19 @@ test('verbindingen: wie te lang niets stuurde, telt als weg', () => {
   assert.equal(room.msSetting('rommel', 30_000), 30_000);
   assert.equal(room.msSetting('-5', 30_000), 30_000);
   assert.equal(rules.HOST_GRACE_MS, 30_000);
+  assert.equal(room.HOST_GRACE_MS, 30_000, 'de servers lezen de standaardwaarde hier');
+});
+
+test('terug naar de wachtkamer omdat de muziek niet verder kon: de wachtkamer zegt het tot het volgende spel', async () => {
+  const state = newRoom();
+  rules.startGame(state, 'p0', makeTracks(40), () => 0);
+  rules.setHost(state, 'p0', 'p1', { online: all });
+  await room.applyAction(state, 'p1', { t: 'lobby', why: 'music' }, { loadTracks: async () => makeTracks(40), online: all });
+  assert.equal(state.phase, 'lobby');
+  assert.equal(rules.viewFor(state, 'p2', all).note, 'music');
+  await room.applyAction(state, 'p1', { t: 'start' }, { loadTracks: async () => makeTracks(40), online: all });
+  assert.equal(rules.viewFor(state, 'p2', all).note, null);
+  // Een gewone stop zegt niets; een onbekende reden ook niet.
+  await room.applyAction(state, 'p1', { t: 'lobby', why: 'iets' }, { loadTracks: null, online: all });
+  assert.equal(rules.viewFor(state, 'p2', all).note, null);
 });
