@@ -1,81 +1,158 @@
 // Welke nummers er gespeeld worden: de standaardlijst van de site of een
-// eigen Spotify-playlist van de host, of met fragmenten een van de
-// ingebouwde lijsten. Alleen op de gsm van de host.
+// eigen Spotify-playlist van de host, of met fragmenten een of meer van de
+// ingebouwde lijsten, eventueel binnen een periode. Alleen op de gsm van de host.
 
-import { useEffect, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import { MAX_DECK as MAX, minutesLeft } from '../lib/deckplan.js';
-import { loadFragments } from '../lib/fragments.js';
-import { deckFor, listsOf } from '../fragment/lists.js';
+import { periodText } from '../fragment/lists.js';
 
-export function DeckPanel({ view, send, deck, loggedIn, source = 'spotify' }) {
-  if (source === 'fragment') return <FragmentLists view={view} deck={deck} />;
+export function DeckPanel({ view, send, deck, choice, loggedIn, source = 'spotify' }) {
+  if (source === 'fragment' && choice) return <FragmentLists deck={deck} choice={choice} />;
   return <SpotifyDeck view={view} send={send} deck={deck} loggedIn={loggedIn} />;
 }
 
-/** Met fragmenten: kies een van de lijsten van het spel. */
-function FragmentLists({ view, deck }) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [sample, setSample] = useState(null); // { name, total } als het spel een greep nam
-  const playlist = view.playlist?.source === 'fragment' ? view.playlist : null;
+const nummers = (n) => (n === 1 ? '1 nummer' : `${n} nummers`);
 
-  function load() {
-    setError('');
-    loadFragments().then(setData, (err) => setError(err.message));
-  }
-  useEffect(load, []);
-
-  async function pick(list) {
-    setBusy(true);
-    const { tracks, sampled, total } = deckFor(data, list.id);
-    if (await deck.sendList(list.name, tracks)) setSample(sampled ? { name: list.name, total } : null);
-    setBusy(false);
-  }
-
-  const lists = data ? listsOf(data) : null;
+/**
+ * Met fragmenten: vink een of meer lijsten van het spel aan en beperk
+ * eventueel de periode. Wat dat geeft, staat er meteen onder. De keuze zelf
+ * (bewaren, naar de server sturen) zit in lib/fragmentchoice.js.
+ */
+function FragmentLists({ deck, choice: c }) {
+  const limited = c.choice && (c.choice.from != null || c.choice.to != null);
+  const from = c.choice?.from ?? null;
+  const to = c.choice?.to ?? null;
   return (
     <section class="card" data-testid="deck-panel" data-source="fragment">
       <h2>Nummers</h2>
-      <p class="deck-current" data-testid="deck-current">
-        {playlist ? `Lijst «${playlist.name}» · ${playlist.count} nummers` : 'Kies een lijst.'}
-      </p>
-      {sample && playlist?.name === sample.name && (
-        <p class="muted small" data-testid="deck-sample">
-          Deze lijst heeft {sample.total} nummers; het spel koos er willekeurig {MAX} uit. Kies de lijst later opnieuw voor een andere greep.
-        </p>
-      )}
-      {!lists && !error && <p class="muted small">Lijsten ophalen…</p>}
-      {lists && (
-        <ul class="devices" data-testid="fragment-lists">
-          {lists.map((l) => (
-            <li key={l.id}>
-              <button
-                type="button"
-                class={`device${playlist?.name === l.name ? ' on' : ''}`}
-                aria-pressed={playlist?.name === l.name}
-                disabled={busy}
-                data-testid={`list-${l.id}`}
-                onClick={() => pick(l)}
-              >
-                <span class="device-name">{l.name}</span>
-                <span class="muted small">{l.count} nummers</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {(error || deck.error) && (
-        <p class="notice error" data-testid="deck-error">
-          {error || deck.error}
-          {error && (
-            <>
-              {' '}
-              <button class="btn link" onClick={load}>
-                Opnieuw
-              </button>
-            </>
+      {!c.data && !c.loadError && <p class="muted small">Lijsten ophalen…</p>}
+      {c.data && c.lists && (
+        <>
+          <p class="muted small">
+            Vink een of meer lijsten aan: je speelt met alle nummers die in minstens één ervan zitten.
+            {c.lists
+              .filter((l) => l.all)
+              .slice(0, 1)
+              .map((l) => ` «${l.name}» bevat alles en zet de andere uit.`)}
+          </p>
+          {limited && (
+            <p class="muted small" data-testid="count-period">
+              Aantallen per lijst binnen de periode {periodText(c.choice)}.
+            </p>
           )}
+          <ul class="devices picks" data-testid="fragment-lists">
+            {c.lists.map((l) => {
+              const on = c.choice.lists.includes(l.id);
+              return (
+                <li key={l.id}>
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={on}
+                    class={`device pick${on ? ' on' : ''}`}
+                    data-testid={`list-${l.id}`}
+                    onClick={() => c.toggle(l.id)}
+                  >
+                    <span class="pick-box" aria-hidden="true">
+                      {on ? '✓' : ''}
+                    </span>
+                    <span class="pick-text">
+                      <span class="device-name">{l.name}</span>
+                      <span class="muted small pick-count" data-testid={`count-${l.id}`}>
+                        {nummers(l.count)}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {c.bounds && (c.options.from.length > 0 || c.options.to.length > 0) && (
+            <fieldset class="period" data-testid="period">
+              <legend class="label">
+                Periode <span class="muted">(nummers van {c.bounds.min} tot {c.bounds.max})</span>
+              </legend>
+              <div class="period-row">
+                <label class="period-field">
+                  <span>Van</span>
+                  <select
+                    class="input"
+                    data-testid="period-from"
+                    value={from ?? ''}
+                    onChange={(e) => c.setFrom(e.currentTarget.value)}
+                  >
+                    <option value="">het begin</option>
+                    {c.options.from
+                      .filter((y) => to == null || y <= to)
+                      .map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label class="period-field">
+                  <span>tot en met</span>
+                  <select class="input" data-testid="period-to" value={to ?? ''} onChange={(e) => c.setTo(e.currentTarget.value)}>
+                    <option value="">nu</option>
+                    {c.options.to
+                      .filter((y) => from == null || y >= from)
+                      .map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+              {limited && (
+                <button type="button" class="btn link" data-testid="period-clear" onClick={c.clearPeriod}>
+                  Alle jaren
+                </button>
+              )}
+            </fieldset>
+          )}
+
+          <div
+            class={`deck-total${c.enough ? '' : ' short'}`}
+            data-testid="deck-total"
+            data-total={c.total}
+            data-synced={c.synced ? 'yes' : 'no'}
+            aria-live="polite"
+          >
+            <p class="deck-total-line">
+              <strong class="deck-total-n" data-testid="deck-count">
+                {c.total}
+              </strong>{' '}
+              {c.total === 1 ? 'nummer' : 'nummers'}
+            </p>
+            <p class="small deck-total-name" data-testid="deck-name">
+              {c.name || 'Nog geen lijst gekozen'}
+            </p>
+            {c.sampled && (
+              <p class="muted small" data-testid="deck-sample">
+                Het spel kiest er willekeurig {MAX} uit.
+              </p>
+            )}
+          </div>
+          {!c.enough && (
+            <p class="notice warn" data-testid="deck-short">
+              {c.choice.lists.length === 0
+                ? 'Vink minstens één lijst aan.'
+                : c.total === 0
+                  ? 'Geen nummers in deze periode. Kies een ruimere periode of andere lijsten.'
+                  : `Te weinig nummers: voor ${c.players === 1 ? '1 speler' : `${c.players} spelers`} naar ${c.target} kaarten zijn er minstens ${c.need} nodig. Vink meer lijsten aan, kies een ruimere periode of speel naar minder kaarten.`}
+            </p>
+          )}
+        </>
+      )}
+      {(c.loadError || deck.error) && (
+        <p class="notice error" data-testid="deck-error">
+          {c.loadError || deck.error}{' '}
+          <button class="btn link" onClick={c.loadError ? c.reload : c.retry}>
+            Opnieuw
+          </button>
         </p>
       )}
     </section>

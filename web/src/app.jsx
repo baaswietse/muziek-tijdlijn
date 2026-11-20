@@ -6,6 +6,7 @@ import { keepAwake } from './lib/wakelock.js';
 import { useHostMusic } from './lib/source.js';
 import { useListen } from './lib/listen.js';
 import { useDeck } from './lib/deck.js';
+import { useFragmentChoice } from './lib/fragmentchoice.js';
 import { APP_NAME } from './config.js';
 import { Home } from './screens/Home.jsx';
 import { Lobby } from './screens/Lobby.jsx';
@@ -91,6 +92,8 @@ export function App({ loginResult }) {
   const latency = useCallback(() => conn.current?.latency() ?? 0, []);
   const listen = useListen({ view, send, net, incoming: sound, latency });
   const deck = useDeck({ code, token, phase: view?.phase ?? null, players: view?.players.length ?? 1, target: view?.settings.target ?? 10 });
+  // Met fragmenten: welke lijsten en welke periode (alleen bij de host).
+  const choice = useFragmentChoice({ enabled: isHost && music.source === 'fragment', view, deck, send });
 
   useEffect(() => {
     keepAwake(Boolean(session));
@@ -115,7 +118,7 @@ export function App({ loginResult }) {
       </main>
     );
   } else if (view.phase === 'lobby') {
-    screen = <Lobby view={view} send={send} music={music} listen={listen} deck={deck} onLeave={leave} notify={notify} />;
+    screen = <Lobby view={view} send={send} music={music} listen={listen} deck={deck} choice={choice} onLeave={leave} notify={notify} />;
   } else {
     // Het spelscherm heeft een eigen bovenbalk (stand en menu), met daarin ook
     // de verbindingsstatus en de testmodus.
