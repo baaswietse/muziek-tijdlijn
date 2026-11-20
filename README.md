@@ -35,6 +35,12 @@ Details:
 - Is de stapel op voor iemand het doel haalt, dan wint wie de meeste kaarten heeft (gelijkspel kan).
 - Later instappen kan: je krijgt een startkaart en sluit achteraan aan.
 - De host kan een ander nummer vragen (als er een niet afspeelt), een beurt overslaan en een speler verwijderen.
+- De host kan zijn rol doorgeven aan een andere speler die verbonden is: in de wachtkamer met *Maak host* bij die
+  speler, tijdens het spel in het menu met *Geef de host-rol door*. Telkens met een bevestigingsvraag. Hij speelt
+  daarna gewoon mee als gewone speler. Is de host een halve minuut niet verbonden (gsm uit, batterij leeg, netwerk
+  kwijt), dan krijgen de anderen de melding *De host is weg* met de knop *Word host*: wie eerst tikt, wordt host.
+  Komt de vorige host terug, dan speelt hij mee als gewone speler. Niets gebeurt vanzelf; zie *De host-rol
+  doorgeven en overnemen*.
 - Een tweede spel in dezelfde kamer herhaalt geen nummers zolang er genoeg ongespeelde zijn.
 - De host kiest de nummers: met Spotify de standaardlijst van het spel of een van zijn eigen Spotify-playlists; met
   fragmenten een of meer lijsten van het spel, eventueel binnen een periode (zie *Spelen met fragmenten*).
@@ -54,10 +60,14 @@ Details:
   stapel zitten), bij fragmenten voor de andere spelers een luidsprekerknop (*Geluid op dit toestel*, aan of uit) en
   rechts het menu (spelcode, spelregels, voor de andere spelers *Verlaat het spel* en bij fragmenten nog eens
   *Geluid op dit toestel*, en voor de host de muziek, *Ander
-  nummer*, *Sla beurt over*, een speler verwijderen en *Stop dit spel*; na afloop *Terug naar de wachtkamer*). De
-  host heeft tijdens het spel geen *Verlaat het spel*: zonder hem zat de rest midden in een beurt zonder muziek en
-  zonder host. Hij stopt het spel en kan in de wachtkamer nog altijd vertrekken; zitten er dan nog anderen, dan zegt
-  de vraag dat zij zonder host achterblijven en zelf een nieuw spel moeten maken. Daaronder één regel uitleg en één tijdlijn:
+  nummer*, *Sla beurt over*, *Geef de host-rol door*, een speler verwijderen en *Stop dit spel*; na afloop *Terug
+  naar de wachtkamer*). De host heeft tijdens het spel geen *Verlaat het spel*: zonder hem zat de rest midden in
+  een beurt zonder muziek en zonder host. Wil hij weg, dan geeft hij eerst de rol door (dat zegt het menu ook); als
+  gewone speler kan hij daarna vertrekken. Of hij stopt het spel. In de wachtkamer kan hij altijd vertrekken; zitten
+  er nog anderen, dan stelt de vraag voor om eerst een nieuwe host aan te duiden (*Maak host*), en zegt ze dat de
+  anderen anders even zonder host zitten, tot een van hen na een halve minuut host wordt. Is de host weg, dan staat
+  *De host is weg* met *Word host* bij de anderen onder de uitleg (en in de wachtkamer bovenaan), alleen als het
+  zover is. Daaronder één regel uitleg en één tijdlijn:
   die waarop nu gespeeld wordt. Tijdens andermans beurt wissel je tussen zijn tijdlijn en de jouwe; via de stand kan
   je elke tijdlijn bekijken. Een probleem met de muziek ziet de host als één regel met een knop op het spelscherm
   zelf, niet alleen in het menu.
@@ -132,12 +142,65 @@ gsm host  ──┘        │
   `settings`, `clearDeck`, `select`, `place`, `challenge` (met `index`: een token inzetten), `pass` (deze beurt geen
   token inzetten), `reveal` (einde van het inzetten, pas als iedereen koos; de host kan met `force: true` toch
   onthullen), `buy` (op je eigen beurt de kaart kopen voor 3 tokens), `next`, `token` (met `playerId` van wie het token van deze beurt krijgt; leeg neemt het terug),
-  `skipTrack`, `skipTurn`, `remove` en `lobby`. De server antwoordt met `{ t: 'state' }` of
-  `{ t: 'error', code, message }`. Zie `server/src/room.js`.
+  `skipTrack`, `skipTurn`, `remove`, `lobby` (met `why: 'music'` als de muziek niet verder kon; de wachtkamer zegt
+  dat dan aan iedereen), `setHost` (met `playerId`: de host geeft zijn rol door) en `takeHost` (de host is lang
+  genoeg weg: word host). De server antwoordt met `{ t: 'state' }` of `{ t: 'error', code, message }`. In de stand
+  staat ook `hostAway: { ms, grace } | null` en `note`. Zie `server/src/room.js`.
 - **Geluid op afstand (alleen met fragmenten).** De host stuurt `sound` (`{ action: 'play' | 'url' | 'pause' |
   'resume', trackId, url? }`); een andere speler stuurt `listen` (`{ on: true | false }`, per verbinding) en
   `soundFail` (`{ n }`: het adres speelt hier niet). Wie `listen` aan heeft, krijgt naast de stand een apart bericht
   `{ t: 'sound', sound: { n, url, playing, pos } | null }`. Zie *Spelen op afstand* hieronder en `server/src/sound.js`.
+- **De host-rol doorgeven en overnemen** (`server/src/rules.js`: `setHost`, `takeHost`, `trackHost`;
+  `web/src/components/Host.jsx`):
+  - **Doorgeven.** Alleen de host, alleen aan een andere speler die volgens de server nu verbonden is. De oude host
+    blijft in het spel als gewone speler. Alles wat alleen de host mocht (starten, instellingen, lijst, muziek,
+    overslaan, verwijderen, stoppen, onthullen met de noodknop, het geluid voor wie meeluistert, de gedeelde
+    jaartallen), mag daarna alleen de nieuwe host: de server kijkt bij elk bericht na wie nu host is. Elke speler
+    houdt zijn eigen geheime sleutel; er verandert alleen `hostId`.
+  - **Overnemen.** De server houdt in de stand bij sinds wanneer de host niet verbonden is (`hostAwaySince`, met
+    de klok van de server). Dat gebeurt telkens als er iets verandert aan wie verbonden is, en ook bij elke actie.
+    `takeHost` lukt alleen als de server zelf ziet dat de host op dat moment niet verbonden is en dat al minstens
+    de wachttijd lang: 30 s (`HOST_GRACE_MS`, in de e2e-tests 5 s). Zolang de host verbonden is, of nog maar net
+    weg, weigert de server (`HOST_HERE`, `HOST_WAIT`), ook als een gsm het bericht zonder de knop stuurt. Een korte
+    haper of een vergrendeld scherm (de gsm herverbindt binnen enkele seconden) lokt dus niets uit, en een speler
+    kan de rol niet kapen terwijl de host er is. De eerste die tikt, wordt host; daarna is de host er weer en
+    weigert de server de volgende. Ziet de server de host pas weg zonder het moment te kennen (een oudere kamer, een
+    herstart), dan begint de telling op dat moment: nooit korter.
+  - **Wanneer de melding komt.** In de stand staat `hostAway: { ms, grace }`: hoe lang de host al weg is en de
+    wachttijd. De gsm telt zelf verder vanaf het moment dat die stand aankwam (de eigen klok van de gsm, geen
+    klokken vergelijken), en toont *De host is weg* pas als de wachttijd om is. De server hoeft daarvoor niets te
+    sturen; op Cloudflare kan de kamer dus intussen slapen.
+  - **Wie is er nog?** Een gsm waarvan de batterij leeg is of die zijn netwerk kwijt is, sluit de verbinding niet
+    netjes: de server zou hem dan nog lang verbonden wanen. Daarom telt een verbinding die 45 s (`STALE_MS`) niets
+    stuurde als weg en sluit de server ze; de gsm pingt om de 15 s. Op Node kijkt een timer dat om de 5 s na. Op
+    Cloudflare beantwoordt Cloudflare de pings zelf zonder de kamer wakker te maken; het onthoudt wel wanneer
+    (`getWebSocketAutoResponseTimestamp`), en een andere boodschap zet de kamer zelf in de bijlage van de
+    verbinding. Zolang er verbindingen zijn, gaat de wekker van de kamer om de 15 s af, sluit wie te lang stil was,
+    en vertelt het de anderen (anders een halve dag later om de kamer op te ruimen, zoals voordien). `hostAwaySince`
+    staat in de bewaarde stand, dus het overleeft een kamer die slaapt of herstart.
+  - **Wat de nieuwe host ziet.** Hetzelfde als elke host: vanaf dan het track-ID van het lopende nummer (om het af
+    te spelen), en bij fragmenten de geluidsstand zonder adres. Niets extra: geen titel, artiest of jaar, geen
+    stapel en niet de nummers van de eigen lijst. De vorige host krijgt het track-ID niet meer. Wie host wordt
+    terwijl hij zelf aan de beurt is, kan het ID van zijn eigen nummer vinden in de ontwikkelaarstools, net zoals
+    een host dat altijd kan bij zijn eigen beurten (zie *Wat de browsers zien*).
+  - **De muziek volgt de host.** De gsm die host wordt, neemt de bron over die bij de lijst op de server past (een
+    lijst met fragmenten: fragmenten; al de rest: Spotify). Met fragmenten loopt het nummer van de beurt door: het
+    geluid voor wie meeluistert blijft bij het nummer op de server, dus wie *Geluid op dit toestel* aan heeft, hoort
+    gewoon verder. De nieuwe host ziet *Jij bent nu de host* met *Zet het geluid aan* (één tik; het fragment begint
+    dan bij iedereen opnieuw, zoals na een herlaad) of *Geen geluid op dit toestel*. Met Spotify is de nieuwe host
+    meestal niet ingelogd: hij ziet meteen *Log in bij Spotify* (Premium nodig, en in «development mode» moet hij
+    bij *User Management* van de app staan) of *Stop en kies fragmenten*. Dat laatste brengt iedereen terug naar
+    de wachtkamer met de uitleg dat de muziek van Spotify bij de vorige host kwam; een Spotify-lijst speelt niet
+    met fragmenten, dus hij kiest daar een lijst met fragmenten en start een nieuw spel. Zo kan het spel nooit
+    vastlopen. De vorige host zet zijn muziek stil (fragment of Spotify) zodra hij geen host meer is.
+  - **De eigen lijst van de vorige host** (een playlist of fragmentenlijst) blijft op de server, ook als de kamer
+    slaapt of herstart (op Cloudflare apart bewaard; op Node in `DATA_FILE` als dat ingesteld is). De nieuwe host
+    speelt er gewoon mee verder, ook *Nog een spel*, tot hij een andere kiest; hij hoeft niets opnieuw te sturen.
+    Wat niet meegaat: het opzoeken van jaartallen dat nog liep op de gsm van de vorige host (de rest van de
+    playlist komt er niet meer bij) en zijn verbeteringen die nog niet doorgestuurd waren. De nieuwe host kan
+    die playlist ook niet zelf opnieuw inlezen: Spotify laat alleen de eigenaar of een medewerker een playlist
+    lezen. De vorige host stopt met opzoeken zodra hij geen host meer is (alleen de host kan een lijst sturen);
+    wordt hij later weer host, dan gaat het verder.
 - **Spotify blijft bij de host.** De host logt in met Authorization Code + PKCE, volledig in de browser. Er is geen
   Client Secret, en de tokens gaan nooit naar de spelserver.
 - **Twee manieren om geluid te maken.** De site stuurt een Spotify-toestel aan (Spotify Connect): een gsm, laptop, tv
@@ -405,7 +468,8 @@ Zonder Spotify (geen account, geen Premium): zie *Spelen met fragmenten*. Met Sp
    anders vul je enkel je naam in. Instappen in een spel dat al loopt kan ook: je krijgt dan een startkaart.
    - Zat je nog in een ander spel als gast, dan stap je meteen over; je oude plaats blijft daar als offline speler
      staan, net als bij *Verlaat het spel*.
-   - Ben je host van een ander spel, dan vraagt de site eerst of je overstapt: zonder host valt dat spel stil.
+   - Ben je host van een ander spel, dan vraagt de site eerst of je overstapt: de anderen zitten daar dan even
+     zonder host, tot een van hen na een halve minuut host wordt. Geef de rol liever eerst door.
    - Is je naam al bezet, of is de server even onbereikbaar, dan kies je een andere naam of tik je opnieuw. Bestaat
      het spel niet (meer) of zit het vol, dan krijg je een melding en blijf je waar je was.
 5. **Host:** start het spel. Elke beurt begint het nummer vanzelf.
@@ -555,6 +619,8 @@ Een box of auto met een schermpje kan de titel ook tonen.
 | «Spotify weigert dit commando» | Geen Premium, of het account staat niet bij *User Management* van de app. |
 | Een nummer speelt niet af | *Ander nummer* (host): dezelfde speler krijgt een nieuw nummer. |
 | Iemand is even weg | *Sla beurt over* (host). |
+| De host moet weg, of zijn batterij is bijna leeg | De host geeft de rol door: *Maak host* in de wachtkamer, of *Geef de host-rol door* in het menu. |
+| «De host is weg» | De host is al een halve minuut niet verbonden. Tik op *Word host* (wie eerst tikt). Met fragmenten: tik daarna op *Zet het geluid aan*. Met Spotify: log in, of *Stop en kies fragmenten*. |
 | Scherm was vergrendeld | Niets doen: de gsm herverbindt vanzelf en kijkt na of het juiste nummer speelt. |
 | *Test het geluid* staat uit | Tijdens een spel zou de test het nummer van de beurt onderbreken: gebruik dan *Opnieuw afspelen*. |
 | Fragmenten: geen geluid | Tik op *Zet het geluid aan* (na een herlaad altijd nodig). Staat het volume van de gsm open? |
@@ -873,6 +939,16 @@ Gedekt, automatisch:
   nummer, en het rekenen op de gsm (verstreken tijd, herhalen, wanneer bijspringen). Unit-tests: het bronbestand en de lijsten,
   het opvragen van een adres, de speler (ontgrendelen, herhalen, geweigerd, verlopen, een nieuwere start wint) en hoe
   de server een fragmentenlijst herkent; `tools/test_deezer.py` voor het zoeken en het maken van de lijsten.
+- De host-rol (`tests/unit/host.test.js`, `tests/e2e/host.spec.js`, drie gsm's): doorgeven in de wachtkamer (met
+  de vraag, niet aan wie niet verbonden is, de oude host kan daarna niets meer van de host en de server weigert
+  ook berichten zonder de knop) en tijdens een spel met fragmenten (de muziek gaat door bij de nieuwe host, een
+  gast met *Geluid op dit toestel* hoort zonder onderbreking verder, de oude host is stil, krijgt het track-ID
+  niet meer en kan daarna vertrekken); de host valt weg (een korte haper lokt niets uit, voor de wachttijd geen
+  melding en weigert de server, daarna bij iedereen *De host is weg*, de eerste die tikt wordt host, het spel gaat
+  verder, de oude host komt terug als gewone speler); met Spotify logt de nieuwe host in en speelt het nummer van
+  de beurt verder, of stopt hij en speelt hij met fragmenten verder (met de uitleg in de wachtkamer). Unit-tests
+  voor de regels (doorgeven, overnemen pas na de wachttijd, niet kapen, rechten daarna, het geluid voor wie
+  meeluistert) en voor wanneer een stille verbinding als weg telt.
 - Beide servervarianten (Node en Cloudflare, lokaal), en met `npm run test:live` de uitgerolde site en server.
 
 Niet gedekt, alleen in het echt te testen:
@@ -897,3 +973,9 @@ Niet gedekt, alleen in het echt te testen:
   zitten), en of het echte adres van Deezer echt
   geen ID bevat en op een andere gsm (ander IP-adres) speelt, is niet nagekeken.
 - De voorwaarden van Deezer voor het gebruik van de API en de fragmenten in een spel zijn niet nagekeken.
+- De host-rol in het echt: hoe snel een echte gsm met een lege batterij of zonder netwerk als weg telt (verwacht:
+  hoogstens 45 s zonder ping, plus de wachttijd van 30 s), hoe een vergrendelde gsm zich gedraagt (een pagina op
+  de achtergrond pingt trager of niet: na 45 s telt ze als weg, en na de wachttijd kan een ander host worden; de
+  host houdt zijn scherm normaal wakker) en inloggen bij de echte Spotify als nieuwe host. Getest is met
+  nagebootste gsm's die de pagina sluiten; dat een verbinding die stil valt zonder te sluiten na 45 s weg is, is
+  op beide servers alleen met een los script nagekeken, niet in de e2e-tests (dat zou elke run 45 s trager maken).
