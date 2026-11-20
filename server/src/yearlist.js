@@ -10,7 +10,7 @@
 // dezelfde regels volgen.
 
 import { GameError } from './rules.js';
-import { TRACK_ID } from './tracks.js';
+import { FRAGMENT_ID, TRACK_ID } from './tracks.js';
 
 /** Hoogstens zoveel nummers per opvraging en per schrijfverzoek. */
 export const MAX_IDS = 500;
@@ -281,4 +281,115 @@ export function exportPage(sortedAfter, limit = EXPORT_PAGE) {
   const page = sortedAfter.slice(0, limit).map(exportEntry);
   const next = sortedAfter.length > limit && page.length ? page[page.length - 1].id : null;
   return { entries: page, next };
+}
+
+// ---------- testrijen ----------
+//
+// De e2e-tests schrijven ook in de echte lijst (MT_LIVE=1), met verzonnen
+// track-ID's die met 'zz' beginnen (tests/e2e/fake-spotify.js, fakeIds). Zo'n
+// ID kan nooit een echt nummer zijn: een Spotify-ID is een getal van 128 bits
+// in 22 tekens base62 (0-9a-zA-Z), dus het eerste teken is altijd 0 tot 7.
+// De server ruimt zulke rijen zelf op zodra ze ouder zijn dan TEST_MAX_AGE.
+//
+// Voorzichtig: alleen wat met 'zz' begint, telt als testrij. Een ander ID dat
+// geen Spotify-ID is (een fragment van Deezer, 'dz-…', of een vorm die er later
+// bij komt) blijft staan: bij twijfel wordt niets gewist.
+
+/** Zo ziet een (mogelijk) echt Spotify-track-ID eruit. */
+export const SPOTIFY_ID = /^[0-7][0-9A-Za-z]{21}$/;
+/** Waarmee de verzonnen ID's van de tests beginnen. */
+export const TEST_PREFIX = 'zz';
+/** Een testrij blijft zo lang staan (ms): ruim genoeg voor een testrun die schrijft en terugleest. */
+export const TEST_MAX_AGE = 60 * 60 * 1000;
+/** Hoogstens eens per zoveel ms opruimen (behalve als er nog een volle partij wachtte). */
+export const PURGE_EVERY = 10 * 60 * 1000;
+/** Hoogstens zoveel testrijen per keer, zodat een verzoek nooit lang duurt. */
+export const PURGE_BATCH = 500;
+/**
+ * Alle ID's die met TEST_PREFIX beginnen, liggen (bij een gewone
+ * tekstvergelijking) in [from, to): 'zz' <= id < 'z{'. Zo kan SQLite ze via de
+ * primaire sleutel vinden; isTestId beslist daarna.
+ */
+export const TEST_RANGE = {
+  from: TEST_PREFIX,
+  to: TEST_PREFIX.slice(0, -1) + String.fromCharCode(TEST_PREFIX.charCodeAt(TEST_PREFIX.length - 1) + 1),
+};
+
+/** Kan dit een echt Spotify-track-ID zijn? */
+export function possibleSpotifyId(id) {
+  return typeof id === 'string' && SPOTIFY_ID.test(id);
+}
+
+/**
+ * Is dit een verzonnen ID van een test (een tijdelijke rij)? Alleen als het met
+ * TEST_PREFIX begint; wat een echt nummer of een fragment kan zijn, nooit.
+ */
+export function isTestId(id) {
+  return (
+    typeof id === 'string' &&
+    TRACK_ID.test(id) &&
+    id.startsWith(TEST_PREFIX) &&
+    !possibleSpotifyId(id) &&
+    !FRAGMENT_ID.test(id)
+  );
+}
+
+/** Een geheel getal >= 0 uit een instelling (tekst of getal), anders `fallback`. */
+function setting(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : fallback;
+}
+
+/**
+ * De instellingen voor het opruimen, uit omgevingsvariabelen (Node) of vars
+ * (Cloudflare): YEARS_TEST_MAX_AGE_MS en YEARS_PURGE_EVERY_MS. Alleen de tests
+ * zetten ze, om niet een uur te moeten wachten.
+ */
+export function purgeSettings(env = {}) {
+  return {
+    maxAge: setting(env?.YEARS_TEST_MAX_AGE_MS, TEST_MAX_AGE),
+    every: setting(env?.YEARS_PURGE_EVERY_MS, PURGE_EVERY),
+    batch: PURGE_BATCH,
+  };
+}
+
+/**
+ * De ID's van testrijen die weg mogen: ouder dan maxAge (veld `at`, ms), in de
+ * volgorde van `rows`, hoogstens `batch`. Een rij zonder geldig tijdstip blijft.
+ */
+export function expiredTestIds(rows, now, { maxAge = TEST_MAX_AGE, batch = PURGE_BATCH } = {}) {
+  const out = [];
+  for (const row of rows) {
+    if (out.length >= batch) break;
+    if (!isTestId(row?.id) || !Number.isInteger(row.at)) continue;
+    if (now - row.at > maxAge) out.push(row.id);
+  }
+  return out;
+}
+
+/**
+ * Houdt bij wanneer er laatst opgeruimd werd. Beide servers roepen run() op bij
+ * elk verzoek aan de lijst (opvragen, schrijven, export); het werk gebeurt
+ * hoogstens eens per `every` ms, of bij het volgende verzoek opnieuw als de
+ * vorige keer een volle partij was (dan wacht er nog meer).
+ *  - candidates(cutoff, batch): rijen { id, at } die in aanmerking komen (mag
+ *    ruimer zijn, expiredTestIds beslist), bv. de testrijen met at < cutoff.
+ *  - remove(ids): verwijdert die rijen.
+ * Geeft het aantal verwijderde rijen terug.
+ */
+export class TestRowCleaner {
+  constructor(settings = purgeSettings()) {
+    this.settings = settings;
+    this.last = null;
+  }
+
+  run(now, candidates, remove) {
+    const { every, maxAge, batch } = this.settings;
+    if (this.last !== null && now - this.last < every) return 0;
+    const ids = expiredTestIds(candidates(now - maxAge, batch), now, this.settings);
+    if (ids.length) remove(ids);
+    this.last = ids.length >= batch ? null : now;
+    return ids.length;
+  }
 }

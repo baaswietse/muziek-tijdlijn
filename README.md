@@ -282,6 +282,24 @@ gsm host  ──┘        │
 
   Een gast krijgt `400 HOST_ONLY`, een onbestaand spel `404 NO_ROOM`, de sleutel van een ander spel `400 BAD_TOKEN`.
   Zie `server/src/yearlist.js`.
+- **Testrijen ruimt de server zelf op.** De e2e-tests schrijven ook in de echte gedeelde lijst (`npm run test:live`),
+  met verzonnen track-ID's die met `zz` beginnen (`fakeIds` in `tests/e2e/fake-spotify.js`). Zo'n ID kan geen echt
+  nummer zijn: een Spotify-ID is een getal van 128 bits in 22 tekens base62, en begint dus altijd met een cijfer van
+  0 tot 7. De server beschouwt een rij als testrij als het ID met `zz` begint (`isTestId` in
+  `server/src/yearlist.js`, de enige plaats waar die regel staat), en verwijdert ze zodra ze langer dan een uur niet
+  meer veranderd zijn. Al het andere blijft staan, ook een ID dat geen Spotify-ID is maar ook niet met `zz` begint
+  (zoals een fragment van Deezer, `dz-…`): bij twijfel wordt niets gewist. Er is geen route om iets te verwijderen.
+  Het opruimen gebeurt bij een verzoek aan de lijst (opvragen, schrijven of export, na de controle dat het van een
+  host komt), op Node en op Cloudflare op dezelfde manier: hoogstens eens per tien minuten, en hoogstens 500 rijen
+  per keer (zat de partij vol, dan gaat het bij het volgende verzoek meteen verder). Het tijdstip van de laatste keer
+  staat alleen in het geheugen, dus na een herstart of een uitrol ruimt het eerste verzoek meteen op. Op Cloudflare
+  leest dat alleen het stuk van de tabel met de `zz`-ID's (via de primaire sleutel), en het logboek van de Worker
+  meldt `gedeelde lijst: N oude testrij(en) opgeruimd`. Voor tests zijn de grens en de pauze in te stellen met
+  `YEARS_TEST_MAX_AGE_MS` en `YEARS_PURGE_EVERY_MS` (omgevingsvariabelen bij Node, `--var` bij `wrangler dev`).
+
+  Nagaan of de testrijen weg zijn: vraag als host de export op (`POST /api/rooms/:code/years/export`, pagina per
+  pagina met `after`) en kijk of er nog ID's met `zz` tussen staan waarvan `at` meer dan een uur geleden is. Een
+  verse testrun laat er tot een uur lang wel enkele staan; dat is de bedoeling.
 
 ## Eenmalige opzet
 
@@ -334,7 +352,7 @@ Vanaf dan rolt Cloudflare de server opnieuw uit bij elke push naar `main`. Lieve
 
 Het gratis plan volstaat ruim: wie over een daglimiet gaat, krijgt fouten tot middernacht (UTC), geen factuur. De server
 bewaart elk spel, dus een spel overleeft ook een herstart. Kamers die een halve dag stil liggen, ruimt hij zelf op.
-De gedeelde lijst met jaartallen blijft wel staan. Ook die maakt `wrangler deploy` zelf aan (de migratie `v2` in
+De gedeelde lijst met jaartallen blijft wel staan (alleen testrijen ruimt de server na een uur op, zie hoger). Ook die maakt `wrangler deploy` zelf aan (de migratie `v2` in
 `wrangler.jsonc`); in het dashboard hoeft daarvoor niets.
 
 **B. Eigen server (alternatief)**
@@ -761,19 +779,27 @@ Gedekt, automatisch:
 - De gedeelde jaartallen: een tweede host (ander toestel, ander spel) doet geen enkel verzoek naar MusicBrainz en krijgt
   de verbeteringen van de eerste; gasten en onbestaande spellen worden geweigerd; zonder die routes op de server (een
   oudere server, of onbereikbaar) werkt een playlist zoals vroeger. De verzonnen nummers krijgen bij elke run nieuwe
-  ID's, zodat ook `npm run test:live` herhaalbaar is; zo'n run laat 8 rijen achter in de echte gedeelde lijst.
+  ID's, zodat ook `npm run test:live` herhaalbaar is; zo'n run laat 8 rijen achter in de echte gedeelde lijst, die
+  de server na een uur zelf opruimt.
+- Het opruimen van testrijen: unit-tests (`tests/unit/yearlist.test.js`) voor de regel (welke ID's een echt
+  Spotify-ID kunnen zijn, welke testrijen zijn, ook de oudere vorm van verzonnen ID's, en dat `dz-…` en andere vormen
+  blijven), voor wat weggaat en wat blijft (alleen testrijen ouder dan de grens, niet zonder tijdstip) en voor de
+  begrenzing (500 per keer, hoogstens eens per tien minuten, meteen verder na een volle partij). En
+  `tests/e2e/cleanup.spec.js`, op beide servervarianten: die start een eigen server met een grens van 4 s en kijkt
+  na dat een oude testrij (ook in de oudere vorm) verdwijnt, en een even oud echt nummer, een fragment en een verse
+  testrij blijven. Niet met `npm run test:live` (daar kan de grens niet korter).
 - Een eigen playlist zonder wachten, tegen een trage nagebootste MusicBrainz: starten terwijl er nog opgezocht wordt,
   doorzoeken tijdens het spel zonder de stapel van dat spel te raken en meer nummers in het volgende spel, verder na
   een herlaad, een willekeurige greep uit een playlist van meer dan 500 nummers, en stoppen, een andere playlist of
   de standaardlijst kiezen midden in het opzoeken of terwijl een upload nog onderweg is, een herlaad nadat het
   opzoeken tijdens het spel klaar raakte, en een evenwichtige greep bij een vroege start. Een run laat hoogstens 51
-  rijen achter in de gedeelde lijst.
+  rijen achter in de gedeelde lijst (voor een uur).
 - Wikidata als derde bron, tegen een nagebootste Wikidata (`tests/e2e/wikidata.spec.js`): overeenstemming zonder
   twijfel, onenigheid die Wikidata beslist, geen Wikidata-resultaat, Wikidata onbereikbaar of te druk (alles zoals
   met twee bronnen), oude jaartallen met twijfel die opnieuw beoordeeld worden (zonder nieuw verzoek naar
   MusicBrainz waar dat kan), een handmatige verbetering die blijft, titel en artiest aanvullen, en de export voor de
   host (in pagina's; gasten en onbestaande spellen geweigerd). Het echte MusicBrainz en Wikidata worden in geen enkele
-  test aangesproken, ook niet met `npm run test:live`. Een run laat 16 rijen achter in de gedeelde lijst.
+  test aangesproken, ook niet met `npm run test:live`. Een run laat 16 rijen achter in de gedeelde lijst (voor een uur).
 - De regels voor het kiezen van een jaartal (dezelfde in de browser en in het Python-script), ook met een nagebootste
   MusicBrainz die pagina's en de filters op eerste release en studio-uitgave nadoet, en met echte gevallen waar
   MusicBrainz te vroeg zat (fout gedateerde verzamelaars, een remix die als origineel telde, een losse fout

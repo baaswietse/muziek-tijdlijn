@@ -10,6 +10,10 @@
 //   ALLOWED_ORIGINS  komma-gescheiden lijst van toegelaten sites, of * (standaard)
 //   DATA_FILE        optioneel: bestand om lopende spellen en de gedeelde lijst
 //                    met jaartallen in te bewaren
+//   YEARS_TEST_MAX_AGE_MS, YEARS_PURGE_EVERY_MS
+//                    alleen voor tests: na hoeveel ms een testrij in de gedeelde
+//                    lijst weg mag (standaard een uur) en hoe vaak er hoogstens
+//                    opgeruimd wordt (standaard tien minuten); zie yearlist.js
 
 import http from 'node:http';
 import { readFile, writeFile, rename } from 'node:fs/promises';
@@ -39,6 +43,25 @@ const rooms = new Map();
 
 /** De gedeelde lijst met jaartallen (zie ../src/yearlist.js): id -> { id, y, s, d, r?, b?, title?, artist?, at } */
 const years = new Map();
+
+// Oude testrijen in de gedeelde lijst ruimt de server zelf op (zie
+// yearlist.TestRowCleaner), bij elk verzoek aan de lijst en hoogstens eens per
+// zoveel tijd, zoals op Cloudflare.
+const yearCleaner = new yearlist.TestRowCleaner(yearlist.purgeSettings(process.env));
+
+function* yearRows() {
+  for (const entry of years.values()) yield entry;
+}
+
+function cleanTestRows() {
+  const removed = yearCleaner.run(Date.now(), yearRows, (ids) => {
+    for (const id of ids) years.delete(id);
+  });
+  if (removed) {
+    console.log(`gedeelde lijst: ${removed} oude testrij(en) opgeruimd`);
+    scheduleSave();
+  }
+}
 
 // ---------- nummers ----------
 
@@ -92,6 +115,9 @@ function loadSaved() {
       const entry = yearlist.normaliseEntry(raw);
       if (!entry) continue;
       if (Number.isInteger(raw.at)) entry.at = raw.at;
+      // Een testrij zonder tijdstip (een ouder bestand) telt als nieuw vanaf nu,
+      // zodat ook die na de gewone tijd verdwijnt.
+      else if (yearlist.isTestId(entry.id)) entry.at = Date.now();
       years.set(entry.id, entry);
     }
     console.log(`${rooms.size} spel(len) en ${years.size} jaartallen hersteld uit ${DATA_FILE}`);
@@ -231,6 +257,7 @@ const server = http.createServer(async (req, res) => {
       // van een bestaand spel.
       const body = await readJson(req, yearlist.MAX_YEARS_BODY);
       room.authenticateHost(getRoom(y[1]).state, body.token);
+      cleanTestRows();
       if (y[2] === '/lookup') {
         const found = {};
         for (const id of yearlist.parseLookup(body).ids) {

@@ -267,6 +267,168 @@ test('export: alles wat bewaard is, in pagina\'s op track-ID', () => {
   assert.deepEqual(L.exportPage(all.slice(0, 2), 2).next, null);
 });
 
+// ---------- testrijen ----------
+
+// De vormen van verzonnen ID's die de tests ooit schreven (tests/e2e/fake-spotify.js):
+// eerst `zz${run}${label}` met nullen tot 22, nu met de lengte van het label erbij.
+const OLD_FAKE = `zz${'0123456789abcde'}G1`.padEnd(22, '0');
+const NEW_FAKE = `zz${'0123456789abcde'}2G1`.padEnd(22, '0');
+
+test('possibleSpotifyId: 22 tekens base62, eerste teken 0 tot 7', () => {
+  for (const id of [ID, ID2, '0000000000000000000000', '7zzzzzzzzzzzzzzzzzzzzz', '1A2b3C4d5E6f7G8h9I0jKl']) {
+    assert.equal(L.possibleSpotifyId(id), true, id);
+  }
+  for (const id of [OLD_FAKE, NEW_FAKE, '8aaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaa', 'Zaaaaaaaaaaaaaaaaaaaaa', ID.slice(1), ID + 'x', 'dz-3135556', '4uLU6hMCjMI75M1A2tKU-C', '', null, 5]) {
+    assert.equal(L.possibleSpotifyId(id), false, String(id));
+  }
+  // Het grootste getal van 128 bits in base62 begint met een 7.
+  const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let n = (1n << 128n) - 1n;
+  let max = '';
+  while (n > 0n) {
+    max = ALPHABET[Number(n % 62n)] + max;
+    n /= 62n;
+  }
+  assert.equal(max.length, 22);
+  assert.equal(max[0], '7');
+  assert.equal(L.possibleSpotifyId(max), true);
+});
+
+test('isTestId: alleen verzonnen ID\'s die met zz beginnen; echte nummers en fragmenten nooit', () => {
+  // Alle vormen die de tests schreven en schrijven.
+  for (const id of [OLD_FAKE, NEW_FAKE, 'zz', 'zzx', 'zz' + 'a'.repeat(62), 'zz_-x']) assert.equal(L.isTestId(id), true, id);
+  // Bij twijfel blijft een rij staan: een echt Spotify-ID, een fragment van Deezer,
+  // en elke andere vorm die geen Spotify-ID is maar ook niet als test herkend wordt.
+  for (const id of [
+    ID,
+    ID2,
+    'dz-3135556',
+    'dz-1',
+    'zZabc',
+    'Zzabc',
+    'z',
+    'yzzzzzzzzzzzzzzzzzzzzz',
+    'azzzzzzzzzzzzzzzzzzzzz',
+    'x0',
+    'id0001',
+    'abcdefghijABCDEFGHIJ12',
+    'zz' + 'a'.repeat(63), // te lang voor een track-ID
+    'zz:track',
+    '',
+    null,
+    undefined,
+    7,
+  ]) {
+    assert.equal(L.isTestId(id), false, String(id));
+  }
+});
+
+test('TEST_RANGE: precies de ID\'s die met zz beginnen', () => {
+  assert.deepEqual(L.TEST_RANGE, { from: 'zz', to: 'z{' });
+  const inRange = (id) => id >= L.TEST_RANGE.from && id < L.TEST_RANGE.to;
+  // De tekens van een track-ID: A-Z a-z 0-9 _ -
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+  for (const a of chars) {
+    for (const b of chars) {
+      for (const tail of ['', '0', 'zz', '_-']) {
+        const id = a + b + tail;
+        assert.equal(inRange(id), id.startsWith('zz'), id);
+      }
+    }
+  }
+  assert.equal(inRange('z'), false);
+  assert.equal(inRange('zz'), true);
+});
+
+test('purgeSettings: standaard een uur en tien minuten; alleen gehele getallen >= 0 tellen', () => {
+  assert.deepEqual(L.purgeSettings(), { maxAge: 3_600_000, every: 600_000, batch: L.PURGE_BATCH });
+  assert.deepEqual(L.purgeSettings({ YEARS_TEST_MAX_AGE_MS: '2000', YEARS_PURGE_EVERY_MS: '0' }), { maxAge: 2000, every: 0, batch: L.PURGE_BATCH });
+  for (const bad of ['', '-1', '1.5', 'abc', null]) {
+    assert.deepEqual(L.purgeSettings({ YEARS_TEST_MAX_AGE_MS: bad, YEARS_PURGE_EVERY_MS: bad }), L.purgeSettings(), String(bad));
+  }
+  assert.equal(L.PURGE_BATCH, 500);
+});
+
+const HOUR = 60 * 60 * 1000;
+const rowAt = (id, ageMs) => ({ id, y: 1990, s: 'spotify', d: [], at: NOW - ageMs });
+
+test('expiredTestIds: alleen testrijen ouder dan de grens; echte rijen, fragmenten en verse testrijen blijven', () => {
+  const rows = [
+    rowAt(ID, 10 * HOUR), // echt, oud: blijft
+    rowAt('dz-3135556', 10 * HOUR), // fragment, oud: blijft
+    rowAt('abcdefghijABCDEFGHIJ12', 10 * HOUR), // geen Spotify-ID maar ook geen test: blijft
+    rowAt(OLD_FAKE, HOUR + 1), // oudere vorm, net te oud: weg
+    rowAt(NEW_FAKE, 2 * HOUR), // weg
+    rowAt('zz' + 'b'.repeat(20), HOUR), // precies een uur: blijft nog
+    rowAt('zz' + 'c'.repeat(20), 5 * 60 * 1000), // vers (een lopende testrun): blijft
+    { id: 'zz' + 'd'.repeat(20), y: 1990, s: 'spotify', d: [] }, // zonder tijdstip: blijft
+    { id: 'zz' + 'e'.repeat(20), at: null },
+  ];
+  assert.deepEqual(L.expiredTestIds(rows, NOW), [OLD_FAKE, NEW_FAKE]);
+  assert.deepEqual(L.expiredTestIds(rows, NOW, { maxAge: 0, batch: 10 }), [OLD_FAKE, NEW_FAKE, 'zz' + 'b'.repeat(20), 'zz' + 'c'.repeat(20)]);
+  assert.deepEqual(L.expiredTestIds([], NOW), []);
+});
+
+test('expiredTestIds: hoogstens één partij', () => {
+  const many = Array.from({ length: 1200 }, (_, i) => rowAt(`zz${String(i).padStart(20, '0')}`, 2 * HOUR));
+  const ids = L.expiredTestIds(many, NOW);
+  assert.equal(ids.length, L.PURGE_BATCH);
+  assert.deepEqual(ids, many.slice(0, L.PURGE_BATCH).map((r) => r.id));
+  assert.equal(L.expiredTestIds(many, NOW, { batch: 3 }).length, 3);
+  // Stopt met lezen zodra de partij vol is (een generator wordt niet verder doorlopen).
+  let read = 0;
+  function* rows() {
+    for (const r of many) {
+      read++;
+      yield r;
+    }
+  }
+  L.expiredTestIds(rows(), NOW, { batch: 5 });
+  assert.equal(read, 6);
+});
+
+test('TestRowCleaner: hoogstens eens per zoveel tijd, meteen weer na een volle partij', () => {
+  const store = new Map();
+  const add = (id, at) => store.set(id, { id, at });
+  for (let i = 0; i < 7; i++) add(`zz${String(i).padStart(20, '0')}`, 0);
+  add(ID, 0);
+  add('dz-1', 0);
+  const asked = [];
+  const candidates = (cutoff, batch) => {
+    asked.push({ cutoff, batch });
+    return [...store.values()].filter((r) => r.at < cutoff);
+  };
+  const remove = (ids) => ids.forEach((id) => store.delete(id));
+  const cleaner = new L.TestRowCleaner({ maxAge: 1000, every: 600_000, batch: 3 });
+
+  // Nog niets oud genoeg: niets weg, en de volgende keer pas na `every`.
+  assert.equal(cleaner.run(500, candidates, remove), 0);
+  assert.deepEqual(asked, [{ cutoff: -500, batch: 3 }]);
+  assert.equal(cleaner.run(2000, candidates, remove), 0);
+  assert.equal(asked.length, 1, 'te vroeg: niet eens gezocht');
+
+  // Na `every`: een volle partij weg, en dan meteen bij het volgende verzoek weer.
+  assert.equal(cleaner.run(600_500, candidates, remove), 3);
+  assert.equal(cleaner.run(600_501, candidates, remove), 3);
+  // Een halve partij: klaar, en weer wachten.
+  assert.equal(cleaner.run(600_502, candidates, remove), 1);
+  assert.equal(cleaner.run(600_503, candidates, remove), 0);
+  assert.equal(asked.length, 4);
+  assert.deepEqual([...store.keys()], [ID, 'dz-1']);
+  // Ook met every 0 (de tests) blijft wat echt is staan.
+  const eager = new L.TestRowCleaner({ maxAge: 0, every: 0, batch: 500 });
+  assert.equal(eager.run(10_000, candidates, remove), 0);
+  assert.deepEqual([...store.keys()], [ID, 'dz-1']);
+});
+
+test('TestRowCleaner: de eerste keer meteen (na een herstart of na de eerste deploy)', () => {
+  const store = new Map([[NEW_FAKE, { id: NEW_FAKE, at: NOW - 30 * 24 * HOUR }], [ID, { id: ID, at: NOW - 30 * 24 * HOUR }]]);
+  const cleaner = new L.TestRowCleaner();
+  const removed = cleaner.run(NOW, () => store.values(), (ids) => ids.forEach((id) => store.delete(id)));
+  assert.equal(removed, 1);
+  assert.deepEqual([...store.keys()], [ID]);
+});
+
 test('authenticateHost: alleen de host van het spel', () => {
   const state = room.createRoomState('ABCD');
   const host = room.join(state, 'Hanne');

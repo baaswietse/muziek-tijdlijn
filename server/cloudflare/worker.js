@@ -368,7 +368,9 @@ export class GameRoom extends DurableObject {
  * De gedeelde lijst met jaartallen, in één tabel. Er bestaat maar één
  * exemplaar (YEARS_NAME). Het wordt alleen via de Worker aangesproken, nadat
  * die gecontroleerd heeft dat het verzoek van de host van een spel komt en de
- * inhoud nagekeken is (yearlist.parseLookup / parseEntries).
+ * inhoud nagekeken is (yearlist.parseLookup / parseEntries). Bij elk verzoek
+ * ruimt het (hoogstens eens per tien minuten) oude testrijen op: zie
+ * cleanTestRows en yearlist.isTestId.
  */
 export class YearStore extends DurableObject {
   constructor(ctx, env) {
@@ -391,6 +393,35 @@ export class YearStore extends DurableObject {
       if (!have.has(col)) this.sql.exec(`ALTER TABLE years ADD COLUMN ${col} TEXT`);
     }
     this.count = null; // aantal rijen, pas geteld bij het eerste schrijfverzoek
+    // Ruimt oude testrijen op (zie yearlist.TestRowCleaner). Het tijdstip van
+    // de laatste keer staat alleen in het geheugen: na een herstart of een
+    // pauze van het Durable Object ruimt het eerste verzoek meteen op.
+    this.cleaner = new yearlist.TestRowCleaner(yearlist.purgeSettings(env));
+  }
+
+  /**
+   * Verwijdert testrijen die ouder zijn dan de grens (hoogstens één partij).
+   * Leest alleen het stuk van de tabel met de test-ID's, via de primaire sleutel.
+   */
+  cleanTestRows() {
+    const removed = this.cleaner.run(
+      Date.now(),
+      (cutoff, batch) =>
+        [
+          ...this.sql.exec(
+            'SELECT id, t FROM years WHERE id >= ? AND id < ? AND t < ? ORDER BY id LIMIT ?',
+            yearlist.TEST_RANGE.from,
+            yearlist.TEST_RANGE.to,
+            cutoff,
+            batch,
+          ),
+        ].map((row) => ({ id: row.id, at: row.t })),
+      (ids) => this.sql.exec('DELETE FROM years WHERE id IN (SELECT value FROM json_each(?))', JSON.stringify(ids)),
+    );
+    if (removed) {
+      if (this.count !== null) this.count = Math.max(0, this.count - removed);
+      console.log(`gedeelde lijst: ${removed} oude testrij(en) opgeruimd`);
+    }
   }
 
   /** Een rij uit de tabel als item (zie yearlist.normaliseEntry), met at = tijdstip van de laatste wijziging. */
@@ -436,6 +467,7 @@ export class YearStore extends DurableObject {
    * duizenden nummers kost een handvol verzoeken.
    */
   exportPage({ after, limit }) {
+    this.cleanTestRows();
     const rows = this.sql.exec(
       'SELECT id, y, s, d, r, b, title, artist, t FROM years WHERE id > ? ORDER BY id LIMIT ?',
       after,
@@ -446,6 +478,7 @@ export class YearStore extends DurableObject {
 
   /** { years: { id: { y, s, d, r?, b?, named? } }, names: true } */
   lookup(ids) {
+    this.cleanTestRows();
     const years = {};
     for (const [id, entry] of this.read(ids)) years[id] = yearlist.publicEntry(entry);
     // names: deze server bewaart ook titel en artiest (een oudere niet).
@@ -454,6 +487,7 @@ export class YearStore extends DurableObject {
 
   /** Voegt nagekeken items samen met wat er al staat; schrijft alleen wat verandert. */
   write({ entries, skipped }) {
+    this.cleanTestRows();
     if (this.count === null) this.count = this.sql.exec('SELECT COUNT(*) AS n FROM years').one().n;
     const existing = this.read(entries.map((e) => e.id));
     const changed = yearlist.mergeEntries(existing, entries, yearlist.MAX_ROWS - this.count);
