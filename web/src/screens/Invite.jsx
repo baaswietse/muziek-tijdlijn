@@ -71,7 +71,7 @@ export function InviteConfirm({ invite, onStepOver, onStay }) {
           Overstappen naar spel {code}?
         </h1>
         <p>
-          Je bent host van spel {from}. Stap je over naar {code}, dan valt dat spel stil voor de anderen.
+          Je bent host van spel {from}. Stap je over naar {code}, dan zitten de anderen daar even zonder host, tot een van hen na een halve minuut host wordt. Wil je dat niet, blijf dan en geef eerst de host-rol door.
         </p>
         <button class="btn primary big" onClick={onStepOver} data-testid="invite-step-over">
           Stap over naar {code}

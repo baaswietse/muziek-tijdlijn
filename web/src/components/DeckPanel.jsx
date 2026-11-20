@@ -19,6 +19,20 @@ const nummers = (n) => (n === 1 ? '1 nummer' : `${n} nummers`);
  * (bewaren, naar de server sturen) zit in lib/fragmentchoice.js.
  */
 function FragmentLists({ deck, choice: c }) {
+  if (c.held) {
+    // Net host geworden: de stapel van de vorige host blijft, tot je zelf kiest.
+    return (
+      <section class="card" data-testid="deck-panel" data-source="fragment">
+        <h2>Nummers</h2>
+        <p class="deck-current" data-testid="deck-held">
+          De vorige host koos «{c.held.name}» · {nummers(c.held.count)}. Daar speel je mee, tenzij je zelf kiest.
+        </p>
+        <button type="button" class="btn" onClick={c.release} data-testid="choice-own">
+          Kies zelf lijsten
+        </button>
+      </section>
+    );
+  }
   const limited = c.choice && (c.choice.from != null || c.choice.to != null);
   const from = c.choice?.from ?? null;
   const to = c.choice?.to ?? null;

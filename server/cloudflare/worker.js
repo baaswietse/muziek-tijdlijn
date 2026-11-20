@@ -226,12 +226,17 @@ export class GameRoom extends DurableObject {
         ws.send(JSON.stringify({ t: 'error', code: 'BAD_TOKEN', message: 'Je zit niet (meer) in dit spel.' }));
         return ws.close(4003, 'bad token');
       }
-      ws.serializeAttachment({ playerId, listen: ws.deserializeAttachment()?.listen === true });
+      ws.serializeAttachment({ playerId, listen: ws.deserializeAttachment()?.listen === true, seen: Date.now() });
+      // Zolang er verbindingen zijn, kijkt de wekker geregeld na wie nog leeft.
+      await this.ensureCheck();
       return this.broadcast();
     }
-    const attachment = ws.deserializeAttachment();
+    let attachment = ws.deserializeAttachment();
     const playerId = attachment?.playerId;
     if (!playerId) return;
+    // Wanneer deze verbinding het laatst iets zei (pings telt Cloudflare zelf, zie alive()).
+    attachment = { ...attachment, seen: Date.now() };
+    ws.serializeAttachment(attachment);
     if (msg?.t === 'listen') {
       // Geluid op dit toestel aan of uit: geldt voor deze verbinding (blijft
       // bij de verbinding bewaard, ook als de kamer even slaapt).
@@ -253,6 +258,7 @@ export class GameRoom extends DurableObject {
       await room.applyAction(this.state, playerId, msg, {
         loadTracks: () => this.loadTracks(),
         online: this.onlineIds(),
+        grace: this.grace(),
       });
       const customChanged = hadCustom !== Boolean(this.state.custom);
       // Een verwijderde speler krijgt nog één melding en wordt dan afgesloten.
@@ -289,16 +295,41 @@ export class GameRoom extends DurableObject {
     if (this.state && ws.deserializeAttachment()?.playerId) this.broadcast(ws);
   }
 
-  /** Aangemelde verbindingen met hun speler; `gone` sluit net af. */
-  sockets(gone) {
+  /** Zo lang (ms) moet de host weg zijn voor een ander host kan worden (instelbaar voor de tests). */
+  grace() {
+    return room.msSetting(this.env.HOST_GRACE_MS, room.HOST_GRACE_MS);
+  }
+
+  /** Een verbinding die zo lang (ms) niets stuurde, telt als weg. */
+  staleMs() {
+    return room.msSetting(this.env.STALE_MS, room.STALE_MS);
+  }
+
+  /** Om de zoveel ms kijkt de wekker na wie nog verbonden is, zolang er verbindingen zijn. */
+  checkMs() {
+    return Math.max(1000, Math.min(15_000, this.staleMs() / 3));
+  }
+
+  /**
+   * Leeft de verbinding nog? Pings beantwoordt Cloudflare zelf (zonder de
+   * kamer wakker te maken) en onthoudt wanneer; andere berichten zet de kamer
+   * zelf in de bijlage (`seen`).
+   */
+  alive(s, a, now) {
+    const auto = this.ctx.getWebSocketAutoResponseTimestamp?.(s)?.getTime?.() ?? 0;
+    return room.alive(Math.max(a?.seen ?? 0, auto), now, this.staleMs());
+  }
+
+  /** Aangemelde verbindingen die nog leven, met hun speler; `gone` sluit net af. */
+  sockets(gone, now = Date.now()) {
     return this.ctx
       .getWebSockets()
       .filter((s) => s !== gone)
       .map((s) => {
         const a = s.deserializeAttachment();
-        return { s, playerId: a?.playerId, listen: a?.listen === true };
+        return { s, a, playerId: a?.playerId, listen: a?.listen === true };
       })
-      .filter((x) => x.playerId);
+      .filter((x) => x.playerId && this.alive(x.s, x.a, now));
   }
 
   /** Wie nu verbonden is, zoals het bord het toont. */
@@ -308,12 +339,15 @@ export class GameRoom extends DurableObject {
 
   /** Stuurt iedereen zijn eigen kijk op het spel; `gone` sluit net af. */
   broadcast(gone) {
-    const sockets = this.sockets(gone);
-    const online = new Set(sockets.map((x) => x.playerId));
     const now = Date.now();
+    const sockets = this.sockets(gone, now);
+    const online = new Set(sockets.map((x) => x.playerId));
+    // Sinds wanneer de host weg is (voor «Word host»): bewaard, want de kamer kan slapen.
+    if (room.trackHost(this.state, online, now)) this.saveState();
+    const grace = this.grace();
     for (const { s, playerId, listen } of sockets) {
       try {
-        s.send(JSON.stringify({ t: 'state', state: room.view(this.state, playerId, online) }));
+        s.send(JSON.stringify({ t: 'state', state: room.view(this.state, playerId, online, { now, grace }) }));
         // Alleen wie om geluid vroeg, krijgt het adres van het fragment (apart bericht).
         this.sendSound(s, playerId, listen, now);
       } catch {
@@ -330,19 +364,63 @@ export class GameRoom extends DurableObject {
 
   /** Bewaart het spel. De eigen lijst alleen als die veranderd is (`custom`). */
   async save({ custom = false } = {}) {
-    const { custom: deck, ...rest } = this.state;
-    await this.ctx.storage.put('state', rest);
+    this.state.touchedAt = Date.now();
+    const { custom: deck } = this.state;
+    await this.saveState();
     if (custom) {
       if (deck) await this.ctx.storage.put('custom', deck);
       else await this.ctx.storage.delete('custom');
     }
-    await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS);
+    if (this.ctx.getWebSockets().length > 0) await this.ensureCheck();
+    else await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS);
   }
 
-  /** Ruimt een kamer op die een halve dag stil lag. */
+  /** Bewaart alleen de stand (zonder de eigen lijst). */
+  saveState() {
+    const { custom: _deck, ...rest } = this.state;
+    return this.ctx.storage.put('state', rest);
+  }
+
+  /** De wekker gaat ten laatste binnen checkMs() af (zolang er verbindingen zijn). */
+  async ensureCheck() {
+    const want = Date.now() + this.checkMs();
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || current > want) await this.ctx.storage.setAlarm(want);
+  }
+
+  /**
+   * De wekker. Zijn er verbindingen: sluit wie al te lang niets stuurde (een
+   * gsm die uitviel of zijn netwerk kwijt is, zonder dat de verbinding netjes
+   * sloot), en vertel het de anderen; zo zien ze ook dat de host weg is. Geen
+   * verbindingen meer: ruim de kamer op als ze een halve dag stil lag.
+   */
   async alarm() {
-    if (this.ctx.getWebSockets().length > 0) {
-      await this.ctx.storage.setAlarm(Date.now() + ROOM_TTL_MS);
+    if (!this.state) return;
+    const now = Date.now();
+    const all = this.ctx.getWebSockets();
+    if (all.length > 0) {
+      let changed = false;
+      for (const s of all) {
+        const a = s.deserializeAttachment();
+        if (this.alive(s, a, now)) continue;
+        if (a?.playerId) changed = true;
+        s.serializeAttachment({ playerId: null });
+        try {
+          s.close(4000, 'stil');
+        } catch {
+          // al dicht
+        }
+      }
+      if (changed || room.trackHost(this.state, this.onlineIds(), now)) {
+        await this.saveState();
+        this.broadcast();
+      }
+      await this.ctx.storage.setAlarm(now + this.checkMs());
+      return;
+    }
+    const last = this.state.touchedAt ?? this.state.updatedAt ?? 0;
+    if (now - last < ROOM_TTL_MS) {
+      await this.ctx.storage.setAlarm(last + ROOM_TTL_MS);
       return;
     }
     await this.ctx.storage.deleteAll();

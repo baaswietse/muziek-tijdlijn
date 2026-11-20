@@ -6,8 +6,9 @@ import { DeckPanel } from '../components/DeckPanel.jsx';
 import { Rules } from '../components/Rules.jsx';
 import { ListenCard } from '../components/Listen.jsx';
 import { deckMatches } from '../lib/source.js';
+import { HostAway, handOverQuestion } from '../components/Host.jsx';
 
-export function Lobby({ view, send, music, listen = null, deck, choice = null, onLeave, notify }) {
+export function Lobby({ view, send, music, listen = null, deck, choice = null, net = 'online', onLeave, notify }) {
   const isHost = view.you === view.hostId;
   const url = inviteUrl(view.code);
   const qr = useMemo(() => qrPath(url), [url]);
@@ -47,6 +48,8 @@ export function Lobby({ view, send, music, listen = null, deck, choice = null, o
 
   return (
     <main class="page">
+      {/* De host is al een tijd weg: een andere speler kan host worden. */}
+      {!isHost && <HostAway view={view} send={send} net={net} />}
       {/* Speelt de host met fragmenten, dan kan een speler het geluid ook hier
           laten spelen (op afstand). Bovenaan: wie niets hoort, ziet het meteen. */}
       {!isHost && listen?.available && <ListenCard listen={listen} />}
@@ -78,8 +81,21 @@ export function Lobby({ view, send, music, listen = null, deck, choice = null, o
               {p.id === view.hostId && <span class="chip">host</span>}
               {p.id === view.you && <span class="chip soft">jij</span>}
               {!p.online && <span class="muted small">offline</span>}
+              {isHost && p.id !== view.you && p.online && (
+                <button
+                  class="btn link push"
+                  onClick={() => confirm(handOverQuestion(p.name, false)) && send({ t: 'setHost', playerId: p.id })}
+                  data-testid="make-host"
+                  data-player={p.id}
+                >
+                  Maak host
+                </button>
+              )}
               {isHost && p.id !== view.you && (
-                <button class="btn link danger push" onClick={() => confirm(`${p.name} uit het spel halen?`) && send({ t: 'remove', playerId: p.id })}>
+                <button
+                  class={`btn link danger${p.online ? '' : ' push'}`}
+                  onClick={() => confirm(`${p.name} uit het spel halen?`) && send({ t: 'remove', playerId: p.id })}
+                >
                   Verwijder
                 </button>
               )}
@@ -128,6 +144,12 @@ export function Lobby({ view, send, music, listen = null, deck, choice = null, o
         </>
       ) : (
         <section class="card center-text">
+          {view.note === 'music' && (
+            <p class="notice" data-testid="lobby-note">
+              Het spel is gestopt: de muziek kwam van Spotify bij de vorige host. De nieuwe host kiest andere muziek en start
+              een nieuw spel.
+            </p>
+          )}
           <p class="waiting" data-testid="waiting">Wachten tot de host het spel start…</p>
           <p class="muted small">Je speelt naar {target} kaarten.</p>
           {view.playlist && (
@@ -150,11 +172,15 @@ export function Lobby({ view, send, music, listen = null, deck, choice = null, o
 
 /**
  * De vraag bij «Verlaat het spel». Een host die vertrekt terwijl er nog anderen
- * zijn, laat hen zonder host achter: niemand kan dan nog starten.
+ * zijn, geeft zijn rol beter eerst door (Maak host): anders zitten zij even
+ * zonder host, tot een van hen na de wachttijd host wordt.
  */
 function leaveQuestion(view, isHost) {
   const others = view.players.filter((p) => p.id !== view.you).length;
   if (!isHost || others === 0) return 'Dit spel verlaten?';
-  const wie = others === 1 ? 'De andere speler blijft' : `De ${others} andere spelers blijven`;
-  return `Dit spel verlaten? Je bent de host: ${wie} dan zonder host achter en ${others === 1 ? 'moet' : 'moeten'} zelf een nieuw spel maken.`;
+  const wie = others === 1 ? 'de andere speler' : 'de anderen';
+  return (
+    `Dit spel verlaten? Je bent de host. Duid liever eerst een nieuwe host aan: tik bij «Spelers» op «Maak host». ` +
+    `Vertrek je zonder, dan blijft ${wie} even zonder host achter, tot iemand na een halve minuut host wordt.`
+  );
 }

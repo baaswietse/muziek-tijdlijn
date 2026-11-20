@@ -9,6 +9,9 @@ const SERVER_PORT = 8787 + OFFSET;
 const WEB_PORT = 4173 + OFFSET;
 const TRACKS_PORT = 4174 + OFFSET;
 const INSPECTOR_PORT = 9229 + OFFSET; // debugpoort van wrangler dev
+// Zo lang (ms) moet de host weg zijn voor een ander host kan worden: in de
+// tests korter dan de 30 s van een echt spel (tests/e2e/host.spec.js).
+export const HOST_GRACE_MS = 5000;
 
 // MT_LIVE=1 test de echte site op GitHub Pages met de echte spelserver. Er
 // start dan niets lokaal; Spotify blijft nagebootst. Achter een proxy
@@ -37,7 +40,8 @@ export default defineConfig({
       ? {
           command:
             `npx wrangler dev --port ${SERVER_PORT} --ip 127.0.0.1 --inspector-port ${INSPECTOR_PORT} ` +
-            `--var ALLOWED_ORIGINS:* --var TRACKS_URL:http://127.0.0.1:${TRACKS_PORT}/tracks.json`,
+            `--var ALLOWED_ORIGINS:* --var TRACKS_URL:http://127.0.0.1:${TRACKS_PORT}/tracks.json ` +
+            `--var HOST_GRACE_MS:${HOST_GRACE_MS}`,
           env: { WRANGLER_SEND_METRICS: 'false' },
           url: `http://127.0.0.1:${SERVER_PORT}/api/health`,
           reuseExistingServer: !process.env.CI,
@@ -45,7 +49,12 @@ export default defineConfig({
         }
       : {
           command: 'node server/node/server.js',
-          env: { PORT: String(SERVER_PORT), HOST: '127.0.0.1', TRACKS_FILE: 'tests/fixtures/tracks.json' },
+          env: {
+            PORT: String(SERVER_PORT),
+            HOST: '127.0.0.1',
+            TRACKS_FILE: 'tests/fixtures/tracks.json',
+            HOST_GRACE_MS: String(HOST_GRACE_MS),
+          },
           url: `http://127.0.0.1:${SERVER_PORT}/api/health`,
           reuseExistingServer: !process.env.CI,
         },

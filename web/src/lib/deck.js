@@ -159,7 +159,7 @@ const rowOf = (t, entry, known = false) => ({
   track: t,
 });
 
-export function useDeck({ code, token, phase, players = 1, target = 10 }) {
+export function useDeck({ code, token, isHost = true, phase, players = 1, target = 10 }) {
   const [playlists, setPlaylists] = useState(null); // null = nog niet opgevraagd
   const [loading, setLoading] = useState(false);
   // { name, phase: 'tracks' | 'years', total, todo, done, ready, sampled, playlistTotal, seconds }
@@ -561,19 +561,23 @@ export function useDeck({ code, token, phase, players = 1, target = 10 }) {
   const cancel = useCallback(() => stopRun('stop'), [stopRun]);
 
   // Na een herlaad: een opzoeking voor dit spel gaat verder. Een ander spel
-  // (de host maakte een nieuw): die oude opzoeking vervalt.
+  // (de host maakte een nieuw): die oude opzoeking vervalt. Alleen zolang deze
+  // gsm host is: wie de rol doorgaf (of wie ze overgenomen zag), stopt met
+  // opzoeken; alleen de host kan de lijst naar de server sturen. De bewaarde
+  // opzoeking blijft, voor als hij later weer host wordt.
   useEffect(() => {
     if (!code || !token) return undefined;
     const saved = storage.read(JOB);
     if (saved && saved.code !== code) storage.write(JOB, null);
-    else if (saved && Array.isArray(saved.tracks) && !run.current) start(saved, { resume: true });
+    else if (isHost && saved && Array.isArray(saved.tracks) && !run.current) start(saved, { resume: true });
     return () => {
       stopRun('leave');
       if (current.current) clearTimeout(current.current.timer);
       current.current = null;
       setResult(null);
+      setError('');
     };
-  }, [code, token]);
+  }, [code, token, isHost]);
 
   // Tussen twee spellen (wachtkamer, of na de laatste kaart) gaat wat er
   // tijdens het spel bijkwam alsnog naar de server.

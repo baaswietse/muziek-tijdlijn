@@ -10,6 +10,13 @@
 // verzoek), en «Start» wacht tot dat gebeurd is. Heeft de keuze minder dan
 // het minimum van de server, dan gaat de oude stapel weg (`clearDeck`), zodat
 // de anderen niet iets anders zien dan wat de host koos.
+//
+// Wordt deze gsm host (doorgegeven of overgenomen) terwijl er al een stapel
+// met fragmenten op de server staat, dan blijft die staan: zijn eigen bewaarde
+// keuze gaat niet vanzelf naar de server (`held`, bewaard per spel, ook na een
+// herlaad). Pas als hij zelf iets kiest («Kies zelf lijsten», of een lijst of
+// periode aantikken), geldt zijn keuze weer. Wie geen host meer is, stuurt
+// niets meer (`enabled` is dan uit; de server weigert het ook).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { loadFragments } from './fragments.js';
@@ -28,6 +35,8 @@ import { MAX_DECK, MIN_DECK, deckNeed } from './deckplan.js';
 import { storage } from './session.js';
 
 export const CHOICE_KEY = 'mt.fragmentChoice';
+// { code }: in dit spel nam deze gsm de stapel van de vorige host over.
+const HOLD_KEY = 'mt.fragmentChoice.held';
 const WAIT_MS = 300;
 
 export function useFragmentChoice({ enabled, view, deck, send }) {
@@ -35,6 +44,22 @@ export function useFragmentChoice({ enabled, view, deck, send }) {
   const [loadError, setLoadError] = useState('');
   const [raw, setRaw] = useState(() => storage.read(CHOICE_KEY));
   const [tick, setTick] = useState(0);
+  const code = view?.code ?? null;
+  const [holdCode, setHoldCode] = useState(() => storage.read(HOLD_KEY)?.code ?? null);
+  // Net host geworden: de stapel van de vorige host blijft (zie boven).
+  const lastHost = useRef(null);
+  if (view) {
+    const prev = lastHost.current;
+    if (prev && prev.code === view.code && prev.hostId !== view.you && view.hostId === view.you && holdCode !== view.code) {
+      storage.write(HOLD_KEY, { code: view.code });
+      setHoldCode(view.code);
+    }
+    lastHost.current = { code: view.code, hostId: view.hostId };
+  }
+  const release = useCallback(() => {
+    storage.write(HOLD_KEY, null);
+    setHoldCode(null);
+  }, []);
 
   const load = useCallback(() => {
     setLoadError('');
@@ -51,8 +76,9 @@ export function useFragmentChoice({ enabled, view, deck, send }) {
       const next = fn(normaliseChoice(data, raw));
       storage.write(CHOICE_KEY, next);
       setRaw(next);
+      release();
     },
-    [data, raw],
+    [data, raw, release],
   );
 
   const lists = useMemo(() => (data && choice ? listsOf(data, choice) : null), [data, choice]);
@@ -65,9 +91,11 @@ export function useFragmentChoice({ enabled, view, deck, send }) {
   const need = deckNeed(players, target);
   const planned = Math.min(total, MAX_DECK);
 
-  // Wat er op de server moet staan, en wat er staat.
-  const wanted = !choice ? null : total >= MIN_DECK ? `${name}|${planned}` : 'clear';
+  // Wat er op de server moet staan, en wat er staat. Neemt deze host de
+  // stapel van de vorige over, dan moet er niets naartoe.
   const playlist = view?.playlist?.source === 'fragment' ? view.playlist : null;
+  const held = holdCode != null && holdCode === code && playlist != null;
+  const wanted = held || !choice ? null : total >= MIN_DECK ? `${name}|${planned}` : 'clear';
   const onServer = playlist ? `${playlist.name}|${playlist.count}` : 'clear';
   const synced = wanted != null && wanted === onServer;
   const phase = view?.phase ?? null;
@@ -77,7 +105,7 @@ export function useFragmentChoice({ enabled, view, deck, send }) {
   const busy = useRef(null);
   const timer = useRef(null);
   const latest = useRef(null);
-  latest.current = { data, choice, wanted, synced, phase, enabled, deck, send };
+  latest.current = { data, choice, wanted, synced, phase, enabled, deck, send, held };
 
   useEffect(() => {
     if (onServer !== sent.current) sent.current = null;
@@ -125,6 +153,7 @@ export function useFragmentChoice({ enabled, view, deck, send }) {
     await sync();
     while (busy.current) await busy.current;
     const s = latest.current;
+    if (s.held) return true;
     return Boolean(s.wanted && s.wanted !== 'clear' && (s.synced || sent.current === s.wanted));
   }, [sync]);
 
@@ -135,6 +164,10 @@ export function useFragmentChoice({ enabled, view, deck, send }) {
   }, [sync]);
 
   return {
+    /** De stapel van de vorige host blijft staan: { name, count } (of null). */
+    held: held ? { name: playlist.name, count: playlist.count } : null,
+    /** «Kies zelf lijsten»: vanaf nu geldt de eigen keuze (die gaat dan naar de server). */
+    release,
     data,
     loadError,
     reload: load,
@@ -149,8 +182,8 @@ export function useFragmentChoice({ enabled, view, deck, send }) {
     need,
     players,
     target,
-    enough: total >= need,
-    synced,
+    enough: held || total >= need,
+    synced: held || synced,
     toggle: (id) => update((c) => toggleList(data, c, id)),
     setFrom: (y) => update((c) => setPeriod(data, c, 'from', y)),
     setTo: (y) => update((c) => setPeriod(data, c, 'to', y)),

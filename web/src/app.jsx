@@ -49,7 +49,9 @@ export function App({ loginResult }) {
     const c = new Connection({
       code,
       token,
-      onState: setView,
+      // `at`: wanneer de stand aankwam (klok van deze gsm), om zelf verder te
+      // tellen hoe lang de host al weg is (zie components/Host.jsx).
+      onState: (state) => setView({ ...state, at: performance.now() }),
       onSound: (s, receivedAt) => setSound({ sound: s, receivedAt }),
       onStatus,
       onError: (msg) => notify(msg.message, msg.code),
@@ -60,9 +62,10 @@ export function App({ loginResult }) {
       },
     });
     conn.current = c;
-    // Haakje voor de automatische tests: verbreek de verbinding zoals een
-    // vergrendeld scherm dat doet.
-    window.__mt = { drop: () => c.ws?.close() };
+    // Haakjes voor de automatische tests: verbreek de verbinding zoals een
+    // vergrendeld scherm dat doet, of stuur een bericht zoals een gsm die de
+    // knoppen omzeilt (de server moet dan zelf weigeren).
+    window.__mt = { drop: () => c.ws?.close(), send: (msg) => c.send(msg) };
     c.start();
     return () => {
       c.stop();
@@ -91,9 +94,27 @@ export function App({ loginResult }) {
   const music = useHostMusic({ enabled: isHost, view, send });
   const latency = useCallback(() => conn.current?.latency() ?? 0, []);
   const listen = useListen({ view, send, net, incoming: sound, latency });
-  const deck = useDeck({ code, token, phase: view?.phase ?? null, players: view?.players.length ?? 1, target: view?.settings.target ?? 10 });
+  const deck = useDeck({
+    code,
+    token,
+    isHost,
+    phase: view?.phase ?? null,
+    players: view?.players.length ?? 1,
+    target: view?.settings.target ?? 10,
+  });
   // Met fragmenten: welke lijsten en welke periode (alleen bij de host).
   const choice = useFragmentChoice({ enabled: isHost && music.source === 'fragment', view, deck, send });
+
+  // Een andere host (doorgegeven of overgenomen): iedereen krijgt een melding.
+  const hostSeen = useRef(null);
+  useEffect(() => {
+    if (!view) return;
+    const prev = hostSeen.current;
+    hostSeen.current = { code: view.code, hostId: view.hostId };
+    if (!prev || prev.code !== view.code || prev.hostId === view.hostId) return;
+    const name = view.players.find((p) => p.id === view.hostId)?.name ?? 'Iemand';
+    notify(view.hostId === view.you ? 'Jij bent nu de host.' : `${name} is nu de host.`, 'HOST');
+  }, [view?.code, view?.hostId]);
 
   useEffect(() => {
     keepAwake(Boolean(session));
@@ -118,7 +139,9 @@ export function App({ loginResult }) {
       </main>
     );
   } else if (view.phase === 'lobby') {
-    screen = <Lobby view={view} send={send} music={music} listen={listen} deck={deck} choice={choice} onLeave={leave} notify={notify} />;
+    screen = (
+      <Lobby view={view} send={send} music={music} listen={listen} deck={deck} choice={choice} net={net} onLeave={leave} notify={notify} />
+    );
   } else {
     // Het spelscherm heeft een eigen bovenbalk (stand en menu), met daarin ook
     // de verbindingsstatus en de testmodus.
