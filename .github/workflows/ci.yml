@@ -1,7 +1,10 @@
 # Tests bij elke pull request: spelregels, het Python-script en het volledige
-# spelverloop met meerdere browsers, tegen beide servervarianten. De twee
-# e2e-varianten lopen als aparte jobs naast elkaar; de snelle tests en de
-# build lopen in een eigen job.
+# spelverloop met meerdere browsers, tegen beide servervarianten. De snelle
+# tests en de build lopen in een eigen job. Het spelverloop is per
+# servervariant verdeeld over enkele groepen spec-bestanden
+# (.github/e2e-groepen.json), die elk als eigen job naast elkaar lopen; de job
+# «Spelverloop» vat ze samen: groen als alle groepen op beide varianten
+# slaagden.
 name: Tests
 
 on:
@@ -34,15 +37,38 @@ jobs:
       - name: Site bouwen
         run: npm run build
 
-  e2e:
-    name: Spelverloop (${{ matrix.server }})
+  # Leest de groepen en faalt als een spec-bestand in geen of in meer dan één
+  # groep zit, zodat elke test blijft draaien.
+  verdeling:
+    name: Verdeling van het spelverloop
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
+    outputs:
+      groepen: ${{ steps.groepen.outputs.groepen }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Elk spec-bestand in precies één groep
+        id: groepen
+        # Eerst in een variabele: een fout binnen $(...) in echo zelf zou de
+        # stap niet laten falen.
+        run: |
+          groepen=$(node .github/e2e-groepen.mjs)
+          echo "groepen=$groepen" >> "$GITHUB_OUTPUT"
+
+  e2e:
+    name: Spelverloop (${{ matrix.server }}, groep ${{ matrix.groep.naam }})
+    needs: verdeling
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
-      # Een fout in de ene variant breekt de andere niet af.
+      # Een fout in de ene job breekt de andere niet af.
       fail-fast: false
       matrix:
         server: [node, cloudflare]
+        groep: ${{ fromJSON(needs.verdeling.outputs.groepen) }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -53,15 +79,37 @@ jobs:
       - name: Browser installeren
         run: npx playwright install --with-deps chromium
       # Playwright bouwt de site zelf (webServer in playwright.config.js).
-      - name: Spelverloop met de ${{ matrix.server }}-server
-        run: npm run test:e2e
+      # Binnen een job lopen de tests na elkaar met één worker, zoals lokaal.
+      # $BESTANDEN zonder aanhalingstekens: elk bestand een eigen argument.
+      - name: Spelverloop met de ${{ matrix.server }}-server, groep ${{ matrix.groep.naam }}
+        run: npm run test:e2e -- $BESTANDEN
         env:
           MT_SERVER: ${{ matrix.server }}
+          BESTANDEN: ${{ matrix.groep.bestanden }}
       - name: Testresultaten bewaren
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ matrix.server }}
+          name: test-results-${{ matrix.server }}-${{ matrix.groep.naam }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # Eén controle om op te letten: slaagt alleen als de verdeling en alle
+  # groepen op beide varianten slaagden. always() zodat ze ook loopt (en faalt)
+  # als een groep faalde of afgebroken werd; zonder dat zou ze overgeslagen
+  # worden, en een overgeslagen controle telt op GitHub als geslaagd.
+  spelverloop:
+    name: Spelverloop
+    needs: [verdeling, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Alle groepen geslaagd
+        run: |
+          echo "verdeling: $VERDELING, groepen: $GROEPEN"
+          test "$VERDELING" = success && test "$GROEPEN" = success
+        env:
+          VERDELING: ${{ needs.verdeling.result }}
+          GROEPEN: ${{ needs.e2e.result }}
