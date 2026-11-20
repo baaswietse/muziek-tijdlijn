@@ -81,10 +81,52 @@ export function createRoom({ code, now }) {
     // na een gekochte kaart bought: true.
     reveal: null, // { playerId, card, index, correct, guessTokenTo? }
     winnerIds: [],
+    // Cijfers van het lopende (of laatste) spel voor het eindscherm: zie
+    // blankStats en gameStats. null in de wachtkamer van een nieuwe kamer.
+    stats: null,
     game: 0,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+// ---------- cijfers voor het eindscherm ----------
+//
+// Per speler (`player.stats`) en per spel (`state.stats`). Ze veranderen alleen
+// op momenten die iedereen toch al ziet: bij de onthulling van een beurt, bij
+// een gekochte kaart en bij het geven van het raad-token. Zo verklappen ze
+// tijdens een beurt niets over het lopende nummer of de stapel. Een kamer van
+// voor deze cijfers (een spel dat al liep bij de uitrol) heeft ze niet: dan
+// doet niets hier iets, en toont het eindscherm gewoon wat er is.
+
+/** Lege tellers voor één speler. */
+export function blankStats() {
+  return {
+    placed: 0, // zelf gelegd op de eigen beurt (niet gekocht)
+    correct: 0, // waarvan juist
+    streak: 0, // juist na elkaar, nu (alleen op de server)
+    bestStreak: 0, // langste reeks juist na elkaar
+    guessed: 0, // tokens verdiend met artiest en titel raden
+    betsWon: 0, // kaarten gewonnen met een ingezet token
+    betsLost: 0, // ingezette tokens die niets opleverden
+    bought: 0, // gekochte kaarten
+  };
+}
+
+/** Tellers van een speler, alleen als het lopende spel ze bijhoudt. */
+function statsOf(state, player) {
+  return state.stats && player?.stats ? player.stats : null;
+}
+
+/**
+ * Zet het begin en het einde van het spel (ms, klok van de server). De server
+ * roept dit na elke actie op; de spelregels zelf kennen geen klok.
+ */
+export function markTimes(state, now) {
+  const s = state.stats;
+  if (!s) return;
+  if (s.startedAt == null && state.phase !== 'lobby') s.startedAt = now;
+  if (state.phase === 'finished' && s.endedAt == null && s.startedAt != null) s.endedAt = now;
 }
 
 export function findPlayer(state, playerId) {
@@ -116,7 +158,7 @@ export function addPlayer(state, { id, token, name }) {
   // tokens: de starttokens plus wat hij verdiende met het raden van artiest en
   // nummer, min wat hij inzette. Wie in de wachtkamer binnenkomt, krijgt ze ook
   // al (startGame zet ze toch opnieuw), zodat er nergens een ander getal staat.
-  const player = { id, token, name: clean, timeline: [], guessTokens: LIMITS.startTokens };
+  const player = { id, token, name: clean, timeline: [], guessTokens: LIMITS.startTokens, stats: blankStats() };
   // Wie tijdens een spel instapt, krijgt meteen een startkaart en sluit
   // achteraan aan in de beurtvolgorde.
   if (state.phase === 'playing' || state.phase === 'challenge' || state.phase === 'reveal') {
@@ -200,7 +242,10 @@ export function startGame(state, actorId, tracks, random) {
     state.used.push(card.id);
     p.timeline = [card];
     p.guessTokens = LIMITS.startTokens;
+    p.stats = blankStats();
   }
+  // Elk spel begint met lege tellers, ook "Nog een spel".
+  state.stats = { startedAt: null, endedAt: null, turns: 0 };
   // Willekeurige startspeler; daarna gewoon de volgorde van de lijst.
   const first = Math.floor(random() * n);
   state.players = state.players.slice(first).concat(state.players.slice(0, first));
@@ -326,6 +371,11 @@ export function buyCard(state, actorId) {
   player.guessTokens -= LIMITS.buyCost;
   const index = slotFor(player.timeline, card.year);
   player.timeline.splice(index, 0, card);
+  const stats = statsOf(state, player);
+  if (stats) {
+    stats.bought += 1;
+    state.stats.turns += 1;
+  }
   state.reveal = { playerId: player.id, card, index, correct: true, bought: true };
   state.turn = null;
   state.phase = 'reveal';
@@ -367,6 +417,7 @@ function resolveTurn(state, index, bets) {
       receiver.timeline.splice(slotFor(receiver.timeline, card.year), 0, card);
     }
   }
+  countTurn(state, player, correct, results, receiver);
   // `guessTokenTo` komt er pas bij als iemand het token van deze beurt krijgt;
   // `bets` en `cardTo` alleen als er tokens ingezet werden.
   state.reveal = { playerId: player.id, card, index, correct };
@@ -379,6 +430,30 @@ function resolveTurn(state, index, bets) {
   // Dezelfde winstregel als bij een gewone beurt, voor wie de kaart kreeg.
   if (receiver && receiver.timeline.length >= state.settings.target) {
     finish(state, [receiver.id]);
+  }
+}
+
+/** De tellers na een onthulde beurt: de speler aan beurt en wie inzette. */
+function countTurn(state, player, correct, results, receiver) {
+  if (!state.stats) return;
+  state.stats.turns += 1;
+  const own = statsOf(state, player);
+  if (own) {
+    own.placed += 1;
+    if (correct) {
+      own.correct += 1;
+      own.streak += 1;
+      own.bestStreak = Math.max(own.bestStreak, own.streak);
+    } else {
+      own.streak = 0;
+    }
+  }
+  for (const r of results) {
+    const bettor = findPlayer(state, r.playerId);
+    const s = statsOf(state, bettor);
+    if (!s) continue;
+    if (receiver && receiver.id === bettor.id) s.betsWon += 1;
+    else s.betsLost += 1;
   }
 }
 
@@ -574,6 +649,10 @@ export function giveToken(state, actorId, targetId) {
   const old = previous ? findPlayer(state, previous) : null;
   if (old) old.guessTokens = Math.max(0, (old.guessTokens ?? 0) - 1);
   if (target) target.guessTokens = (target.guessTokens ?? 0) + 1;
+  const oldStats = statsOf(state, old);
+  if (oldStats) oldStats.guessed = Math.max(0, oldStats.guessed - 1);
+  const newStats = statsOf(state, target);
+  if (newStats) newStats.guessed += 1;
   state.reveal.guessTokenTo = target?.id ?? null;
 }
 
@@ -659,9 +738,11 @@ export function backToLobby(state, actorId, { why = null } = {}) {
   state.reveal = null;
   state.winnerIds = [];
   state.deck = [];
+  state.stats = null;
   for (const p of state.players) {
     p.timeline = [];
     p.guessTokens = LIMITS.startTokens;
+    p.stats = blankStats();
   }
 }
 
@@ -695,7 +776,21 @@ export function viewFor(state, playerId, online = new Set(), { now = Date.now(),
       timeline: p.timeline.map((c) => ({ ...c })),
       // Oudere opgeslagen kamers kennen het veld nog niet: dat telt als 0.
       guessTokens: p.guessTokens ?? 0,
+      // Tellers over voorbije beurten (voor het eindscherm), of null als het
+      // spel ze niet bijhoudt (een spel van voor de uitrol).
+      stats: statsView(state, p),
     })),
+    // Over het hele spel: hoeveel beurten er onthuld zijn en, als het afgelopen
+    // is, hoe lang het duurde (ms). null bij een spel zonder cijfers.
+    summary: state.stats
+      ? {
+          turns: state.stats.turns ?? 0,
+          ms:
+            state.stats.startedAt != null && state.stats.endedAt != null
+              ? Math.max(0, state.stats.endedAt - state.stats.startedAt)
+              : null,
+        }
+      : null,
     deckLeft: state.deck.length,
     // Welke lijst er gespeeld wordt; de nummers zelf gaan niet mee.
     // Een ingebouwde lijst met fragmenten van Deezer krijgt `source: 'fragment'`.
@@ -737,5 +832,21 @@ export function viewFor(state, playerId, online = new Set(), { now = Date.now(),
         }
       : null,
     winnerIds: state.winnerIds.slice(),
+  };
+}
+
+/** De tellers van één speler zoals de spelers ze zien (zonder de lopende reeks). */
+function statsView(state, player) {
+  const s = statsOf(state, player);
+  if (!s) return null;
+  const n = (v) => (Number.isFinite(v) ? v : 0);
+  return {
+    placed: n(s.placed),
+    correct: n(s.correct),
+    bestStreak: n(s.bestStreak),
+    guessed: n(s.guessed),
+    betsWon: n(s.betsWon),
+    betsLost: n(s.betsLost),
+    bought: n(s.bought),
   };
 }
