@@ -22,8 +22,13 @@ gevonden is, staat onderaan in de uitvoer van het script.
 `lijsten` maakt daaruit het bronbestand web/public/fragmenten.json met de
 lijsten die uit jaar en genre volgen (zie LIJSTEN hieronder). Als genre telt
 `genres` uit de invoer, of anders `album_genres`. Lijsten die je
-zelf vult (Nederlandstalig, Rustige pop en ballads) blijven daarbij staan,
-per Deezer-ID. Daarna pas je fragmenten.json gewoon zelf aan.
+zelf vult (alles buiten AUTOMATISCH: Nederlandstalig, Feestklassiekers …)
+blijven daarbij staan, met hun nummers, ook nummers die niet in de invoer
+staan. Daarna pas je fragmenten.json gewoon zelf aan.
+
+Een nummer in de invoer mag ook `zoekartiest` of `zoektitel` hebben: zo zoekt
+het als Deezer het anders noemt ("Céline Dion, Peabo Bryson", "Bailando
+(Spanish Version)"); `artist` en `title` blijven voor het spel.
 
 De antwoorden van Deezer staan in tools/deezer-cache.json, dus een tweede keer
 gaat snel; met --opnieuw vraagt het alles opnieuw. Het script doet hoogstens
@@ -38,6 +43,7 @@ import json
 import re
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -57,17 +63,33 @@ SEARCH_LIMIT = 50
 
 # ---------------------------------------------------------------- de lijsten
 
-# Volgorde = volgorde in het spel. `genres`/`vanaf` bepalen wie er bij
-# `lijsten` in komt; een lijst zonder regel vul je zelf in fragmenten.json.
+# Volgorde = volgorde in het spel. Alleen de lijsten in AUTOMATISCH volgen bij
+# `lijsten` uit jaar en genre; de andere vul je zelf in fragmenten.json, en ze
+# blijven bij een nieuwe run staan (zie build_lists). "main": de hoofdlijst
+# (zie web/src/fragment/lists.js): wat de host standaard speelt.
 LIJSTEN = [
-    {"id": "alles", "name": "Alle hits"},
+    {"id": "alles", "name": "Alle hits", "main": True},
     {"id": "2000", "name": "2000 tot nu"},
     {"id": "pop", "name": "Pop"},
     {"id": "rock", "name": "Rock"},
     {"id": "dance", "name": "Dance"},
     {"id": "nl", "name": "Nederlandstalig"},
     {"id": "rustig", "name": "Rustige pop en ballads"},
+    {"id": "feest", "name": "Feestklassiekers"},
+    {"id": "fout", "name": "Foute hits"},
+    {"id": "eendag", "name": "Eendagsvliegen"},
+    {"id": "zomer", "name": "Zomerhits"},
+    {"id": "disco", "name": "Disco, soul en funk"},
+    {"id": "hiphop", "name": "Hiphop en R&B"},
+    {"id": "belpop", "name": "Belpop"},
+    {"id": "bands", "name": "Boybands en girlbands"},
+    {"id": "meezing", "name": "Meezingers en après-ski"},
+    {"id": "kind", "name": "Kinderen en tekenfilms"},
 ]
+AUTOMATISCH = {"alles", "2000", "pop", "rock", "dance"}
+# Een nummer dat alleen in zo'n lijst zit, komt niet in Alle hits of 2000 tot
+# nu: anders krijgt een gewoon spel kinderliedjes.
+APART = {"kind"}
 ROCK = {"Rock", "Alternative", "Indie Rock"}
 HEAVY = {"Metal", "Hard Rock"}
 DANCE = {"Dance", "Electro", "Techno/House", "Dancefloor", "Disco"}
@@ -82,6 +104,9 @@ _ALLOWED = {
     "edit", "version", "versie", "mono", "stereo", "original", "explicit", "clean", "bonus", "track",
     "deluxe", "edition", "expanded", "anniversary", "from", "soundtrack", "motion", "picture", "film",
     "the", "a", "an", "of", "and", "feat", "featuring", "ft", "with", "x", "vs", "short", "uncensored",
+    # "(Video Edit)", "(Mastered 1994)", "(Original Recording Remastered)", "(Studio Versie)". Een
+    # heropname ("Re-Recorded", "Re-Recording") valt nog altijd af: "re" en "recorded" mogen niet.
+    "video", "mastered", "recording", "studio",
 }
 # Een andere opname, tenzij de gevraagde titel het ook zegt.
 _OTHER = {
@@ -93,6 +118,27 @@ _OTHER = {
 }
 # Klinkt (bijna) als het origineel, maar liever niet als er iets beters is.
 _SOFT = {"mix"}
+
+# Een aanduiding tussen haakjes (of na " - ") die niets over de opname zegt:
+# een gastartiest ("feat. Bruno Mars", "with Wanz") of de film of musical
+# waaruit het komt ("From "Despicable Me 2"", "From "Saturday Night Fever"
+# Soundtrack", "Original Song from DreamWorks Animation's "TROLLS"").
+_GROUP_RE = re.compile(r"\s*[\(\[]([^\(\)\[\]]*)[\)\]]")
+_GUEST_RE = re.compile(r"^\s*(?:feat\.?|featuring|ft\.?|with)\s+(.+)$", re.IGNORECASE)
+_FROM_RE = re.compile(r"^\s*(?:(?:the\s+)?(?:original\s+)?(?:song|theme|music)\s+)?from\b", re.IGNORECASE)
+_SOUNDTRACK_RE = re.compile(r"\b(?:soundtrack|motion picture)\b", re.IGNORECASE)
+
+# Rangorde (lager is beter):
+# - TIER_SAME: hetzelfde nummer, eventueel met "Remaster", "Radio Edit" of een
+#   gevraagde gast;
+# - TIER_FROM: met "From <film>": voor "Night Fever" of "Happy" het origineel,
+#   maar voor "Reflection" of "The Safety Dance" vaak een soundtrack-uitgave
+#   of nieuwe opname, dus alleen als er niets zonder is;
+# - TIER_MIX: een "mix" die geen remix heet;
+# - TIER_GUEST: met een gast die niet gevraagd was ("Uptown Funk (feat. Bruno
+#   Mars)" voor "Mark Ronson – Uptown Funk": vaak gewoon het origineel, maar
+#   soms een latere versie, zoals "Despacito" met Justin Bieber).
+TIER_SAME, TIER_FROM, TIER_MIX, TIER_GUEST = 0, 1, 2, 3
 
 
 def words(text: str) -> list[str]:
@@ -113,7 +159,7 @@ def artists_of(artist: str) -> list[str]:
 
 
 # Dezelfde artiest onder een andere naam bij Deezer.
-ALIASES = {"mgk": "machine gun kelly"}
+ALIASES = {"mgk": "machine gun kelly", "puff daddy": "diddy", "ch pz": "chipz"}
 
 
 def artist_ok(candidate: str, wanted: list[str]) -> bool:
@@ -136,12 +182,68 @@ def artist_ok(candidate: str, wanted: list[str]) -> bool:
     return False
 
 
+def foreign_letters(text: str) -> set[str]:
+    """Letters die norm() laat wegvallen omdat ze geen Latijnse letter worden ("電影", "Ø")."""
+    t = unicodedata.normalize("NFKD", str(text))
+    return {c.casefold() for c in t if c.isalpha() and not c.isascii() and not unicodedata.combining(c)}
+
+
+def drop_extras(title: str, names: set[str]) -> tuple[str, set[str]]:
+    """Haalt gastartiesten en "From <film>" uit een titel.
+
+    `names`: de woorden van de gevraagde artiesten en titel. Geeft de titel
+    zonder die aanduidingen en wat er wegging: "guest" (een gast die niet in
+    `names` staat) en/of "from". Een aanduiding met een woord voor een andere
+    opname ("From "Frozen"/Club Remix") blijft staan, zodat ze daarna nog
+    afvalt.
+    """
+    found = set()
+
+    def extra(text: str) -> bool:
+        g = _GUEST_RE.match(text)
+        if g:
+            if not set(words(g.group(1))) <= names:
+                found.add("guest")
+            return True
+        if (_FROM_RE.match(text) or _SOUNDTRACK_RE.search(text)) and not set(words(text)) & _OTHER:
+            if T._REMIX_RE.search(text):
+                return False
+            found.add("from")
+            return True
+        return False
+
+    t = _GROUP_RE.sub(lambda m: "" if extra(m.group(1)) else m.group(0), str(title)).strip()
+    # Zonder haakjes: "Titel - From "Grease"", "Titel feat. X".
+    if " - " in t:
+        head, tail = t.rsplit(" - ", 1)
+        if head.strip() and extra(tail):
+            t = head.strip()
+    m = re.search(r"\s+((?:feat\.?|featuring|ft\.)\s+.+)$", t, re.IGNORECASE)
+    if m and t[: m.start()].strip() and extra(m.group(1)):
+        t = t[: m.start()].strip()
+    return (t or str(title)), found
+
+
 def version_tier(candidate: str, wanted: str, wanted_artists: list[str]) -> int | None:
     """Hoe goed een titel van Deezer past bij de gevraagde titel.
 
-    0: hetzelfde nummer (eventueel "Remaster", "Radio Edit", "feat. X");
-    1: een "mix" die geen remix heet; None: een andere opname of een ander nummer.
+    Een van de TIER_-waarden hierboven, of None: een andere opname of een
+    ander nummer.
     """
+    names = {w for a in wanted_artists for w in words(a)} | set(words(wanted))
+    raw = candidate
+    candidate, found = drop_extras(candidate, names)
+    # Ook in de gevraagde titel ("It Must Have Been Love - From the Film "Pretty Woman"").
+    wanted = drop_extras(wanted, names)[0]
+    tier = TIER_GUEST if "guest" in found else TIER_FROM if "from" in found else TIER_SAME
+    # "Reflection (2020) (From "Mulan")": een jaartal naast een film is vaak een nieuwe opname.
+    if "from" in found and not set(words(raw)) & {"remaster", "remastered"}:
+        if any(w.isdigit() and len(w) == 4 and w not in names for w in words(raw)):
+            return None
+    # Tekst in een ander schrift valt bij het vergelijken weg; die mag er dus niet zomaar bij
+    # ("Beauty & the Beast 電影''美女與野獸''主題曲" is niet "Beauty and the Beast").
+    if foreign_letters(raw) - foreign_letters(wanted) - {c for a in wanted_artists for c in foreign_letters(a)}:
+        return None
     if not T.title_matches(candidate, T.clean_title(wanted)):
         # Leestekens of haakjes in de titel zelf ("Chop Suey!", "Party In The U.S.A.").
         if T.norm(base_title(candidate)).replace(" ", "") != T.norm(base_title(wanted)).replace(" ", ""):
@@ -155,13 +257,21 @@ def version_tier(candidate: str, wanted: str, wanted_artists: list[str]) -> int 
     # Ook aaneengeschreven ("U.S.A." -> "u s a" -> "usa").
     allowed = {"".join(ww[i:j]) for i in range(len(ww)) for j in range(i + 1, min(i + 5, len(ww) + 1))}
     allowed |= {w for a in wanted_artists for w in words(a)}
-    extra = [w for w in words(candidate) if w not in allowed]
-    tier = 0
+    # Anders aaneengeschreven: "2 Wicky" voor "2Wicky".
+    cw, target, acc = words(candidate), "".join(words(base_title(wanted))), ""
+    for i, w in enumerate(cw):
+        acc += w
+        if acc == target:
+            allowed |= set(cw[: i + 1])
+            break
+        if not target.startswith(acc):
+            break
+    extra = [w for w in cw if w not in allowed]
     for w in extra:
         if w in _ALLOWED or w.isdigit():
             continue
         if w in _SOFT:
-            tier = 1
+            tier = max(tier, TIER_MIX)
             continue
         return None  # "live", "acoustic", of een woord dat er niet hoort ("Jacques Lu Cont")
     # Een heropname heet vaak "(2025 Version)": een jaartal bij "version" zonder "remaster".
@@ -328,18 +438,32 @@ class Deezer:
 def find(dz: Deezer, artist: str, title: str) -> dict | None:
     """Het beste Deezer-nummer voor artiest en titel, of None."""
     base = base_title(title)
+    wanted = artists_of(artist)
     best = None
+
+    def better(hit):
+        if not hit:
+            return False
+        if best is None:
+            return True
+        return (version_tier(hit["title"], title, wanted), -hit["rank"]) < (version_tier(best["title"], title, wanted), -best["rank"])
+
+    def same(hit):
+        return hit is not None and version_tier(hit["title"], title, wanted) == TIER_SAME
+
     for q in queries(artist, title):
         hit = pick(dz.search(q, base), artist, title)
-        if hit and (best is None or (version_tier(hit["title"], title, artists_of(artist)), -hit["rank"]) < (version_tier(best["title"], title, artists_of(artist)), -best["rank"])):
+        if better(hit):
             best = hit
-        # Ruimer zoeken alleen als nog niets paste.
-        if best:
+        # Ruimer zoeken alleen als nog niets (of alleen een tweede keus) paste.
+        if same(best):
             break
-    if best is None:
+    if not same(best):
         # Laatste kans: de bekendste nummers van de artiest zelf. Sommige
         # artiesten ("*NSYNC") vindt de gewone zoekfunctie niet terug.
-        best = pick(dz.artist_top(artists_of(artist)[0] if artists_of(artist) else artist), artist, title)
+        hit = pick(dz.artist_top(wanted[0] if wanted else artist), artist, title)
+        if better(hit):
+            best = hit
     return best
 
 
@@ -357,15 +481,22 @@ def display_title(title: str) -> str:
 def build_lists(rows: list[dict], previous: dict | None = None) -> dict:
     """Het bronbestand voor de site: de lijsten en per nummer in welke het zit.
 
-    `previous`: het huidige fragmenten.json; wat daarin met de hand in een
-    lijst zonder regel staat (Nederlandstalig, Rustige pop en ballads), blijft.
+    `previous`: het huidige fragmenten.json. Wat daarin met de hand in een
+    lijst zonder regel staat (alles buiten AUTOMATISCH, ook een lijst die nog
+    niet in LIJSTEN staat), blijft. Een nummer dat niet in `rows` zit maar wel
+    in zo'n lijst, blijft ook, zoals het in het bestand stond; alleen Alle hits
+    en 2000 tot nu worden voor hem opnieuw bepaald.
     """
-    manual_ids = {"nl", "rustig"}
-    kept = {}
+    prev_lists = (previous or {}).get("lists") or []
+    known = {x["id"] for x in LIJSTEN}
+    lijsten = [dict(x) for x in LIJSTEN] + [dict(x) for x in prev_lists if x.get("id") not in known]
+    order = [x["id"] for x in lijsten]
+    kept, prev_tracks = {}, {}
     for t in (previous or {}).get("tracks") or []:
-        tags = [x for x in t.get("lists") or [] if x in manual_ids]
+        tags = [x for x in t.get("lists") or [] if x not in AUTOMATISCH]
         if tags:
             kept[int(t["deezer"])] = tags
+            prev_tracks[int(t["deezer"])] = t
     seen_ids, seen_songs, tracks = set(), set(), []
     for r in rows:
         dz_id = r.get("deezer")
@@ -405,10 +536,23 @@ def build_lists(rows: list[dict], previous: dict | None = None) -> dict:
         t["lists"].append("rock")
     for t in tracks:
         t["lists"] += kept.get(t["deezer"], [])
-        t["lists"] = [x["id"] for x in LIJSTEN if x["id"] in t["lists"]]
         del t["_genres"], t["_rank"]
+    # Met de hand toegevoegd (niet in `rows`): zoals het was, met zijn eigen
+    # Pop, Rock of Dance, en in Alle hits tenzij het alleen in APART-lijsten zit.
+    for dz_id, old in prev_tracks.items():
+        if dz_id in seen_ids:
+            continue
+        seen_ids.add(dz_id)
+        tags = [x for x in old.get("lists") or [] if x in {"pop", "rock", "dance"}] + kept[dz_id]
+        if any(x not in APART for x in kept[dz_id]):
+            tags.append("alles")
+            if int(old["year"]) >= 2000:
+                tags.append("2000")
+        tracks.append({**old, "deezer": dz_id, "lists": tags})
+    for t in tracks:
+        t["lists"] = [x for x in order if x in t["lists"]]
     tracks.sort(key=lambda t: (t["year"], T.norm(t["artist"]), T.norm(t["title"])))
-    return {"lists": [{"id": x["id"], "name": x["name"]} for x in LIJSTEN], "tracks": tracks}
+    return {"lists": lijsten, "tracks": tracks}
 
 
 def write_fragments(path: Path, data: dict) -> None:
@@ -442,7 +586,9 @@ def cmd_zoek(args) -> int:
     missing = []
     try:
         for i, r in enumerate(rows, 1):
-            hit = find(dz, r["artist"], r["title"])
+            # `zoekartiest`/`zoektitel`: zo zoeken als de naam bij Deezer anders is
+            # ("Céline Dion, Peabo Bryson"), `artist`/`title` blijven voor het spel.
+            hit = find(dz, r.get("zoekartiest") or r["artist"], r.get("zoektitel") or r["title"])
             if hit:
                 info = dz.album(hit["album_id"]) if hit.get("album_id") else {"genres": []}
                 r.update({

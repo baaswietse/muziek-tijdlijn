@@ -13,6 +13,16 @@ export function DeckPanel({ view, send, deck, choice, loggedIn, source = 'spotif
 
 const nummers = (n) => (n === 1 ? '1 nummer' : `${n} nummers`);
 
+/** Uitleg bij de hoofdlijst: welke lijsten ze uitzet, en welke je erbij kan aanvinken. */
+function mainHelp(lists) {
+  const main = lists.find((l) => l.main);
+  if (!main) return '';
+  const apart = lists.filter((l) => !l.main && !l.inMain).map((l) => `«${l.name}»`);
+  if (apart.length === 0) return ` «${main.name}» bevat alles en zet de andere uit.`;
+  const which = apart.length === 1 ? apart[0] : `${apart.slice(0, -1).join(', ')} en ${apart[apart.length - 1]}`;
+  return ` «${main.name}» zet de andere uit, behalve ${which}: die kan je erbij aanvinken.`;
+}
+
 /**
  * Met fragmenten: vink een of meer lijsten van het spel aan en beperk
  * eventueel de periode. Wat dat geeft, staat er meteen onder. De keuze zelf
@@ -44,10 +54,7 @@ function FragmentLists({ deck, choice: c }) {
         <>
           <p class="muted small">
             Vink een of meer lijsten aan: je speelt met alle nummers die in minstens één ervan zitten.
-            {c.lists
-              .filter((l) => l.all)
-              .slice(0, 1)
-              .map((l) => ` «${l.name}» bevat alles en zet de andere uit.`)}
+            {mainHelp(c.lists)}
           </p>
           {limited && (
             <p class="muted small" data-testid="count-period">

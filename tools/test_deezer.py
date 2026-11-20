@@ -51,8 +51,60 @@ class VersionTier(unittest.TestCase):
         self.assertEqual(self.tier("Baddest Behaviour (Timmy Trumpet Remix)", "Baddest Behaviour - Timmy Trumpet Remix"), 0)
         self.assertIsNone(self.tier("Baddest Behaviour (Other Remix)", "Baddest Behaviour - Timmy Trumpet Remix"))
 
-    def test_a_mix_is_second_choice(self):
-        self.assertEqual(self.tier("Banger Hart (Radio Mix)", "Banger Hart"), 1)
+    def test_a_mix_is_last_choice(self):
+        self.assertEqual(self.tier("Banger Hart (Radio Mix)", "Banger Hart"), D.TIER_MIX)
+
+    def test_guest_artists_and_soundtracks(self):
+        # Een gast die niet gevraagd was: hetzelfde nummer, maar tweede keus.
+        self.assertEqual(self.tier("Uptown Funk (feat. Bruno Mars)", "Uptown Funk", ["Mark Ronson"]), D.TIER_GUEST)
+        self.assertEqual(self.tier("Crazy In Love (feat. JAŸ-Z)", "Crazy in Love", ["Beyoncé"]), D.TIER_GUEST)
+        self.assertEqual(self.tier("Thrift Shop (feat. Wanz)", "Thrift Shop", ["Macklemore & Ryan Lewis"]), D.TIER_GUEST)
+        self.assertEqual(self.tier("Havana (with Young Thug)", "Havana", ["Camila Cabello"]), D.TIER_GUEST)
+        self.assertEqual(self.tier("Now You're Gone (feat. DJ Mental Theo's Bazzheadz) (Radio Edit)", "Now You're Gone", ["Basshunter"]), D.TIER_GUEST)
+        # Een gevraagde gast: gewoon hetzelfde nummer.
+        self.assertEqual(self.tier("Uptown Funk (feat. Bruno Mars)", "Uptown Funk", ["Mark Ronson", "Bruno Mars"]), D.TIER_SAME)
+        # De film of musical waaruit het komt: alleen als er niets zonder is.
+        self.assertEqual(self.tier('Happy (From "Despicable Me 2")', "Happy"), D.TIER_FROM)
+        self.assertEqual(self.tier('Night Fever (From "Saturday Night Fever" Soundtrack)', "Night Fever"), D.TIER_FROM)
+        self.assertEqual(self.tier('Let It Go (From "Frozen"/Soundtrack Version)', "Let It Go"), D.TIER_FROM)
+        self.assertEqual(self.tier("You're The One That I Want (From “Grease”)", "You're the One That I Want"), D.TIER_FROM)
+        self.assertEqual(
+            self.tier('CAN\'T STOP THE FEELING! (Original Song from DreamWorks Animation\'s "TROLLS")', "Can't Stop the Feeling!"),
+            D.TIER_FROM,
+        )
+        # Ook in de gevraagde titel.
+        self.assertEqual(
+            self.tier('It Must Have Been Love (From the Film "Pretty Woman")', 'It Must Have Been Love - From the Film "Pretty Woman"'),
+            D.TIER_FROM,
+        )
+        self.assertEqual(self.tier("It Must Have Been Love", 'It Must Have Been Love - From the Film "Pretty Woman"'), D.TIER_SAME)
+        # Een jaartal naast de film: een nieuwe opname.
+        self.assertIsNone(self.tier('Reflection (2020) (From "Mulan")', "Reflection"))
+        self.assertEqual(self.tier('Happy (From "Despicable Me 2") (2014 Remaster)', "Happy"), D.TIER_FROM)
+        # Anders geschreven of een onschuldige toevoeging.
+        self.assertEqual(self.tier("2 Wicky", "2Wicky"), D.TIER_SAME)
+        self.assertEqual(self.tier("Blue (Da Ba Dee) (Video Edit)", "Blue (Da Ba Dee)"), D.TIER_SAME)
+        self.assertEqual(self.tier("Cotton Eye Joe (Mastered 1994)", "Cotton Eye Joe"), D.TIER_SAME)
+        self.assertEqual(self.tier("Mickey (Original Recording Remastered)", "Mickey"), D.TIER_SAME)
+        self.assertEqual(self.tier("Zij Weet Het (Studio Versie)", "Zij weet het"), D.TIER_SAME)
+
+    def test_still_other_recordings(self):
+        refused = [
+            ('Let It Go (From "Frozen"/Papercha$er Club Remix)', "Let It Go"),
+            ("Uptown Funk (feat. Bruno Mars) (Will Sparks Remix)", "Uptown Funk"),
+            ("Jerusalema (feat. Burna Boy & Nomcebo Zikode) (Remix)", "Jerusalema"),
+            ("Crazy In Love (Homecoming Live)", "Crazy in Love"),
+            ("867-5309 / Jenny (Re-Recorded Version)", "867-5309/Jenny"),
+            ("Push It (Re-Recorded) [Remastered]", "Push It"),
+            ("Mickey (Spanish Version)", "Mickey"),
+            ("Pop Muzik (12 Inch Version)", "Pop Muzik"),
+            ("Headhunter (Front Line Assembly)", "Headhunter"),
+            ("Happy (In the Style of Pharrell Williams) [Karaoke Instrumental Version]", "Happy"),
+            ("Bailando (feat. Sean Paul, Descemer Bueno & Gente de Zona) (English Version)", "Bailando"),
+        ]
+        for candidate, wanted in refused:
+            with self.subTest(candidate=candidate):
+                self.assertIsNone(self.tier(candidate, wanted))
 
 
 class Pick(unittest.TestCase):
@@ -66,6 +118,16 @@ class Pick(unittest.TestCase):
         ]
         self.assertEqual(D.pick(results, "Dire Straits", "Sultans Of Swing")["id"], 3)
 
+    def test_without_guest_before_with_guest(self):
+        results = [
+            hit(1, "Despacito (feat. Justin Bieber)", "Luis Fonsi", rank=990),
+            hit(2, "Despacito (feat. Daddy Yankee)", "Luis Fonsi", rank=900),
+            hit(3, "Despacito", "Luis Fonsi", rank=500),
+        ]
+        self.assertEqual(D.pick(results, "Luis Fonsi, Daddy Yankee", "Despacito")["id"], 2)
+        self.assertEqual(D.pick(results[:2], "Luis Fonsi", "Despacito")["id"], 1)
+        self.assertEqual(D.pick(results, "Luis Fonsi", "Despacito")["id"], 3)
+
     def test_artist_variants(self):
         self.assertTrue(D.artist_ok("*NSYNC", ["*NSYNC"]))
         self.assertTrue(D.artist_ok("P!nk", ["P!nk"]))
@@ -75,6 +137,8 @@ class Pick(unittest.TestCase):
         self.assertFalse(D.artist_ok("Sia", ["David Guetta", "Sia"]))
         self.assertFalse(D.artist_ok("Freshman", ["*NSYNC"]))
         self.assertTrue(D.artist_ok("Machine Gun Kelly", ["mgk", "Kid Rock"]))
+        self.assertTrue(D.artist_ok("Diddy", ["Puff Daddy"]))
+        self.assertTrue(D.artist_ok("Auli'i Cravalho", ["Auliʻi Cravalho"]))
 
     def test_queries_from_targeted_to_broad(self):
         q = D.queries("System Of A Down", "Chop Suey!")
@@ -149,10 +213,38 @@ class BuildLists(unittest.TestCase):
         self.assertEqual(lists["nl"], [])
 
     def test_hand_made_lists_stay(self):
-        previous = {"tracks": [{"deezer": 3000, "lists": ["alles", "nl", "rustig"]}]}
+        previous = {"tracks": [{"deezer": 3000, "lists": ["alles", "nl", "rustig", "feest"]}]}
         data = D.build_lists(self.rows(), previous)
         pop = next(t for t in data["tracks"] if t["deezer"] == 3000)
-        self.assertEqual(pop["lists"], ["alles", "2000", "pop", "dance", "nl", "rustig"])
+        self.assertEqual(pop["lists"], ["alles", "2000", "pop", "dance", "nl", "rustig", "feest"])
+
+    def test_hand_added_tracks_and_lists_stay(self):
+        """Een tweede run van `lijsten` wist niets van wat met de hand in het bestand kwam."""
+        previous = {
+            "lists": [{"id": "alles", "name": "Alle hits", "main": True}, {"id": "eigen", "name": "Eigen lijst"}],
+            "tracks": [
+                {"deezer": 5001, "artist": "Hand", "title": "Ballade", "year": 2010, "lists": ["alles", "2000", "pop", "rustig"]},
+                {"deezer": 5002, "artist": "Bumba", "title": "Bumba", "year": 2004, "lists": ["kind"]},
+                {"deezer": 5003, "artist": "Pharrell Williams", "title": "Happy", "year": 2013, "lists": ["alles", "2000", "feest", "kind"]},
+                {"deezer": 5004, "artist": "Eigen", "title": "Nummer", "year": 1999, "lists": ["eigen"]},
+                {"deezer": 5005, "artist": "Weg", "title": "Uit de oude invoer", "year": 1990, "lists": ["alles", "rock"]},
+            ],
+        }
+        data = D.build_lists(self.rows(), previous)
+        ids = [x["id"] for x in data["lists"]]
+        self.assertEqual(ids[: len(D.LIJSTEN)], [x["id"] for x in D.LIJSTEN])
+        self.assertEqual(ids[-1], "eigen")
+        self.assertEqual(data["lists"][0], {"id": "alles", "name": "Alle hits", "main": True})
+        by = {t["deezer"]: t for t in data["tracks"]}
+        self.assertEqual(by[5001], {"deezer": 5001, "artist": "Hand", "title": "Ballade", "year": 2010, "lists": ["alles", "2000", "pop", "rustig"]})
+        # Alleen in Kinderen en tekenfilms: niet in Alle hits of 2000 tot nu.
+        self.assertEqual(by[5002]["lists"], ["kind"])
+        self.assertEqual(by[5003]["lists"], ["alles", "2000", "feest", "kind"])
+        self.assertEqual(by[5004]["lists"], ["alles", "eigen"])
+        # Een nummer zonder lijst die je zelf vult en niet in de invoer: weg, zoals voordien.
+        self.assertNotIn(5005, by)
+        # Nog een run op het resultaat verandert niets.
+        self.assertEqual(D.build_lists(self.rows(), data), data)
 
 
 if __name__ == "__main__":

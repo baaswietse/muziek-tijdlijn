@@ -490,9 +490,10 @@ hang die aan een box als je wil. Op afstand spelen kan ook: zie hieronder.
    (een browser speelt pas geluid na een tik).
 3. **Host:** kies onder *Nummers* welke nummers meedoen (standaard *Alle hits*: dan hoef je niets te doen).
    - **Lijsten:** vink er een of meer aan. Het spel speelt met alle nummers die in minstens één ervan zitten, elk
-     één keer. *Alle hits* bevat alles: aanvinken zet de andere uit, en een andere lijst aanvinken zet *Alle hits*
-     uit (samen zou het toch gewoon alles zijn). Alles uitvinken mag, maar dan kan je niet starten. Een lege lijst
-     staat er niet bij.
+     één keer. *Alle hits* bevat alles behalve de kinderliedjes: aanvinken zet de andere uit, en een andere lijst
+     aanvinken zet *Alle hits* uit (samen zou het toch gewoon *Alle hits* zijn). Alleen *Kinderen en tekenfilms*
+     kan je erbij aanvinken: *Alle hits* blijft dan aan, en het spel speelt met alles. Alles uitvinken mag, maar dan
+     kan je niet starten. Een lege lijst staat er niet bij.
    - **Periode:** *Van* en *tot en met*, twee keuzelijsten in stappen van 5 jaar (1965, 1970, …), standaard *het
      begin* en *nu*: geen beperking. De grenzen volgen uit de jaren van de nummers in het bestand. Kruisen ze (van
      na tot), dan valt de andere grens weg. *Alle jaren* haalt de beperking weer weg. De periode geldt voor alle
@@ -729,7 +730,7 @@ fragmenten speelt, haalt het op. Eén nummer per regel:
 ```json
 {
   "lists": [
-    {"id": "alles", "name": "Alle hits"},
+    {"id": "alles", "name": "Alle hits", "main": true},
     {"id": "nl", "name": "Nederlandstalig"}
   ],
   "tracks": [
@@ -739,27 +740,46 @@ fragmenten speelt, haalt het op. Eén nummer per regel:
 ```
 
 - Een lijst toevoegen: een item in `lists` (de volgorde is die op het scherm) en het `id` bij de nummers die erin
-  horen. Er hangt niets af van welke lijsten er zijn: een lijst waarin alle nummers zitten (nu *Alle hits*), staat
-  vooraan en zet bij aanvinken de andere uit; dat volgt uit de nummers, niet uit het `id`. Een lijst zonder nummers wordt niet getoond: zo staan *Nederlandstalig* (`nl`) en *Rustige pop en ballads*
-  (`rustig`) er al klaar.
+  horen. Een lijst zonder nummers wordt niet getoond. Zet ze ook in `LIJSTEN` in `tools/deezer.py`, zodat ze op de
+  juiste plaats staat als iemand `lijsten` nog eens draait (wissen doet dat commando haar ook zonder niet, zie
+  hieronder).
+- De hoofdlijst (*Alle hits*) heeft `"main": true`: die staat vooraan, is de standaardkeuze en zet bij aanvinken de
+  lijsten uit die er helemaal in zitten (en omgekeerd). Een lijst met nummers die niet in de hoofdlijst zitten (nu
+  alleen *Kinderen en tekenfilms*) kan je er wel bij aanvinken. Dat volgt uit de nummers, niet uit het `id`. Zonder
+  `main` geldt, zoals vroeger, een lijst waarin alle nummers zitten als hoofdlijst.
+- Een nieuw nummer komt ook in *Alle hits* (`alles`) en, vanaf het jaar 2000, in *2000 tot nu* (`2000`), behalve
+  een nummer dat alleen in *Kinderen en tekenfilms* (`kind`) zit: anders krijgt een gewoon spel kinderliedjes.
 - Een nummer wijzigen of toevoegen: die ene regel. `deezer` is het ID uit het adres bij Deezer
   (`deezer.com/track/<ID>`), `year` het jaar dat bij de onthulling verschijnt. Elk nummer zit in minstens één lijst;
   een nummer met een ongeldig ID, jaar of lege titel of artiest, of een ID dat al voorkomt, doet niet mee. Een lijst
   heeft minstens 10 nummers nodig om mee te spelen.
-- `npm test` kijkt het bestand na (geldige nummers, geen dubbels, de afgesproken lijsten, "2000 tot nu" klopt).
+- `npm test` kijkt het bestand na (geldige nummers, geen dubbels, de afgesproken lijsten in die volgorde, alleen
+  *Alle hits* als hoofdlijst, "Alle hits" en "2000 tot nu" kloppen, elke lijst minstens 10 nummers).
 
-Nu (november 2026) staan er 758 nummers in: 616 uit de 644 nagekeken nummers van de eigenaar, en 142 die voor de
-lijsten Nederlandstalig en Rustige pop en ballads met de hand zijn toegevoegd:
+Nu (november 2026) staan er 1158 nummers in: 616 uit de 644 nagekeken nummers van de eigenaar, 142 die voor de
+lijsten Nederlandstalig en Rustige pop en ballads met de hand zijn toegevoegd, en 400 voor de tien lijsten vanaf
+Feestklassiekers (die bevatten ook 111 nummers die er al in stonden). 26 kinderliedjes zitten alleen in Kinderen en
+tekenfilms en dus niet in Alle hits:
 
 | Lijst | Nummers | Wat |
 | --- | --- | --- |
-| Alle hits | 758 | alles met een Deezer-ID (dubbels eruit) |
-| 2000 tot nu | 384 | jaar 2000 of later |
+| Alle hits | 1132 | alles met een Deezer-ID (dubbels eruit), behalve wat alleen in Kinderen en tekenfilms zit |
+| 2000 tot nu | 507 | uit Alle hits, jaar 2000 of later |
 | Pop | 341 | genre Pop, plus de toegevoegde nummers van Rustige pop en ballads |
 | Rock | 272 | genres Rock, Alternative en Indie Rock, plus de 54 bekendste nummers met Metal of Hard Rock (hoogstens een vijfde) |
 | Dance | 51 | genres Dance, Electro, Techno/House, Dancefloor of Disco |
 | Nederlandstalig | 102 | met de hand samengesteld; jaartal vergeleken met MusicBrainz en Wikidata |
 | Rustige pop en ballads | 104 | met de hand samengesteld (Adele, Lewis Capaldi en dergelijke); zelfde controle |
+| Feestklassiekers | 79 | met de hand samengesteld, zoals de tien lijsten hieronder; zelfde controle |
+| Foute hits | 51 | |
+| Eendagsvliegen | 54 | |
+| Zomerhits | 54 | |
+| Disco, soul en funk | 59 | |
+| Hiphop en R&B | 59 | |
+| Belpop | 56 | |
+| Boybands en girlbands | 60 | |
+| Meezingers en après-ski | 53 | |
+| Kinderen en tekenfilms | 45 | ook een paar nummers uit Alle hits (bv. *Happy*); wat alleen hierin zit, niet in Alle hits of 2000 tot nu |
 
 De genres zijn die van het album bij Deezer. Voor Rock telt een nummer met ook Metal of Hard Rock als metal; daarvan
 gaan er zoveel mee als een vijfde van de lijst toelaat, de bekendste eerst (`rank` van Deezer, bij gelijke rank het
@@ -779,18 +799,31 @@ python tools/deezer.py lijsten gevonden.json
   tekstbestand met per regel `Artiest - Titel`. `gevonden.json` krijgt per nummer `deezer` (of `null`),
   `deezer_titel`, `deezer_artiest`, `rank`, `album` en `album_genres`. Wat het niet vond, schrijft het onderaan op het
   scherm.
-- `lijsten` maakt daaruit `web/public/fragmenten.json` opnieuw, met de lijsten die uit jaar en genre volgen (zie
-  `LIJSTEN` bovenaan het script). Als genre telt `genres` uit de invoer, anders `album_genres`. Wat je met de hand in
-  `nl` of `rustig` zette, blijft staan. Het is eenmalig handig; daarna pas je het bronbestand ook gewoon zelf aan.
+- `lijsten` maakt daaruit `web/public/fragmenten.json` opnieuw. Alle hits, 2000 tot nu, Pop, Rock en Dance
+  (`AUTOMATISCH`) volgen uit jaar en genre; als genre telt `genres` uit de invoer, anders `album_genres`. Alle andere
+  lijsten vul je met de hand, en die blijven staan: welke nummers erin zitten, ook nummers die niet in de invoer
+  staan (die blijven zoals ze in het bestand stonden), en ook een lijst die nog niet in `LIJSTEN` bovenaan het script
+  staat (die komt achteraan). Zo'n met de hand toegevoegd nummer komt in Alle hits en 2000 tot nu volgens dezelfde
+  regel als hierboven (niet als het alleen in `APART` zit, nu Kinderen en tekenfilms). Een tweede run verandert dus
+  niets. Daarna pas je het bronbestand ook gewoon zelf aan.
+- In de invoer mag een nummer ook `zoekartiest` of `zoektitel` hebben: daarmee zoekt het, als Deezer het anders
+  noemt ("Céline Dion, Peabo Bryson" voor *Beauty and the Beast*, "Bailando (Spanish Version)",
+  "I Will Survive (Lalala)"); `artist` en `title` blijven voor het spel.
 - Zo zoekt het: eerst op artiest en titel samen, dan op de titel alleen, daarna hetzelfde zonder leestekens ("Chop
   Suey!" → "Chop Suey"), en als laatste kans in de 100 bekendste nummers van de artiest (zo vindt het *NSYNC, dat de
   gewone zoekfunctie mist). De geavanceerde zoekvorm `artist:"…" track:"…"` geeft bij Deezer nu niets terug en
   gebruikt het dus niet. Van de resultaten telt alleen wat een fragment heeft, van de juiste artiest is en dezelfde
   titel heeft (zonder accenten, hoofdletters en leestekens). Een live-versie, remix, akoestische, instrumentale of
   karaokeversie, "Sped Up", "(2025 Version)" of een woord dat niet in de gevraagde titel staat ("Jacques Lu Cont's
-  Thin White Duke Mix") valt af, tenzij de gevraagde titel er zelf om vraagt ("Pump It - Live 2022"). "Remaster",
-  "Radio Edit", "Single Version" en "feat." tellen als het origineel; een "Mix" zonder meer is tweede keus. Van wat
-  overblijft wint het bekendste (`rank`).
+  Thin White Duke Mix") valt af, tenzij de gevraagde titel er zelf om vraagt ("Pump It - Live 2022"). Tekst in een
+  ander schrift die niet in de gevraagde titel staat, ook. "Remaster", "Radio Edit", "Video Edit", "Single Version",
+  "Studio Versie" en "Original Recording Remastered" tellen als het origineel, net als anders aaneengeschreven ("2
+  Wicky" voor "2Wicky"). Daarna, in die volgorde van voorkeur: met "From <film>" ("Happy (From "Despicable Me 2")",
+  "Night Fever (From "Saturday Night Fever" Soundtrack)"; met een jaartal erbij, zoals "Reflection (2020) (From
+  "Mulan")", valt het af: een nieuwe opname), een "Mix" zonder meer, en een gast die niet gevraagd was ("Uptown Funk
+  (feat. Bruno Mars)" voor Mark Ronson; een gevraagde gast telt als het origineel). Zo wint een versie zonder gast,
+  zodat "Despacito" niet de remix met Justin Bieber wordt. Vindt een zoekopdracht alleen zo'n tweede keus, dan zoekt
+  het verder (ook in de bekendste nummers van de artiest). Van wat overblijft wint het bekendste (`rank`).
 - Hoogstens 3 verzoeken per seconde (Deezer laat er 50 per 5 seconden toe), met een algemene User-Agent zonder naam of
   adres; bij "Quota limit exceeded" wacht het. De antwoorden staan in `tools/deezer-cache.json` (niet in de repo: een
   paar MB), dus een tweede keer gaat meteen; `--opnieuw` vraagt alles opnieuw.
