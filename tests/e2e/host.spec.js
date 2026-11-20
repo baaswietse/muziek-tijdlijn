@@ -384,17 +384,94 @@ test('Spotify: de nieuwe host logt in of stopt het spel en speelt verder met fra
   // Terug in de wachtkamer, met uitleg voor iedereen.
   for (const p of [host, bob, cas]) await expect(p.getByTestId('big-code')).toHaveText(code);
   for (const p of [host, bob]) await expect(p.getByTestId('lobby-note')).toContainText('Spotify bij de vorige host');
-  // Bij Cas staan de fragmenten klaar; de Spotify-lijst past daar niet bij, dus eerst een lijst kiezen.
+  // Bij Cas staan de fragmenten klaar. De Spotify-lijst past daar niet bij: er
+  // valt niets over te nemen, dus hij kiest zelf lijsten (die gaan naar de server).
   await expect(cas.getByTestId('source-fragment')).toHaveAttribute('aria-pressed', 'true');
   await expect(cas.getByTestId('start-game')).toBeDisabled();
+  await expect(cas.getByTestId('deck-held')).toHaveCount(0);
+  await expect(cas.getByTestId('fragment-lists')).toBeVisible();
   await cas.getByTestId('fragment-unlock').click();
-  await expect(cas.getByTestId('deck-mismatch')).toContainText('Kies eerst een lijst');
   await cas.getByTestId('list-oud').click();
+  await expect(cas.getByTestId('deck-total')).toHaveAttribute('data-synced', 'yes');
   await expect(cas.getByTestId('start-game')).toBeEnabled();
+  for (const p of [host, bob]) await expect(p.getByTestId('lobby-playlist')).toContainText('Oud');
   await cas.getByTestId('start-game').click();
   for (const p of [host, bob, cas]) await expect(p.getByTestId('turn-banner')).toBeVisible();
   await playing(cas);
   // In het nieuwe spel is de uitleg weg.
   await expect(bob.getByTestId('lobby-note')).toHaveCount(0);
+  for (const p of [host, bob, cas]) await p.context().close();
+});
+
+test('wissel van host met een gecombineerde lijstkeuze: de stapel van de vorige host blijft, tot de nieuwe zelf kiest', async ({ browser }) => {
+  const host = await openPhone(browser);
+  await fakeDeezer(host.context());
+  const code = await hostGame(host, 'Hanne');
+  await host.getByTestId('source-fragment').click();
+  await host.getByTestId('fragment-unlock').click();
+  const bob = await guest(browser, code, 'Bob');
+  // Cas heeft op zijn gsm een eigen bewaarde keuze van een vorig spel (alles).
+  const cas = await openPhone(browser);
+  await fakeDeezer(cas.context());
+  await cas.evaluate(() => localStorage.setItem('mt.fragmentChoice', JSON.stringify({ lists: ['alles'], from: null, to: null })));
+  await joinGame(cas, code, 'Cas');
+  const casId = await myId(cas);
+
+  // Hanne kiest twee lijsten samen en een periode.
+  await host.getByTestId('list-oud').click();
+  await host.getByTestId('list-nieuw').click();
+  await host.getByTestId('period-from').selectOption({ index: 3 });
+  await expect(host.getByTestId('deck-total')).toHaveAttribute('data-synced', 'yes');
+  const name = (await host.getByTestId('deck-name').textContent()).trim();
+  const count = Number(await host.getByTestId('deck-total').getAttribute('data-total'));
+  expect(name).toContain('+');
+  const shown = bob.getByTestId('lobby-playlist');
+  await expect(shown).toContainText(name);
+  const before = (await shown.textContent()).trim();
+  const from = Number(await host.getByTestId('period-from').inputValue());
+
+  // Vanaf nu: stuurt Hanne nog een stapel naar de server?
+  const posts = [];
+  host.on('request', (r) => r.method() === 'POST' && /\/deck$/.test(r.url()) && posts.push(r.url()));
+  await host.getByTestId('lobby-player').filter({ hasText: 'Cas' }).getByTestId('make-host').click();
+  await expect(cas.getByTestId('start-game')).toBeVisible();
+
+  // Cas ziet wat de vorige host koos, en de server houdt die stapel.
+  await expect(cas.getByTestId('deck-held')).toContainText(name);
+  await expect(cas.getByTestId('fragment-lists')).toHaveCount(0);
+  await cas.waitForTimeout(1500);
+  await expect(shown).toHaveText(before);
+  // Ook na een herlaad blijft dat zo.
+  await cas.reload();
+  await expect(cas.getByTestId('deck-held')).toContainText(name);
+  await cas.waitForTimeout(1000);
+  await expect(shown).toHaveText(before);
+  expect(posts, 'de oude host stuurt niets meer').toEqual([]);
+  // Hanne kan geen stapel meer kiezen.
+  await expect(host.getByTestId('fragment-lists')).toHaveCount(0);
+
+  // Cas start met die stapel: het nummer zit in de gekozen lijsten en de periode.
+  await cas.getByTestId('fragment-unlock').click();
+  await expect(cas.getByTestId('start-game')).toBeEnabled();
+  await cas.getByTestId('start-game').click();
+  for (const p of [host, bob, cas]) await expect(p.getByTestId('turn-banner')).toBeVisible();
+  const id = await playing(cas);
+  const t = fragmentOf(id);
+  expect(t.lists.some((l) => l === 'oud' || l === 'nieuw')).toBe(true);
+  expect(t.year).toBeGreaterThanOrEqual(from);
+  await openStand(cas);
+  await expect(cas.getByTestId('deck-left')).toContainText(`nog ${count - 4} nummers`);
+  await closePanel(cas);
+
+  // Terug in de wachtkamer: nog altijd de stapel van Hanne. Pas «Kies zelf lijsten» zet de keuze van Cas.
+  await hostAction(cas, 'stop-game');
+  await expect(cas.getByTestId('deck-held')).toContainText(name);
+  await expect(shown).toHaveText(before);
+  await cas.getByTestId('choice-own').click();
+  await expect(cas.getByTestId('fragment-lists')).toBeVisible();
+  await expect(cas.getByTestId('list-alles')).toHaveAttribute('aria-checked', 'true');
+  await expect(cas.getByTestId('deck-total')).toHaveAttribute('data-synced', 'yes');
+  await expect(shown).toContainText('Alle testfragmenten');
+  expect(posts).toEqual([]);
   for (const p of [host, bob, cas]) await p.context().close();
 });

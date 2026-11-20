@@ -196,6 +196,11 @@ gsm host  ──┘        │
   - **De eigen lijst van de vorige host** (een playlist of fragmentenlijst) blijft op de server, ook als de kamer
     slaapt of herstart (op Cloudflare apart bewaard; op Node in `DATA_FILE` als dat ingesteld is). De nieuwe host
     speelt er gewoon mee verder, ook *Nog een spel*, tot hij een andere kiest; hij hoeft niets opnieuw te sturen.
+    Bij fragmenten bewaart elke gsm zijn eigen keuze van lijsten en periode en stuurt die normaal vanzelf naar de
+    server. Wie host wordt terwijl er al een stapel met fragmenten op de server staat, ziet in plaats daarvan
+    «De vorige host koos …» met *Kies zelf lijsten*: zijn eigen bewaarde keuze gaat pas naar de server als hij
+    daarop tikt (of later zelf iets kiest), ook na een herlaad (`mt.fragmentChoice.held`, per spel). De vorige
+    host stuurt niets meer; de server zou het ook weigeren.
     Wat niet meegaat: het opzoeken van jaartallen dat nog liep op de gsm van de vorige host (de rest van de
     playlist komt er niet meer bij) en zijn verbeteringen die nog niet doorgestuurd waren. De nieuwe host kan
     die playlist ook niet zelf opnieuw inlezen: Spotify laat alleen de eigenaar of een medewerker een playlist
@@ -945,7 +950,9 @@ Gedekt, automatisch:
   gast met *Geluid op dit toestel* hoort zonder onderbreking verder, de oude host is stil, krijgt het track-ID
   niet meer en kan daarna vertrekken); de host valt weg (een korte haper lokt niets uit, voor de wachttijd geen
   melding en weigert de server, daarna bij iedereen *De host is weg*, de eerste die tikt wordt host, het spel gaat
-  verder, de oude host komt terug als gewone speler); met Spotify logt de nieuwe host in en speelt het nummer van
+  verder, de oude host komt terug als gewone speler); een wissel van host met een gecombineerde keuze van lijsten
+  en een periode (de stapel en de naam op de server blijven, ook na een herlaad van de nieuwe host, de oude host
+  stuurt niets meer, en pas *Kies zelf lijsten* zet de keuze van de nieuwe host); met Spotify logt de nieuwe host in en speelt het nummer van
   de beurt verder, of stopt hij en speelt hij met fragmenten verder (met de uitleg in de wachtkamer). Unit-tests
   voor de regels (doorgeven, overnemen pas na de wachttijd, niet kapen, rechten daarna, het geluid voor wie
   meeluistert) en voor wanneer een stille verbinding als weg telt.
