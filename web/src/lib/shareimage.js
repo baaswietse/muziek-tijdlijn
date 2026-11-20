@@ -31,7 +31,7 @@ const SANS = "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Ar
 const PAD = 56; // rand rond de kaart
 const IN = 64; // binnenrand van de kaart
 const ROW = 92; // hoogte van een rij in de eindstand
-const PRIZE_ROW = 76;
+const PRIZE_ROW = 90;
 
 /** Tekens zoals een mens ze telt (een emoji is er één), voor het inkorten. */
 function graphemes(text) {
@@ -80,6 +80,17 @@ function wrap(ctx, text, width, max) {
     lines.push(rest);
   }
   return lines.map((l) => ellipsize(ctx, l, width));
+}
+
+/**
+ * Namen naast elkaar ("A & B") in `width`: is het te lang, dan wordt elke naam
+ * apart ingekort, zodat een gedeelde prijs nooit een naam verliest.
+ */
+function fitNames(ctx, names, width) {
+  const all = names.join(' & ');
+  if (ctx.measureText(all).width <= width || names.length < 2) return ellipsize(ctx, all, width);
+  const each = (width - ctx.measureText(' & ').width * (names.length - 1)) / names.length;
+  return names.map((n) => ellipsize(ctx, n, each)).join(' & ');
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -135,9 +146,19 @@ function star(ctx, x, y, r) {
 function winnerLines(ctx, s, width) {
   const names = s.winners.map((w) => w.name);
   const label = names.length > 1 ? 'Gelijkspel' : names.length ? 'Winnaar' : 'Spel afgelopen';
-  let text = names.length > 1 ? names.join(' & ') : names[0] ?? '';
-  const size = text ? fitFont(ctx, text, { weight: 700, size: 92, min: 52, family: SERIF, width }) : 0;
-  const lines = text ? wrap(ctx, text, width, 3) : [];
+  let size = 0;
+  let lines = [];
+  if (names.length >= 2 && names.length <= 3) {
+    // Gelijkspel: elke naam op een eigen regel ("Ann &", "Bob").
+    const parts = names.map((n, i) => (i < names.length - 1 ? `${n} &` : n));
+    const longest = parts.reduce((a, b) => (ctx.measureText(a).width >= ctx.measureText(b).width ? a : b));
+    size = fitFont(ctx, longest, { weight: 700, size: 80, min: 52, family: SERIF, width });
+    lines = parts.map((l) => ellipsize(ctx, l, width));
+  } else if (names.length) {
+    const text = names.join(' & ');
+    size = fitFont(ctx, text, { weight: 700, size: 92, min: 52, family: SERIF, width });
+    lines = wrap(ctx, text, width, 3);
+  }
   const sub = names.length
     ? `${names.length > 1 ? 'elk ' : 'met '}${plural(s.winners[0].cards, 'kaart', 'kaarten')}`
     : '';
@@ -152,7 +173,7 @@ function measure(ctx, s) {
   const standH = 64 + s.standings.length * ROW;
   const prizesH = s.prizes.length ? 48 + 64 + s.prizes.length * PRIZE_ROW : 0;
   const top = PAD + 56 + 70 + 40; // merk en naam van het spel
-  const footer = 56 + 60;
+  const footer = 56 + 20;
   return { inner, w, winnerH, standH, prizesH, top, height: Math.ceil(top + winnerH + 48 + standH + prizesH + footer + PAD + IN) };
 }
 
@@ -298,10 +319,10 @@ export function drawSummary(canvas, s) {
       ctx.fillText(title, x0 + 60, mid + 4);
       const tw = ctx.measureText(title).width;
       ctx.font = `400 34px ${SANS}`;
-      ctx.fillText(ellipsize(ctx, prize.names.join(' & '), right - x0 - 60 - tw), x0 + 60 + tw, mid + 4);
+      ctx.fillText(fitNames(ctx, prize.names, right - x0 - 60 - tw), x0 + 60 + tw, mid + 4);
       ctx.fillStyle = C.muted;
       ctx.font = `400 26px ${SANS}`;
-      ctx.fillText(ellipsize(ctx, prize.detail, right - x0 - 60), x0 + 60, mid + 36);
+      ctx.fillText(ellipsize(ctx, prize.detail, right - x0 - 60), x0 + 60, mid + 40);
       y += PRIZE_ROW;
     }
   }
