@@ -415,7 +415,7 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
         tokens={myTokens}
         waitText={blocked && !waitInBar ? waitText : null}
         canContinue={canContinue}
-        holdKey={turnNo.current}
+        holdKey={finished ? `${view.game}:end` : turnNo.current}
       >
         {myTurn && !placing && <BuyCard key={turnKey} tokens={myTokens} cards={mine.timeline.length} target={target} send={send} />}
         {challenge && isHost && blocked && (
@@ -456,6 +456,12 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
         </div>
       )}
 
+      {/* Na afloop staat de tijdlijn onder het overzicht: zeg dan wiens het is. */}
+      {finished && shown && views.length < 2 && (
+        <h3 class="summary-head timeline-head" data-testid="timeline-head">
+          {shown.id === me ? 'Jouw tijdlijn' : `Tijdlijn van ${shown.name}`}
+        </h3>
+      )}
       {shown && (
         <section class="tl-zone" data-testid="timeline-section" data-player={shown.id} aria-label={views.find((v) => v.id === shownId)?.label ?? 'Tijdlijn'}>
           <Timeline {...timelineProps} />

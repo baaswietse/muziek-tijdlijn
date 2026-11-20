@@ -2331,7 +2331,9 @@ html:not(.has-bar) .outcome {
   color: #c98a14;
 }
 
+/* Het detail breekt als geheel naar de volgende regel, niet midden in. */
 .summary-prize-detail {
+  display: inline-block;
   opacity: 0.85;
 }
 
@@ -2342,6 +2344,11 @@ html:not(.has-bar) .outcome {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.timeline-head {
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
 }
 
 .summary-list {

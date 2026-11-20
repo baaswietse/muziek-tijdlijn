@@ -48,7 +48,8 @@ export function Summary({ view, onShow }) {
               <Star small />
               <span>
                 <strong>{prize.title}:</strong> {joinNames(prize.ids.map((id, i) => (id === me ? 'jij' : prize.names[i])))}
-                <span class="summary-prize-detail"> · {prize.detail}</span>
+{' '}
+                <span class="summary-prize-detail">· {prize.detail}</span>
               </span>
             </li>
           ))}
