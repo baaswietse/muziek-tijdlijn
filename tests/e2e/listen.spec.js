@@ -21,7 +21,7 @@ import {
   myId,
   expectFullyVisible,
 } from './helpers.js';
-import { FRAGMENTS, FRAGMENT_SECONDS, LONG_FRAGMENT_SECONDS, audioState, fakeDeezer, fragmentOf } from './fake-deezer.js';
+import { FRAGMENTS, LONG_FRAGMENT_SECONDS, audioState, fakeDeezer, fragmentOf } from './fake-deezer.js';
 import { drift } from '../../web/src/fragment/sync.js';
 
 /**
@@ -152,14 +152,21 @@ async function gap(host, page, duration) {
 }
 
 /**
- * Het fragment van host en gast loopt ongeveer gelijk (binnen een paar
- * tienden van een seconde). Let op: bij het fragment van 1,5 s zegt dit niet
- * veel. Het verschil telt modulo 1,5 s (meer dan 0,75 s kan het niet zijn),
- * en de host verliest bij elke herhaling zo'n 0,1 s tegenover de klok van de
- * server (zie fake-deezer.js). Om echt te meten: `long` en
- * `LONG_FRAGMENT_SECONDS`.
+ * Het fragment van host en gast loopt ongeveer gelijk: hoogstens 0,45 s. De
+ * gast springt pas bij als hij meer dan TOLERANCE (0,35 s) van de plaats
+ * volgens de server afwijkt (zie web/src/fragment/sync.js), dus tot 0,35 s
+ * mag hij blijven staan; de rest (0,1 s) is voor wat de schatting niet ziet:
+ * de tijd dat de start van de host naar de server onderweg was (live een paar
+ * honderdsten), en dat de twee metingen niet op hetzelfde ogenblik vallen.
+ *
+ * Meet dit alleen met het fragment van 20 s (`long`, `LONG_FRAGMENT_SECONDS`).
+ * Bij het fragment van 1,5 s zegt het niets: het telt modulo 1,5 s, de host
+ * verliest bij elke herhaling zo'n 0,1 s tegenover de klok van de server, en
+ * springen kan daar niet (zonder Range springt Chromium naar het begin, zie
+ * fake-deezer.js). Het verschil hangt dan alleen af van hoe lang de test
+ * erover deed, en dat is live anders dan lokaal.
  */
-async function inStep(host, page, duration = FRAGMENT_SECONDS, { timeout = 12_000 } = {}) {
+async function inStep(host, page, duration, { timeout = 12_000 } = {}) {
   await expect.poll(() => gap(host, page, duration), { timeout }).toBeLessThan(0.45);
 }
 
@@ -174,8 +181,10 @@ async function staysInStep(host, page, duration, ms) {
 }
 
 test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw en ander nummer, en haakt na een herlaad weer aan', async ({ browser }) => {
-  const { host, code } = await hostWithFragments(browser);
-  const { page: bob, deezer: bobDeezer } = await guest(browser, code, 'Bob', { listener: true });
+  // Met het testfragment van 20 s, zodat inStep echt meet hoe gelijk het loopt.
+  const { host, code } = await hostWithFragments(browser, { long: true });
+  const { page: bob, deezer: bobDeezer } = await guest(browser, code, 'Bob', { listener: true, fake: { long: true } });
+  const D = LONG_FRAGMENT_SECONDS;
   const { page: cas } = await guest(browser, code, 'Cas');
   const pages = [host, bob, cas];
   const ids = await Promise.all(pages.map(myId));
@@ -202,7 +211,7 @@ test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw e
   await (await quickIs(bob, false)).click();
   await quickIs(bob, true);
   await playing(bob, { id: first.id });
-  await inStep(host, bob);
+  await inStep(host, bob, D);
   await expect(bob.getByTestId('listen-alert')).toHaveCount(0);
   // Zijn browser speelde het adres uit de nagebootste Deezer, maar sprak de API nooit aan.
   expect(bobDeezer.media.length).toBeGreaterThan(0);
@@ -241,7 +250,7 @@ test('geluid op dit toestel: een gast hoort het fragment, volgt pauze, opnieuw e
   await quickIs(bob, true);
   await expect(bob.getByTestId('listen-alert')).toHaveCount(0);
   await playing(bob, { id: second.id });
-  await inStep(host, bob);
+  await inStep(host, bob, D);
   await openMenu(bob);
   await expect(bob.getByTestId('listen-toggle')).toHaveAttribute('aria-checked', 'true');
   await expect(bob.getByTestId('listen-status')).toHaveText('Het fragment speelt op dit toestel.');

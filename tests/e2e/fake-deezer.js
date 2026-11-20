@@ -19,6 +19,10 @@ export const FRAGMENT_SECONDS = 1.5; // zo lang duurt het testfragment
 // 1,5 s is dat 0,1 s per 1,5 s: na tien seconden loopt de host al zo'n 0,7 s
 // achter op de klok van de server, terwijl een gast die dan pas aanzet zich
 // op die klok zet. Bij een echt fragment van 30 s is het 0,1 s per 30 s.
+// Bovendien kan een gast in het korte fragment niet bijspringen: het komt
+// zonder Range (`accept-ranges: none`), en dan springt Chromium naar het
+// begin in plaats van naar de gevraagde plaats. Hoe gelijk host en gast lopen,
+// meet je dus alleen met `long`.
 const MP3_LONG = readFileSync(new URL('../fixtures/fragment-lang.mp3', import.meta.url));
 export const LONG_FRAGMENT_SECONDS = 20;
 
