@@ -274,6 +274,11 @@ export async function hostAndLogin(page) {
  * aangevuld, en dan gaven 'M1' en 'M10' hetzelfde ID. De site laat een
  * dubbel ID uit een playlist weg, dus had een playlist stilletjes een nummer
  * minder dan de test dacht.
+ *
+ * De voorloop 'zz' is vast: een echt Spotify-ID begint altijd met 0 tot 7, en
+ * de server ruimt rijen met zo'n ID zelf op als ze ouder zijn dan een uur
+ * (isTestId in server/src/yearlist.js). Een test die in de gedeelde lijst
+ * schrijft, gebruikt dus altijd deze ID's.
  */
 export function fakeIds() {
   const run = randomBytes(8).toString('hex').slice(0, 15); // anders bij elke run

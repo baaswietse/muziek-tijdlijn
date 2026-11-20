@@ -8,7 +8,8 @@
 // krijgen per run nieuwe ID's (fakeIds), de andere komen uit de nagekeken
 // lijst van de site, die nooit naar de gedeelde lijst gaat. De test met meer
 // dan 500 nummers vangt de gedeelde lijst zelf op. Een run laat zo hoogstens
-// 51 rijen achter in de gedeelde lijst (8 + 8 + 8 + 2 + 2 + 3 + 8 + 12).
+// 51 rijen achter in de gedeelde lijst (8 + 8 + 8 + 2 + 2 + 3 + 8 + 12), die
+// de server na een uur zelf opruimt (zie isTestId in server/src/yearlist.js).
 
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';

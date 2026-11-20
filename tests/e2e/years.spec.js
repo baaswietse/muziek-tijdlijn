@@ -5,7 +5,8 @@
 // Ook tegen de echte server (MT_LIVE=1) herhaalbaar: de verzonnen nummers
 // krijgen per run nieuwe ID's (fakeIds), en de andere nummers komen uit de
 // nagekeken lijst van de site, die nooit naar de gedeelde lijst gaat. Een run
-// laat zo 3 rijen achter in de gedeelde lijst.
+// laat zo 3 rijen achter in de gedeelde lijst; de server ruimt ze na een uur
+// zelf op (testrijen: zie isTestId in server/src/yearlist.js en cleanup.spec.js).
 
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
