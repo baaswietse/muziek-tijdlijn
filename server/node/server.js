@@ -14,6 +14,10 @@
 //                    alleen voor tests: na hoeveel ms een testrij in de gedeelde
 //                    lijst weg mag (standaard een uur) en hoe vaak er hoogstens
 //                    opgeruimd wordt (standaard tien minuten); zie yearlist.js
+//   HOST_GRACE_MS    zo lang (ms) moet de host weg zijn voor een ander host kan
+//                    worden, standaard 30000 (de tests zetten het korter)
+//   STALE_MS         een verbinding die zo lang (ms) niets stuurde, telt als
+//                    weg en wordt gesloten, standaard 45000
 
 import http from 'node:http';
 import { readFile, writeFile, rename } from 'node:fs/promises';
@@ -33,6 +37,8 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
   .map((s) => s.trim().replace(/\/$/, ''))
   .filter(Boolean);
 const DATA_FILE = process.env.DATA_FILE || '';
+const HOST_GRACE_MS = room.msSetting(process.env.HOST_GRACE_MS, room.HOST_GRACE_MS);
+const STALE_MS = room.msSetting(process.env.STALE_MS, room.STALE_MS);
 
 const MAX_ROOMS = 200;
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
@@ -128,18 +134,21 @@ function loadSaved() {
 
 // ---------- kamers ----------
 
-function onlineSet(r) {
+/** Wie nu verbonden is: aangemeld, en de verbinding stuurde onlangs nog iets (zie room.alive). */
+function onlineSet(r, now = Date.now()) {
   const online = new Set();
-  for (const ws of r.sockets) if (ws.playerId) online.add(ws.playerId);
+  for (const ws of r.sockets) if (ws.playerId && room.alive(ws.seen, now, STALE_MS)) online.add(ws.playerId);
   return online;
 }
 
 function broadcast(r) {
-  const online = onlineSet(r);
   const now = Date.now();
+  const online = onlineSet(r, now);
+  // Sinds wanneer de host weg is (voor «Word host»), met de klok van de server.
+  room.trackHost(r.state, online, now);
   for (const ws of r.sockets) {
     if (!ws.playerId || ws.readyState !== ws.OPEN) continue;
-    ws.send(JSON.stringify({ t: 'state', state: room.view(r.state, ws.playerId, online) }));
+    ws.send(JSON.stringify({ t: 'state', state: room.view(r.state, ws.playerId, online, { now, grace: HOST_GRACE_MS }) }));
     // Alleen wie om geluid vroeg, krijgt het adres van het fragment (apart bericht).
     sendSound(r, ws, now);
   }
@@ -169,6 +178,15 @@ function getRoom(code) {
   if (!r) throw new GameError('NO_ROOM', 'Dit spel bestaat niet (meer). Controleer de code.');
   return r;
 }
+
+// Een verbinding die niets meer stuurt (gsm uitgevallen, netwerk kwijt zonder
+// dat de verbinding sloot), sluiten: dan ziet iedereen dat die speler weg is.
+setInterval(() => {
+  const now = Date.now();
+  for (const r of rooms.values()) {
+    for (const ws of r.sockets) if (!room.alive(ws.seen, now, STALE_MS)) ws.terminate();
+  }
+}, Math.max(1000, Math.min(5000, STALE_MS / 3))).unref();
 
 setInterval(() => {
   const limit = Date.now() - ROOM_TTL_MS;
@@ -309,6 +327,7 @@ function onConnection(ws, code) {
     return ws.close(4004, 'no room');
   }
   ws.playerId = null;
+  ws.seen = Date.now();
   r.sockets.add(ws);
   // Wie zich niet snel aanmeldt, vliegt eruit.
   const helloTimer = setTimeout(() => {
@@ -316,6 +335,7 @@ function onConnection(ws, code) {
   }, 10_000);
 
   ws.on('message', async (data) => {
+    ws.seen = Date.now();
     let msg;
     try {
       msg = JSON.parse(data.toString('utf8'));
@@ -345,7 +365,7 @@ function onConnection(ws, code) {
       return;
     }
     try {
-      await room.applyAction(r.state, ws.playerId, msg, { loadTracks, online: onlineSet(r) });
+      await room.applyAction(r.state, ws.playerId, msg, { loadTracks, online: onlineSet(r), grace: HOST_GRACE_MS });
       // Een verwijderde speler krijgt nog één melding en wordt dan afgesloten.
       for (const other of r.sockets) {
         if (other.playerId && !r.state.players.some((p) => p.id === other.playerId)) {

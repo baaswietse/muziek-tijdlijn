@@ -52,8 +52,23 @@ export function authenticate(state, token) {
  * verbonden is: wie weg is, houdt het onthullen niet tegen. Gooit een
  * GameError bij een ongeldige actie.
  */
-export async function applyAction(state, playerId, msg, { loadTracks, online = null, random = secureRandom, now = Date.now() }) {
+export async function applyAction(
+  state,
+  playerId,
+  msg,
+  { loadTracks, online = null, random = secureRandom, now = Date.now(), grace = rules.HOST_GRACE_MS },
+) {
   switch (msg?.t) {
+    case 'setHost':
+      // De host geeft zijn rol aan een andere speler die nu verbonden is.
+      rules.setHost(state, playerId, String(msg.playerId ?? ''), { online });
+      break;
+    case 'takeHost':
+      // De host is al een tijd weg: deze speler wordt host. Alleen als de
+      // server dat zelf ziet (wie verbonden is, en sinds wanneer de host weg is).
+      if (!online) throw new GameError('SERVER', 'Er liep iets mis op de server.');
+      rules.takeHost(state, playerId, { online, now, grace });
+      break;
     case 'start': {
       // Eerst controleren, dan pas de nummers ophalen.
       if (state.hostId !== playerId) throw new GameError('HOST_ONLY', 'Alleen de host kan dit doen.');
@@ -115,6 +130,7 @@ export async function applyAction(state, playerId, msg, { loadTracks, online = n
   }
   // Een nieuwe beurt, een ander nummer of het einde: het geluid van het vorige nummer vervalt.
   sound.tidySound(state);
+  if (online) rules.trackHost(state, online, now);
   state.updatedAt = now;
 }
 
@@ -148,10 +164,38 @@ export function setDeck(state, body, now = Date.now()) {
  * Wat één speler mag zien. De host krijgt er ook bij of er geluid is voor wie
  * meeluistert (`sound`: zonder adres, dat heeft hij zelf).
  */
-export function view(state, playerId, online) {
-  const v = rules.viewFor(state, playerId, online);
+export function view(state, playerId, online, { now = Date.now(), grace = rules.HOST_GRACE_MS } = {}) {
+  const v = rules.viewFor(state, playerId, online, { now, grace });
   if (playerId === state.hostId) v.sound = sound.hostSound(state);
   return v;
+}
+
+/**
+ * Sinds wanneer de host weg is, bijhouden (zie rules.trackHost). De server
+ * roept dit op bij elke verandering in wie verbonden is; true als het
+ * veranderde (dan moet het bewaard worden).
+ */
+export function trackHost(state, online, now = Date.now()) {
+  return rules.trackHost(state, online, now);
+}
+
+/**
+ * Een verbinding die zo lang (ms) niets meer stuurde, telt als weg. De gsm
+ * stuurt om de 15 s een ping (web/src/lib/net.js); zo valt een gsm waarvan de
+ * batterij leeg is of die zijn netwerk kwijt is (zonder dat de verbinding
+ * netjes sluit) na hoogstens drie gemiste pings weg.
+ */
+export const STALE_MS = 45_000;
+
+/** Leeft een verbinding nog? `seen`: tijdstip (ms) van het laatste bericht. */
+export function alive(seen, now = Date.now(), stale = STALE_MS) {
+  return Number.isFinite(seen) && now - seen <= stale;
+}
+
+/** Een getal uit een omgevingsvariabele (ms), of `fallback` als het geen geldig getal is. */
+export function msSetting(raw, fallback) {
+  const n = Number(raw);
+  return raw !== undefined && raw !== '' && Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 /**

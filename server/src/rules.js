@@ -68,6 +68,7 @@ export function createRoom({ code, now }) {
     phase: 'lobby', // lobby | playing | challenge | reveal | finished
     settings: { target: LIMITS.defaultTarget },
     hostId: null,
+    hostAwaySince: null, // sinds wanneer de host niet verbonden is (zie trackHost)
     players: [], // volgorde = beurtvolgorde
     deck: [], // nog te spelen kaarten; de bovenste is de laatste
     custom: null, // eigen lijst van de host: { name, tracks }, anders de standaardlijst
@@ -575,6 +576,75 @@ export function giveToken(state, actorId, targetId) {
   state.reveal.guessTokenTo = target?.id ?? null;
 }
 
+// ---------- de host-rol doorgeven of overnemen ----------
+
+/**
+ * Zo lang (ms) moet de host weg zijn voor een andere speler host kan worden.
+ * Een korte haper of een vergrendeld scherm (de gsm herverbindt binnen enkele
+ * seconden) lokt zo niets uit. De server kan een andere waarde meegeven
+ * (HOST_GRACE_MS, bv. korter in de tests).
+ */
+export const HOST_GRACE_MS = 30_000;
+
+/**
+ * Houdt bij sinds wanneer de host niet verbonden is (`state.hostAwaySince`,
+ * ms volgens de klok van de server; null = hij is er). `online` = wie nu
+ * verbonden is. Ziet de server de host voor het eerst weg, dan begint de
+ * telling nu: ook als het wegvallen zelf hem ontging (bv. een herstart), telt
+ * de wachttijd dus nooit korter. Geeft true als er iets veranderde.
+ */
+export function trackHost(state, online, now) {
+  const before = state.hostAwaySince ?? null;
+  const away = Boolean(state.hostId) && !online.has(state.hostId);
+  const after = away ? before ?? now : null;
+  state.hostAwaySince = after;
+  return after !== before;
+}
+
+/** Hoe lang (ms) de host al weg is, of null als hij verbonden is. */
+export function hostAwayFor(state, online, now) {
+  if (!state.hostId || online.has(state.hostId)) return null;
+  const since = state.hostAwaySince ?? null;
+  return since === null ? 0 : Math.max(0, now - since);
+}
+
+/**
+ * De host geeft zijn rol aan een andere speler die nu verbonden is. Hij wordt
+ * zelf een gewone speler en speelt gewoon verder. `online`: wie verbonden is
+ * (zonder: geen controle daarop).
+ */
+export function setHost(state, actorId, targetId, { online = null } = {}) {
+  requireHost(state, actorId);
+  const target = findPlayer(state, targetId);
+  if (!target) fail('NOT_FOUND', 'Die speler zit niet in dit spel.');
+  if (target.id === actorId) fail('NOT_ALLOWED', 'Je bent al host.');
+  if (online && !online.has(target.id)) {
+    fail('OFFLINE', `${target.name} is nu niet verbonden. Kies iemand die verbonden is.`);
+  }
+  state.hostId = target.id;
+  state.hostAwaySince = null;
+}
+
+/**
+ * Een speler wordt host omdat de host weg is. Alleen als de server zelf ziet
+ * dat de host al minstens `grace` ms niet verbonden is: zolang hij er is (of
+ * nog maar net weg is), kan niemand de rol overnemen. De eerste die het vraagt,
+ * wordt het; de vorige host is daarna een gewone speler, ook als hij terugkomt.
+ */
+export function takeHost(state, actorId, { online, now, grace = HOST_GRACE_MS }) {
+  requirePlayer(state, actorId);
+  if (actorId === state.hostId) fail('NOT_ALLOWED', 'Je bent al host.');
+  trackHost(state, online, now);
+  const away = hostAwayFor(state, online, now);
+  if (away === null) fail('HOST_HERE', 'De host is er (weer). Vraag hem om de rol door te geven.');
+  if (away < grace) {
+    const s = Math.ceil((grace - away) / 1000);
+    fail('HOST_WAIT', `De host is nog maar net weg. Misschien komt hij terug; over ${s} s kan je host worden.`);
+  }
+  state.hostId = actorId;
+  state.hostAwaySince = null;
+}
+
 /** Host: stop het lopende spel en ga terug naar de wachtkamer. */
 export function backToLobby(state, actorId) {
   requireHost(state, actorId);
@@ -593,10 +663,12 @@ export function backToLobby(state, actorId) {
  * Wat één speler mag zien. `online` = wie nu verbonden is (ook voor wie in de
  * tussenfase nog moet kiezen). Het antwoord (track-ID, artiest, titel, jaar) van
  * het lopende nummer zit hier niet in; enkel de host krijgt het track-ID,
- * omdat zijn gsm Spotify moet aansturen.
+ * omdat zijn gsm Spotify moet aansturen. Wie host wordt (doorgegeven of
+ * overgenomen), krijgt het vanaf dan; de vorige host niet meer.
  */
-export function viewFor(state, playerId, online = new Set()) {
+export function viewFor(state, playerId, online = new Set(), { now = Date.now(), grace = HOST_GRACE_MS } = {}) {
   const isHost = playerId === state.hostId;
+  const away = hostAwayFor(state, online, now);
   return {
     code: state.code,
     phase: state.phase,
@@ -604,6 +676,10 @@ export function viewFor(state, playerId, online = new Set()) {
     settings: { ...state.settings },
     you: playerId,
     hostId: state.hostId,
+    // Is de host niet verbonden: hoe lang al (ms, volgens de server) en na
+    // hoeveel ms een andere speler host kan worden. De gsm telt zelf verder
+    // vanaf het moment van ontvangst (geen klokken vergelijken).
+    hostAway: away === null ? null : { ms: away, grace },
     players: state.players.map((p) => ({
       id: p.id,
       name: p.name,
