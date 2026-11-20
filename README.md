@@ -906,7 +906,22 @@ geluid, maar het hele spel werkt (`?mock=0` zet het weer uit). Fragmenten zijn n
 | `MT_SERVER=cloudflare npm run test:e2e` | Hetzelfde tegen de Cloudflare-variant (lokaal via wrangler). |
 | `npm run test:live` | Hetzelfde tegen de echte site op GitHub Pages en de echte spelserver. Spotify blijft nagebootst. |
 
-De workflow `.github/workflows/ci.yml` draait dit alles bij elke pull request.
+De workflow `.github/workflows/ci.yml` draait dit alles bij elke pull request (behalve `test:live`), in deze jobs:
+
+- **Unit-tests en build**: `npm test`, `npm run test:py` en `npm run build`.
+- **Verdeling van het spelverloop**: leest de groepen in `.github/e2e-groepen.json` en faalt als een spec-bestand
+  in `tests/e2e/` in geen of in meer dan één groep zit, of als een genoemd bestand niet bestaat. Lokaal:
+  `node .github/e2e-groepen.mjs`.
+- **Spelverloop (node, groep 1)** tot **Spelverloop (cloudflare, groep 3)**: elke groep op elke servervariant als
+  eigen job, naast elkaar. Binnen een job lopen de tests na elkaar met één worker, met een eigen server, zoals bij
+  `npm run test:e2e`. Bij een fout bewaart de job `test-results/` als `test-results-<variant>-<groep>`.
+- **Spelverloop**: vat samen. Groen als de verdeling en alle groepen op beide varianten slaagden, rood als er een
+  faalde of afgebroken werd. Op deze controle let je.
+
+De groepen zijn met de hand verdeeld op duur (elk zo'n 3,5 à 4 minuten): `--shard` van Playwright verdeelt op aantal
+tests, en de bestanden lopen te ver uiteen in duur om zo evenwichtig te worden. Een nieuw spec-bestand zet je dus in
+een groep, anders faalt de verdeling. Een groep lokaal draaien: `npm run test:e2e -- tests/e2e/drag.spec.js
+tests/e2e/tokens.spec.js` (de bestanden van die groep), eventueel met `MT_SERVER=cloudflare`.
 
 ### Wat de tests wel en niet dekken
 

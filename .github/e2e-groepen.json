@@ -1,0 +1,13 @@
+{
+  "1": ["playback.spec.js", "bar.spec.js", "listen.spec.js", "spotify.spec.js", "invite.spec.js"],
+  "2": ["drag.spec.js", "tokens.spec.js", "host.spec.js", "years.spec.js", "install.spec.js"],
+  "3": [
+    "background.spec.js",
+    "fragments.spec.js",
+    "summary.spec.js",
+    "overlay.spec.js",
+    "game.spec.js",
+    "wikidata.spec.js",
+    "cleanup.spec.js"
+  ]
+}
