@@ -398,6 +398,23 @@ export function useMusic({ enabled, view }) {
     wasPlaying.current = active;
   }, [enabled, phase, playback]);
 
+  // Deze gsm is geen host meer (de rol doorgegeven of overgenomen) of koos een
+  // andere bron: wat hij nog liet spelen, zet hij stil. De nieuwe host start
+  // het nummer van de beurt zelf, op zijn eigen toestel.
+  const wasEnabled = useRef(enabled);
+  useEffect(() => {
+    const lost = wasEnabled.current && !enabled;
+    wasEnabled.current = enabled;
+    if (!lost || !playback.expected) return;
+    const id = deviceRef.current?.id;
+    playback.forget();
+    handled.current = null;
+    if (deviceRef.current?.local) pauseBrowserPlayer();
+    else if (loggedIn) Promise.resolve().then(() => player.pause(id)).catch(() => {});
+    setStatus('idle');
+    setWrong(null);
+  }, [enabled, playback, loggedIn]);
+
   /** Het nummer dat nu loopt of net onthuld is (voor «Opnieuw afspelen»). */
   const currentTrackId = view?.turn?.trackId || view?.reveal?.card?.id || null;
   const replayRef = useRef(null);

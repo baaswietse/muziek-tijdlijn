@@ -205,6 +205,7 @@ export function startGame(state, actorId, tracks, random) {
   const first = Math.floor(random() * n);
   state.players = state.players.slice(first).concat(state.players.slice(0, first));
   state.game += 1;
+  state.note = null;
   state.winnerIds = [];
   state.reveal = null;
   state.turn = null;
@@ -645,9 +646,14 @@ export function takeHost(state, actorId, { online, now, grace = HOST_GRACE_MS })
   state.hostAwaySince = null;
 }
 
-/** Host: stop het lopende spel en ga terug naar de wachtkamer. */
-export function backToLobby(state, actorId) {
+/**
+ * Host: stop het lopende spel en ga terug naar de wachtkamer. `why: 'music'`:
+ * de muziek kon niet verder (een nieuwe host zonder Spotify koos voor
+ * fragmenten); de wachtkamer zegt dat dan aan iedereen tot het volgende spel.
+ */
+export function backToLobby(state, actorId, { why = null } = {}) {
   requireHost(state, actorId);
+  state.note = why === 'music' ? 'music' : null;
   state.phase = 'lobby';
   state.turn = null;
   state.reveal = null;
@@ -680,6 +686,8 @@ export function viewFor(state, playerId, online = new Set(), { now = Date.now(),
     // hoeveel ms een andere speler host kan worden. De gsm telt zelf verder
     // vanaf het moment van ontvangst (geen klokken vergelijken).
     hostAway: away === null ? null : { ms: away, grace },
+    // Waarom het vorige spel stopte, als de wachtkamer dat moet uitleggen ('music').
+    note: state.note ?? null,
     players: state.players.map((p) => ({
       id: p.id,
       name: p.name,

@@ -119,7 +119,7 @@ export async function applyAction(
       rules.removePlayer(state, playerId, String(msg.playerId ?? ''));
       break;
     case 'lobby':
-      rules.backToLobby(state, playerId);
+      rules.backToLobby(state, playerId, { why: msg.why === 'music' ? 'music' : null });
       break;
     case 'sound':
       // De host bedient het geluid voor wie meeluistert (alleen met fragmenten; zie sound.js).

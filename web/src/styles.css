@@ -1095,6 +1095,55 @@ details ul {
   color: var(--amber-ink);
 }
 
+/* «De host is weg»: alleen als de host al de hele wachttijd niet verbonden is. */
+.host-away {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border-left: 4px solid var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber-ink);
+}
+
+.host-away-title {
+  margin: 0 0 4px;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.host-away-text {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+}
+
+.host-away .btn {
+  width: 100%;
+}
+
+/* Een tweede keuze in een melding van de host, als link in de tekst. */
+.btn.link.inline-link {
+  display: inline;
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Een melding met twee knoppen (bv. inloggen of fragmenten): knoppen eronder. */
+.host-alert.host-setup {
+  flex-wrap: wrap;
+}
+
+.host-setup .host-alert-text {
+  flex-basis: 100%;
+}
+
+.host-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .host-alert-text {
   flex: 1;
   min-width: 0;

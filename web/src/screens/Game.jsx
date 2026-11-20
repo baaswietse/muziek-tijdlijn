@@ -6,6 +6,7 @@ import { deezerId, deezerLink } from '../fragment/deezer.js';
 import { Rules } from '../components/Rules.jsx';
 import { ListenAlert, ListenButton, ListenHint, ListenToggle } from '../components/Listen.jsx';
 import { MockChip, NetBanner, NetDot } from '../components/Status.jsx';
+import { HandOver, HostAway } from '../components/Host.jsx';
 
 // Het spelscherm: één ding per moment. Bovenaan een balk met de stand en het
 // menu, daaronder één regel uitleg, dan één tijdlijn, en onderaan de zwevende
@@ -316,6 +317,15 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
     </div>
   );
 
+  // Een nieuwe host zonder Spotify: dit spel stoppen en in de wachtkamer met
+  // fragmenten verder (een Spotify-lijst kan niet met fragmenten spelen).
+  function toFragments() {
+    if (!confirm('Dit spel stoppen en terug naar de wachtkamer? Daar kies je een lijst met fragmenten en start je een nieuw spel.')) return;
+    music.setSource('fragment');
+    send({ t: 'lobby', why: 'music' });
+    setPanel(null);
+  }
+
   // Van het menu naar de muziekinstellingen (bv. vanuit een melding op het scherm).
   function openSettings() {
     setSettings(true);
@@ -388,7 +398,11 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
 
       {/* Vaste plek voor een probleem met de muziek: de host ziet het altijd,
           niet alleen in het menu. Staat het menu open, dan staat het daar. */}
-      {isHost && panel !== 'menu' && <MusicAlert music={music} onSettings={openSettings} onSkip={() => send({ t: 'skipTrack' })} />}
+      {isHost && panel !== 'menu' && (
+        <MusicAlert music={music} onSettings={openSettings} onSkip={() => send({ t: 'skipTrack' })} onFragments={toFragments} />
+      )}
+      {/* De host is al een tijd weg: een andere speler kan host worden. */}
+      {!isHost && <HostAway view={view} send={send} net={net} game />}
       {/* Voor een speler met «Geluid op dit toestel»: alleen als het hier niet speelt. */}
       {!isHost && listen && <ListenAlert listen={listen} />}
       {/* Eén keer per spel, als het geluid hier uit staat terwijl er een fragment loopt. */}
@@ -515,8 +529,13 @@ export function Game({ view, send, music, listen = null, deck, net = 'online', o
           {!isHost && listen && <ListenToggle listen={listen} />}
           <Rules target={target} />
           {/* De host verlaat een lopend spel niet: dan zat de rest zonder muziek en
-              zonder host. Hij stopt het (of gaat na afloop terug naar de wachtkamer)
-              en kan daar nog altijd vertrekken. */}
+              zonder host. Hij geeft eerst de rol door (en is dan een gewone speler
+              die kan vertrekken), of stopt het spel. */}
+          {isHost && view.players.length > 1 && (
+            <p class="muted small" data-testid="host-leave-hint">
+              Wil je vertrekken? Geef eerst de host-rol door (hierboven); daarna kan je het spel verlaten.
+            </p>
+          )}
           {!isHost && (
             <button type="button" class="menu-row danger" onClick={() => confirm('Dit spel verlaten?') && onLeave()}>
               Verlaat het spel
@@ -966,16 +985,52 @@ function BuyCard({ tokens, cards, target, send }) {
  * het nummer van deze beurt speelt. Nooit welk nummer er wel speelt: ook de
  * host mag titel, artiest of jaar niet zien.
  */
-function MusicAlert({ music, onSettings, onSkip }) {
+function MusicAlert({ music, onSettings, onSkip, onFragments }) {
   const trackId = music.currentTrackId;
+  // Net host geworden (doorgegeven of overgenomen): dat staat er eerst bij.
+  const intro = music.handover ? 'Jij bent nu de host. ' : '';
   if (!music.ready && music.device?.local && music.local !== 'on') {
+    // Bij fragmenten kan de host ook kiezen voor geen geluid hier (de spelers met «Geluid op dit toestel» horen het).
+    const mute = music.source === 'fragment' && music.chooseMute && music.local !== 'starting';
     return (
-      <p class="host-alert" role="alert" data-testid="browser-off">
-        <span class="host-alert-text">{music.error || 'Het geluid op dit toestel staat nog uit.'}</span>
+      <div class="host-alert" role="alert" data-testid="browser-off">
+        <span class="host-alert-text">
+          {intro}
+          {music.error || 'Het geluid op dit toestel staat nog uit.'}
+          {mute && (
+            <>
+              {' '}
+              <button type="button" class="btn link inline-link" onClick={music.chooseMute} data-testid="alert-mute">
+                Geen geluid op dit toestel
+              </button>
+            </>
+          )}
+        </span>
         <button type="button" class="btn small-btn" onClick={music.chooseBrowser} disabled={music.local === 'starting'} data-testid="device-browser">
           {music.local === 'starting' ? 'Bezig…' : 'Zet het geluid aan'}
         </button>
-      </p>
+      </div>
+    );
+  }
+  if (music.source === 'spotify' && music.configured && !music.loggedIn) {
+    // Bv. een nieuwe host: de muziek kwam van Spotify bij de vorige host. Hij
+    // logt zelf in (Premium nodig), of stopt het spel en speelt verder met
+    // fragmenten (een Spotify-lijst speelt niet met fragmenten).
+    return (
+      <div class="host-alert warn host-setup" role="alert" data-testid="host-spotify-setup">
+        <span class="host-alert-text">
+          {intro}De muziek van dit spel komt van Spotify. Log in bij Spotify (Premium nodig) en kies een toestel, of stop dit spel
+          en speel verder met fragmenten, zonder account.
+        </span>
+        <span class="host-setup-actions">
+          <button type="button" class="btn primary small-btn" onClick={music.login} data-testid="alert-login">
+            Log in bij Spotify
+          </button>
+          <button type="button" class="btn small-btn" onClick={onFragments} data-testid="alert-fragments">
+            Stop en kies fragmenten
+          </button>
+        </span>
+      </div>
     );
   }
   if (music.error) {
@@ -1002,7 +1057,7 @@ function MusicAlert({ music, onSettings, onSkip }) {
   if (!music.ready) {
     return (
       <p class="host-alert" role="alert" data-testid="host-music-setup">
-        <span class="host-alert-text">De muziek is niet klaar: kies een toestel.</span>
+        <span class="host-alert-text">{intro}De muziek is niet klaar: kies een toestel.</span>
         <button type="button" class="btn small-btn" onClick={onSettings} data-testid="alert-settings">
           Muziekinstellingen
         </button>
@@ -1414,6 +1469,7 @@ function HostMenu({ view, send, music, deck, open, settings, setSettings, close 
           vanaf het volgende spel.
         </p>
       )}
+      <HandOver view={view} send={send} onDone={close} />
       {others.length > 0 && (
         <details class="menu-remove">
           <summary>Een speler uit het spel halen</summary>

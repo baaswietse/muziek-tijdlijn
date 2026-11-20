@@ -306,8 +306,9 @@ test('host stopt het spel in plaats van het te verlaten; verlaten kan in de wach
   for (const p of [host, bob]) await expect(p.getByTestId('big-code')).toHaveText(code);
   await expect(host.getByTestId('start-game')).toBeVisible();
 
-  // In de wachtkamer kan de host nog vertrekken, maar de vraag zegt wat dat
-  // betekent voor wie achterblijft. Eerst «Annuleer»: er verandert niets.
+  // In de wachtkamer kan de host nog vertrekken, maar de vraag stelt voor om
+  // eerst een nieuwe host aan te duiden en zegt wat het anders betekent voor
+  // wie achterblijft. Eerst «Annuleer»: er verandert niets.
   const asked = [];
   host.removeAllListeners('dialog');
   host.on('dialog', (d) => {
@@ -318,7 +319,8 @@ test('host stopt het spel in plaats van het te verlaten; verlaten kan in de wach
   await expect.poll(() => asked.length).toBe(1);
   expect(asked[0]).toContain('Je bent de host');
   expect(asked[0]).toContain('zonder host');
-  expect(asked[0]).toContain('nieuw spel');
+  expect(asked[0]).toContain('eerst een nieuwe host aan');
+  expect(asked[0]).toContain('Maak host');
   await expect(host.getByTestId('big-code')).toHaveText(code);
 
   // Een gast krijgt de gewone vraag.
